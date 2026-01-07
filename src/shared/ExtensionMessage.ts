@@ -22,7 +22,6 @@ import { GitCommit } from "../utils/git"
 import { McpServer } from "./mcp"
 import { Mode } from "./modes"
 import { ModelRecord, RouterModels } from "./api"
-import type { SkillForUI } from "../services/skills/SkillsManager"
 
 // Command interface for frontend/backend communication
 export interface Command {
@@ -31,6 +30,15 @@ export interface Command {
 	filePath?: string
 	description?: string
 	argumentHint?: string
+}
+
+// Skill interface for frontend/backend communication
+export interface SkillForUI {
+	name: string
+	description: string
+	source: "global" | "project"
+	filePath: string
+	mode?: string
 }
 
 // Type for marketplace installed metadata
