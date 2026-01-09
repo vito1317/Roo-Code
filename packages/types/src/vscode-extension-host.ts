@@ -100,6 +100,7 @@ export interface ExtensionMessage {
 		| "branchList"
 		| "worktreeDefaults"
 		| "worktreeIncludeStatus"
+		| "branchWorktreeIncludeResult"
 		| "mergeWorktreeResult"
 	text?: string
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -231,6 +232,9 @@ export interface ExtensionMessage {
 	conflictingFiles?: string[]
 	sourceBranch?: string
 	targetBranch?: string
+	// branchWorktreeIncludeResult
+	branch?: string
+	hasWorktreeInclude?: boolean
 }
 
 export type ExtensionState = Pick<
@@ -565,6 +569,7 @@ export interface WebviewMessage {
 		| "getAvailableBranches"
 		| "getWorktreeDefaults"
 		| "getWorktreeIncludeStatus"
+		| "checkBranchWorktreeInclude"
 		| "createWorktreeInclude"
 		| "checkoutBranch"
 		| "mergeWorktree"
