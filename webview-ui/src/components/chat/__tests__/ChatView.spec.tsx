@@ -1081,6 +1081,101 @@ describe("ChatView - Message Queueing Tests", () => {
 			}),
 		)
 	})
+
+	it("queues messages when command is running (command_output state) - Issue #10675", async () => {
+		const { getByTestId, getByText } = renderChatView()
+
+		// First hydrate state with initial task
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 2000,
+					text: "Initial task",
+				},
+			],
+		})
+
+		// Wait for component to render
+		await waitFor(() => {
+			expect(getByTestId("chat-textarea")).toBeInTheDocument()
+		})
+
+		// Clear any initial calls
+		vi.mocked(vscode.postMessage).mockClear()
+
+		// Add command_output ask (command is running, waiting for user input)
+		// During command_output: sendingDisabled=false, enableButtons=true, isStreaming=false
+		// Without the fix, messages would be sent directly (not queued) and could get lost
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 2000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "command_output",
+					ts: Date.now(),
+					text: "",
+					partial: false, // Not partial - command is running
+				},
+			],
+		})
+
+		// Wait for the command_output state to be fully processed
+		// The button text "proceedWhileRunning.title" indicates clineAsk is set to "command_output"
+		// AND the button should NOT be disabled (enableButtons = true)
+		await waitFor(
+			() => {
+				const proceedButton = getByText("chat:proceedWhileRunning.title")
+				// Button should be enabled (not disabled) for command_output state
+				expect(proceedButton).not.toBeDisabled()
+			},
+			{ timeout: 2000 },
+		)
+
+		// Allow extra time for React to recreate the handleSendMessage callback with updated clineAsk
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 100))
+		})
+
+		// Clear message calls before simulating user input
+		vi.mocked(vscode.postMessage).mockClear()
+
+		// Simulate user sending a message while command is running
+		const chatTextArea = getByTestId("chat-textarea")
+		const input = chatTextArea.querySelector("input")! as HTMLInputElement
+
+		await act(async () => {
+			// Use fireEvent to properly trigger React's onChange handler
+			fireEvent.change(input, { target: { value: "user feedback during command execution" } })
+
+			// Simulate pressing Enter to send
+			fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+		})
+
+		// Verify that the message was queued, not sent as direct askResponse
+		// This is the fix for Issue #10675 - messages should be queued during command_output
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "queueMessage",
+				text: "user feedback during command execution",
+				images: [],
+			})
+		})
+
+		// Verify it was NOT sent as a direct askResponse (which would cause the message to "disappear")
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "askResponse",
+				askResponse: "messageResponse",
+			}),
+		)
+	})
 })
 
 describe("ChatView - Context Condensing Indicator Tests", () => {
