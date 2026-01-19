@@ -35,8 +35,7 @@
 		"ui": "UI",
 		"experimental": "Experimental",
 		"language": "Idioma",
-		"about": "Sobre",
-		"commandsAndSkills": "Comandos e Habilidades"
+		"about": "Sobre"
 	},
 	"about": {
 		"bugReport": {
@@ -973,10 +972,6 @@
 			"label": "Requer {{primaryMod}}+Enter para enviar mensagens",
 			"description": "Quando ativado, você deve pressionar {{primaryMod}}+Enter para enviar mensagens em vez de apenas Enter"
 		}
-	},
-	"commandsAndSkills": {
-		"tabCommands": "Comandos de barra",
-		"tabSkills": "Habilidades"
 	},
 	"skills": {
 		"global": "Habilidades globais",

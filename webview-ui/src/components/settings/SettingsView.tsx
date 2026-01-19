@@ -28,6 +28,7 @@ import {
 	Plug,
 	Server,
 	Users2,
+	Sparkles,
 } from "lucide-react"
 
 import {
@@ -75,7 +76,8 @@ import { LanguageSettings } from "./LanguageSettings"
 import { About } from "./About"
 import { Section } from "./Section"
 import PromptsSettings from "./PromptsSettings"
-import { CommandsAndSkillsSettings } from "./CommandsAndSkillsSettings"
+import { SlashCommandsSettings } from "./SlashCommandsSettings"
+import { SkillsSettings } from "./SkillsSettings"
 import { UISettings } from "./UISettings"
 import ModesView from "../modes/ModesView"
 import McpView from "../mcp/McpView"
@@ -95,6 +97,7 @@ const sectionNames = [
 	"providers",
 	"autoApprove",
 	"slashCommands",
+	"skills",
 	"browser",
 	"checkpoints",
 	"notifications",
@@ -511,6 +514,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			{ id: "mcp", icon: Server },
 			{ id: "autoApprove", icon: CheckCheck },
 			{ id: "slashCommands", icon: SquareSlash },
+			{ id: "skills", icon: Sparkles },
 			{ id: "browser", icon: SquareMousePointer },
 			{ id: "checkpoints", icon: GitBranch },
 			{ id: "notifications", icon: Bell },
@@ -729,8 +733,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 						/>
 					)}
 
-					{/* Commands & Skills Section */}
-					{activeTab === "slashCommands" && <CommandsAndSkillsSettings />}
+					{/* Slash Commands Section */}
+					{activeTab === "slashCommands" && <SlashCommandsSettings />}
+
+					{/* Skills Section */}
+					{activeTab === "skills" && <SkillsSettings />}
 
 					{/* Browser Section */}
 					{activeTab === "browser" && (
