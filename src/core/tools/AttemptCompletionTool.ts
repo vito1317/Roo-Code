@@ -98,9 +98,10 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				// Only intercept if not at the final SENTINEL stage
 				// (SENTINEL agent completing means the workflow is done)
 				// Only intercept if not at terminal/review states
+			// Only intercept if not at terminal/review states
 			// Review states auto-pass and shouldn't be intercepted (they use Architect mode)
 			const isTerminalState =
-				currentState === AgentState.SENTINEL ||
+				currentState === AgentState.ARCHITECT_REVIEW_FINAL ||
 				currentState === AgentState.COMPLETED
 			if (!isTerminalState) {
 					// Extract handoff context from the result

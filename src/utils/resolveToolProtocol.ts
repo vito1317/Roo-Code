@@ -26,12 +26,14 @@ type ApiMessageForDetection = Anthropic.MessageParam & {
  * @param _providerSettings - The provider settings (toolProtocol field is ignored)
  * @param _modelInfo - Unused, kept for API compatibility
  * @param lockedProtocol - Optional task-locked protocol that takes absolute precedence
+ * @param mode - Optional mode name to check for Sentinel modes
  * @returns The resolved tool protocol (either "xml" or "native")
  */
 export function resolveToolProtocol(
 	_providerSettings: ProviderSettings,
 	_modelInfo?: unknown,
 	lockedProtocol?: ToolProtocol,
+	mode?: string,
 ): ToolProtocol {
 	// 1. Locked Protocol - task-level lock takes absolute precedence
 	// This ensures resumed tasks continue using their original protocol
@@ -39,7 +41,13 @@ export function resolveToolProtocol(
 		return lockedProtocol
 	}
 
-	// 2. Always return Native protocol for new tasks
+	// 2. Sentinel Edition - Always use XML for sentinel modes
+	// These agents depend on XML parser for handoffs and background services
+	if (mode?.startsWith("sentinel-")) {
+		return TOOL_PROTOCOL.XML
+	}
+
+	// 3. Always return Native protocol for all other new tasks
 	// All models now support native tools; XML is deprecated
 	return TOOL_PROTOCOL.NATIVE
 }
