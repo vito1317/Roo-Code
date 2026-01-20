@@ -165,6 +165,7 @@ export interface TaskOptions extends CreateTaskOptions {
 	workspacePath?: string
 	/** Initial status for the task's history item (e.g., "active" for child tasks) */
 	initialStatus?: "active" | "delegated" | "completed"
+	mode?: string
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -583,7 +584,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this._taskToolProtocol = historyItem.toolProtocol
 		} else {
 			// For new tasks, don't set the mode/apiConfigName yet - wait for async initialization.
-			this._taskMode = undefined
+			// However, if mode is provided in options, use it immediately to resolve protocol.
+			this._taskMode = options.mode
 			this._taskApiConfigName = undefined
 			this.taskModeReady = this.initializeTaskMode(provider)
 			this.taskApiConfigReady = this.initializeTaskApiConfigName(provider)
@@ -593,7 +595,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// This ensures the task will continue using this protocol even if
 			// user settings change.
 			const modelInfo = this.api.getModel().info
-			this._taskToolProtocol = resolveToolProtocol(this.apiConfiguration, modelInfo)
+			this._taskToolProtocol = resolveToolProtocol(this.apiConfiguration, modelInfo, undefined, this._taskMode)
 		}
 
 		// Initialize the assistant message parser based on the locked tool protocol.

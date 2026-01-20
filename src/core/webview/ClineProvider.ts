@@ -1007,6 +1007,7 @@ export class ClineProvider
 			enableBridge: BridgeOrchestrator.isEnabled(cloudUserInfo, taskSyncEnabled),
 			// Preserve the status from the history item to avoid overwriting it when the task saves messages
 			initialStatus: historyItem.status,
+			mode: historyItem.mode,
 		})
 
 		if (isRehydratingCurrentTask) {
@@ -2932,6 +2933,7 @@ export class ClineProvider
 			onCreated: this.taskCreationCallback,
 			enableBridge: BridgeOrchestrator.isEnabled(cloudUserInfo, remoteControlEnabled),
 			initialTodos: options.initialTodos,
+			mode: (await this.getState()).mode,
 			...options,
 		})
 
