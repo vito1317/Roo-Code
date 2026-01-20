@@ -76,6 +76,13 @@ export const toolParamNames = [
 	"old_string", // search_replace and edit_file parameter
 	"new_string", // search_replace and edit_file parameter
 	"expected_replacements", // edit_file parameter for multiple occurrences
+	// Sentinel Edition: handoff_context parameters
+	"notes",
+	"context_json",
+	// Sentinel Edition: start_background_service parameters
+	"service_type",
+	"port",
+	"wait_ms",
 ] as const
 
 export type ToolParamName = (typeof toolParamNames)[number]
