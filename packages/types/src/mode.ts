@@ -219,14 +219,20 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 			"    B --> C[Output]\n" +
 			"```\n\n" +
 			"**After creating plan.md:**\n" +
-			"Use `attempt_completion` to hand off to Builder.\n\n" +
+			"Use `handoff_context` to pass the plan to Builder:\n" +
+			"```xml\n" +
+			"<handoff_context>\n" +
+			"<notes>Plan completed</notes>\n" +
+			"<context_json>{\"plan\": \"plan.md created\"}</context_json>\n" +
+			"</handoff_context>\n" +
+			"```\n\n" +
 			"**IMPORTANT:** Focus ONLY on planning. Do NOT write implementation code.",
 	},
 	{
 		slug: "sentinel-architect-review",
 		name: "🔍 Sentinel Architect Review",
 		roleDefinition:
-			"You are Roo, reviewing the Builder's implementation. Use dom_extract to verify UI layout against standard patterns.",
+			"You are Roo, reviewing the Builder's implementation against the original plan and any UI guidelines provided in the handoff context.",
 		whenToUse:
 			"Activated after Builder completes. Reviews code and UI, approves or rejects with specific feedback.",
 		description: "Code review (Sentinel Edition)",
@@ -234,21 +240,21 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 		customInstructions:
 			"**CODE REVIEW PHASE**\n\n" +
 			"🚨 **STEP 1:** Use `browser_action launch` to open the app\n" +
-			"**STEP 2:** Use `browser_action dom_extract` to get layout\n\n" +
-			"**STANDARD CALCULATOR LAYOUT:**\n" +
-			"```\n" +
-			"7  8  9  +  ← TOP number row\n" +
-			"4  5  6  -  ← MIDDLE number row\n" +
-			"1  2  3  =  ← BOTTOM number row\n" +
-			"   0   .    ← Zero at BOTTOM\n" +
-			"```\n\n" +
+			"**STEP 2:** Use `browser_action dom_extract` to get layout\n" +
+			"**STEP 3:** Compare against the original plan AND any UI Guidelines in the handoff context\n\n" +
+			"**REVIEW CRITERIA:**\n" +
+			"- Does the UI match what was planned?\n" +
+			"- If UI Guidelines were provided (from RAG), does the layout match the standard?\n" +
+			"- Are all required elements present?\n\n" +
 			"**✅ APPROVE IF:**\n" +
-			"- Numbers go 7→4→1→0 from TOP to BOTTOM\n" +
-			"- Operators (+,-,*,/) can be anywhere\n\n" +
-			"**❌ REJECT ONLY IF:**\n" +
-			"- Numbers are in WRONG vertical order (e.g., 1-2-3 above 7-8-9)\n" +
-			"- 0 is NOT at the bottom\n\n" +
-			"⚠️ Operators on the right side of number rows is CORRECT!",
+			"- Implementation matches the original plan\n" +
+			"- Layout follows provided UI guidelines (if any)\n" +
+			"- UI is functional and correct\n\n" +
+			"**❌ REJECT IF:**\n" +
+			"- Layout doesn't follow the provided UI guidelines\n" +
+			"- Missing required elements from the plan\n" +
+			"- UI is broken or incorrect\n\n" +
+			"After review, use `handoff_context` to pass to QA.",
 	},
 	{
 		slug: "sentinel-architect-review-tests",
@@ -293,10 +299,15 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 			"• Implementation details\n" +
 			"• Test results with screenshots\n" +
 			"• Security status\n\n" +
-			"**3. End Conversation:**\n" +
-			"Use `attempt_completion` with a final summary.\n" +
-			"This will complete the workflow and generate the walkthrough.\n\n" +
-			"**IMPORTANT:** Include browser screenshots in your summary!",
+			"**3. End Conversation - MUST CALL TOOL:**\n" +
+			"🚨 You MUST actually invoke the `attempt_completion` tool!\n" +
+			"DO NOT just describe what you would do - CALL THE TOOL:\n" +
+			"```xml\n" +
+			"<attempt_completion>\n" +
+			"<result>Summary of completed work...</result>\n" +
+			"</attempt_completion>\n" +
+			"```\n\n" +
+			"**WARNING:** Outputting text without calling attempt_completion will fail!",
 	},
 	{
 		slug: "sentinel-builder",
@@ -384,25 +395,26 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 		slug: "sentinel-security",
 		name: "🟥 Sentinel",
 		roleDefinition:
-			"You are Roo, a Security Specialist. After security audit, you MUST use handoff_context to pass to Architect Final - NEVER use attempt_completion!",
+			"You are Roo, a Security Specialist. After security audit, you MUST invoke handoff_context tool - NEVER just output text!",
 		whenToUse:
 			"This mode is automatically activated after Sentinel QA passes all tests. Sentinel performs security review and hands off to Architect Final.",
 		description: "Security audit (Sentinel Edition)",
 		groups: ["read", "mcp"],
 		customInstructions:
-			"🚨 **CRITICAL: You MUST end with handoff_context, NOT attempt_completion!**\n\n" +
+			"🚨 **CRITICAL: You MUST CALL handoff_context tool - NOT just output text!**\n\n" +
 			"**Security Checklist:**\n" +
 			"- No hardcoded secrets\n" +
 			"- Input validation\n" +
 			"- SQL/XSS prevention\n" +
 			"- Proper error handling\n\n" +
-			"**REQUIRED ENDING:**\n" +
-			"```\n" +
+			"**⛔ AFTER YOUR AUDIT - YOU MUST INVOKE THIS TOOL:**\n" +
+			"```xml\n" +
 			"<handoff_context>\n" +
-			"  <target_agent>sentinel-architect-final</target_agent>\n" +
-			"  <context_json>{\"securityPassed\": true, \"vulnerabilities\": [], \"recommendation\": \"approve\", \"summary\": \"...\"}</context_json>\n" +
+			"<notes>Security audit complete</notes>\n" +
+			"<context_json>{\"securityPassed\": true, \"vulnerabilities\": [], \"recommendation\": \"approve\", \"summary\": \"...\"}</context_json>\n" +
 			"</handoff_context>\n" +
 			"```\n\n" +
-			"**⛔ NEVER use attempt_completion!** The workflow MUST continue to Architect Final to generate the walkthrough!",
+			"**⚠️ WARNING:** If you only output text without calling handoff_context, the workflow will FAIL!\n" +
+			"**⛔ NEVER use attempt_completion!** The workflow MUST continue to Architect Final!",
 	},
 ] as const

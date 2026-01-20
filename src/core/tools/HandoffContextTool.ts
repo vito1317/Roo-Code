@@ -259,8 +259,11 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 			case AgentState.QA_ENGINEER:
 				return `[AUTO-CONTINUE] You are QA. Test the implementation using browser_action and dom_extract.`
 			case AgentState.ARCHITECT_REVIEW_CODE:
-			case AgentState.ARCHITECT_REVIEW_TESTS:
-				return `[AUTO-CONTINUE] Review the work and decide: approve or reject with feedback.`
+			case AgentState.ARCHITECT_REVIEW_TESTS: {
+				// Inject RAG UI guidelines based on detected UI type
+				const guidelines = this.getRAGGuidelinesForContext(context)
+				return `[AUTO-CONTINUE] Review the work and decide: approve or reject with feedback.\n\n${guidelines}`
+			}
 			case AgentState.SENTINEL:
 				return `[AUTO-CONTINUE] You are Sentinel Security. Perform security audit. After audit, use handoff_context to pass to Architect Final.`
 			case AgentState.ARCHITECT_REVIEW_FINAL:
@@ -270,6 +273,27 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 			default:
 				return `[AUTO-CONTINUE] Continue with your assigned role.`
 		}
+	}
+
+	/**
+	 * Get RAG UI guidelines based on context (detects UI type from plan)
+	 */
+	private getRAGGuidelinesForContext(context: Record<string, unknown>): string {
+		try {
+			// Import the RAG system dynamically
+			const { getFormattedUIGuidelines } = require("../sentinel/ui-guidelines")
+			
+			// Try to detect UI type from the context (plan, description, etc.)
+			const contextStr = JSON.stringify(context)
+			const guidelines = getFormattedUIGuidelines(contextStr)
+			
+			if (guidelines) {
+				return `## 📋 UI GUIDELINES (from RAG):\n${guidelines}`
+			}
+		} catch (error) {
+			console.error("[HandoffContext] Error loading RAG guidelines:", error)
+		}
+		return ""
 	}
 }
 
