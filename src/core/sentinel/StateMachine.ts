@@ -226,21 +226,22 @@ export class SentinelStateMachine {
 
 	/**
 	 * Get current agent slug (for mode switching)
-	 * Review states use the main Architect mode
 	 */
 	getCurrentAgent(): string {
-		if (this.currentState === AgentState.IDLE || this.currentState === AgentState.COMPLETED) {
-			return "code" // Default mode
+		// Map AgentState to actual mode slugs
+		const stateToModeSlug: Record<AgentState, string> = {
+			[AgentState.IDLE]: "code",
+			[AgentState.COMPLETED]: "code",
+			[AgentState.BLOCKED]: "code",
+			[AgentState.ARCHITECT]: "sentinel-architect",
+			[AgentState.BUILDER]: "sentinel-builder",
+			[AgentState.ARCHITECT_REVIEW_CODE]: "sentinel-architect-review",
+			[AgentState.QA_ENGINEER]: "sentinel-qa",
+			[AgentState.ARCHITECT_REVIEW_TESTS]: "sentinel-architect-review-tests",
+			[AgentState.SENTINEL]: "sentinel-security",
+			[AgentState.ARCHITECT_REVIEW_FINAL]: "sentinel-architect-final",
 		}
-		// Map review states to the main Architect mode
-		if (
-			this.currentState === AgentState.ARCHITECT_REVIEW_CODE ||
-			this.currentState === AgentState.ARCHITECT_REVIEW_TESTS ||
-			this.currentState === AgentState.ARCHITECT_REVIEW_FINAL
-		) {
-			return AgentState.ARCHITECT // Use main Architect mode
-		}
-		return this.currentState
+		return stateToModeSlug[this.currentState] || "code"
 	}
 
 	/**
