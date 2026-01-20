@@ -442,6 +442,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// MessageManager for high-level message operations (lazy initialized)
 	private _messageManager?: MessageManager
 
+	// ========================================
+	// Sentinel Edition Properties
+	// ========================================
+
+	/**
+	 * Sentinel FSM for multi-agent workflow orchestration.
+	 * When active, manages transitions between Architect → Builder → QA → Sentinel agents.
+	 * Only initialized when the task is started in Sentinel mode.
+	 */
+	sentinelStateMachine?: import("../sentinel/StateMachine").SentinelStateMachine
+
+	/**
+	 * Background services spawned by the task (e.g., dev servers for QA testing).
+	 * Maps port number to service info including PID for cleanup.
+	 */
+	backgroundServices?: Map<number, import("../tools/StartBackgroundServiceTool").BackgroundServiceInfo>
+
 	constructor({
 		provider,
 		apiConfiguration,
@@ -1135,8 +1152,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private async addToClineMessages(message: ClineMessage) {
-		this.clineMessages.push(message)
+		// Inject current agent name for Sentinel workflow speaker attribution
 		const provider = this.providerRef.deref()
+		if (provider && this.sentinelStateMachine?.isActive()) {
+			const agentName = this.sentinelStateMachine.getAgentDisplayName(this.sentinelStateMachine.getCurrentState())
+			if (agentName && !message.agentName) {
+				message.agentName = agentName
+			}
+		}
+
+		this.clineMessages.push(message)
 		await provider?.postStateToWebview()
 		this.emit(RooCodeEventName.Message, { action: "created", message })
 		await this.saveClineMessages()

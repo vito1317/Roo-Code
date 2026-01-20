@@ -95,6 +95,21 @@ export async function browserActionTool(
 				)
 
 				browserActionResult = await cline.browserSession.navigateToUrl(url)
+
+				// Auto-extract DOM structure for UI verification (always include)
+				try {
+					console.log("[DOM Extract] Attempting DOM extraction...")
+					const domResult = await cline.browserSession.extractDOMStructure()
+					browserActionResult.domStructure = domResult.domStructure
+					console.log("[DOM Extract] Success, got structure:", domResult.domStructure?.substring(0, 100))
+
+					// EXPLICITLY show DOM structure in chat UI
+					await cline.say("text", `🔍 **DOM STRUCTURE EXTRACTED:**\n\n${domResult.domStructure}\n\n⚠️ Use this to verify UI layout!`)
+				} catch (e) {
+					console.error("[DOM Extract] Failed:", e)
+					browserActionResult.domStructure = `[DOM EXTRACTION ERROR: ${e}]`
+					await cline.say("text", `⚠️ DOM extraction failed: ${e}`)
+				}
 			} else {
 				// Variables to hold validated and processed parameters
 				let processedCoordinate = coordinate
@@ -204,9 +219,22 @@ export async function browserActionTool(
 					case "screenshot":
 						browserActionResult = await cline.browserSession.saveScreenshot(filePath!, cline.cwd)
 						break
+					case "dom_extract":
+						browserActionResult = await cline.browserSession.extractDOMStructure()
+						break
 					case "close":
 						browserActionResult = await cline.browserSession.closeBrowser()
 						break
+				}
+
+				// Auto-extract DOM after UI-changing actions (click, type, press)
+				if (["click", "type", "press"].includes(action)) {
+					try {
+						const domResult = await cline.browserSession.extractDOMStructure()
+						browserActionResult.domStructure = domResult.domStructure
+					} catch (e) {
+						console.log("[DOM Extract] Failed after action:", e)
+					}
 				}
 			}
 
@@ -249,6 +277,15 @@ export async function browserActionTool(
 
 					messageText += `\n\nConsole logs:\n${browserActionResult?.logs || "(No new logs)"}\n`
 
+					// Include DOM structure for UI verification (auto-extracted on launch)
+					if (browserActionResult?.domStructure) {
+						messageText += `\n\n🔍 **AUTO-EXTRACTED DOM STRUCTURE (Use this for UI verification):**\n`
+						messageText += browserActionResult.domStructure
+						messageText += `\n⚠️ **VERIFY**: Compare the rows above to expected layout. REJECT if any button is in wrong row!`
+					} else if (action === "launch") {
+						messageText += `\n\n⚠️ **DOM EXTRACTION UNAVAILABLE** - Unable to extract DOM structure. Use dom_extract action manually.`
+					}
+
 					if (images.length > 0) {
 						const blocks = [
 							...formatResponse.imageBlocks(images),
@@ -259,6 +296,20 @@ export async function browserActionTool(
 						pushToolResult(messageText)
 					}
 
+					break
+				}
+				case "dom_extract": {
+					await cline.say("browser_action_result", JSON.stringify(browserActionResult))
+
+					let messageText = `DOM Structure extracted for UI verification (no vision required).\n\n`
+					messageText += browserActionResult?.domStructure || "(No elements found)"
+					messageText += `\n\nURL: ${browserActionResult?.currentUrl || "unknown"}`
+
+					if (browserActionResult?.viewportWidth && browserActionResult?.viewportHeight) {
+						messageText += `\nViewport: ${browserActionResult.viewportWidth}x${browserActionResult.viewportHeight}`
+					}
+
+					pushToolResult(messageText)
 					break
 				}
 				case "close":

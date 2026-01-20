@@ -26,6 +26,7 @@ import { StandardTooltip } from "@src/components/ui"
 
 import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
+import { SentinelAgentIndicator } from "./SentinelAgentIndicator"
 import { ApiConfigSelector } from "./ApiConfigSelector"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./ChatView"
@@ -1306,6 +1307,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							customModes={customModes}
 							customModePrompts={customModePrompts}
 						/>
+						<SentinelAgentIndicator variant="compact" />
 						<ApiConfigSelector
 							value={currentConfigId}
 							displayName={displayName}

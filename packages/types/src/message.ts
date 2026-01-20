@@ -283,6 +283,11 @@ export const clineMessageSchema = z.object({
 	isProtected: z.boolean().optional(),
 	apiProtocol: z.union([z.literal("openai"), z.literal("anthropic")]).optional(),
 	isAnswered: z.boolean().optional(),
+	/**
+	 * Name of the agent that sent this message (for Sentinel workflow).
+	 * Used to display the correct agent attribution in the chat UI.
+	 */
+	agentName: z.string().optional(),
 })
 
 export type ClineMessage = z.infer<typeof clineMessageSchema>

@@ -267,6 +267,9 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	run_slash_command: "run slash command",
 	generate_image: "generate images",
 	custom_tool: "use custom tools",
+	// Sentinel Edition tools
+	start_background_service: "start background services",
+	handoff_context: "handoff context to next agent",
 } as const
 
 // Define available tool groups.

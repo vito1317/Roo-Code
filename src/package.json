@@ -14,7 +14,7 @@
 		"node": "20.19.2"
 	},
 	"author": {
-		"name": "Roo Code"
+		"name": "Sentinel Code"
 	},
 	"repository": {
 		"type": "git",
@@ -43,11 +43,17 @@
 		"ai",
 		"llama",
 		"roo code",
-		"roocode"
+		"roocode",
+		"sentinel",
+		"sentinel code",
+		"multi-agent"
 	],
 	"activationEvents": [
 		"onLanguage",
 		"onStartupFinished"
+	],
+	"extensionDependencies": [
+		"pomdtr.markdown-kroki"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {

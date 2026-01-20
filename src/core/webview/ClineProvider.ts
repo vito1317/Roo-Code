@@ -449,6 +449,18 @@ export class ClineProvider
 				vscode.window.showErrorMessage(error.message)
 			}
 		}
+
+		// Sentinel Edition: Initialize FSM if starting a task in Sentinel mode
+		const currentMode = this.getGlobalState("mode") || "code"
+		if (currentMode.startsWith("sentinel-")) {
+			const { createSentinelFSM } = await import("../sentinel/StateMachine")
+
+			if (!cline.sentinelStateMachine) {
+				cline.sentinelStateMachine = createSentinelFSM(cline, this)
+				await cline.sentinelStateMachine.start()
+				this.log(`[Sentinel] FSM initialized for task ${cline.taskId} in mode ${currentMode}`)
+			}
+		}
 	}
 
 	// Removes and destroys the top Cline instance (the current finished task),
@@ -1321,6 +1333,61 @@ export class ClineProvider
 		await this.updateGlobalState("mode", newMode)
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
+
+		// Sentinel Edition: Initialize and start FSM for Sentinel modes
+		if (task && newMode.startsWith("sentinel-")) {
+			const { createSentinelFSM, AgentState } = await import("../sentinel/StateMachine")
+
+			// Create FSM if not exists
+			if (!task.sentinelStateMachine) {
+				task.sentinelStateMachine = createSentinelFSM(task, this)
+			}
+
+			// Start the FSM
+			await task.sentinelStateMachine.start()
+
+			// Map mode to agent display name for UI update
+			const modeToAgentName: Record<string, string> = {
+				"sentinel-architect": "Architect",
+				"sentinel-builder": "Builder",
+				"sentinel-qa": "QA Engineer",
+				"sentinel-security": "Sentinel",
+			}
+			const modeToAgentState: Record<string, string> = {
+				"sentinel-architect": "ARCHITECT",
+				"sentinel-builder": "BUILDER",
+				"sentinel-qa": "QA",
+				"sentinel-security": "SENTINEL",
+			}
+			const agentName = modeToAgentName[newMode] || "Agent"
+			const currentAgent = (modeToAgentState[newMode] || "IDLE") as "ARCHITECT" | "BUILDER" | "QA" | "SENTINEL" | "IDLE"
+
+			// Update the webview with current agent state
+			this.postMessageToWebview({
+				type: "sentinelAgentState",
+				sentinelAgentState: {
+					enabled: true,
+					currentAgent: currentAgent,
+					agentName: agentName,
+				},
+			})
+
+			this.log(`[Sentinel] FSM started for mode ${newMode}, state: ${task.sentinelStateMachine.getCurrentState()}`)
+		} else if (task?.sentinelStateMachine) {
+			// Clear FSM when switching away from Sentinel modes
+			task.sentinelStateMachine.reset()
+			task.sentinelStateMachine = undefined
+
+			// Notify webview that Sentinel mode is disabled
+			this.postMessageToWebview({
+				type: "sentinelAgentState",
+				sentinelAgentState: {
+					enabled: false,
+					currentAgent: "IDLE",
+					agentName: "Idle",
+				},
+			})
+		}
 
 		// Load the saved API config for the new mode if it exists.
 		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)

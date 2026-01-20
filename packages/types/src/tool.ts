@@ -38,6 +38,9 @@ export const toolNames = [
 	"run_slash_command",
 	"generate_image",
 	"custom_tool",
+	// Sentinel Edition tools
+	"start_background_service",
+	"handoff_context",
 ] as const
 
 export const toolNamesSchema = z.enum(toolNames)

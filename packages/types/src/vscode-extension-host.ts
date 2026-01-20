@@ -97,6 +97,7 @@ export interface ExtensionMessage {
 		| "modes"
 		| "taskWithAggregatedCosts"
 		| "openAiCodexRateLimits"
+		| "sentinelAgentState" // Sentinel Edition: Current agent state update
 	text?: string
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	checkpointWarning?: {
@@ -194,6 +195,12 @@ export interface ExtensionMessage {
 		childrenCost: number
 	}
 	historyItem?: HistoryItem
+	// Sentinel Edition: Current agent state for UI indicator
+	sentinelAgentState?: {
+		enabled: boolean
+		currentAgent: "IDLE" | "ARCHITECT" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
+		agentName: string
+	}
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -766,6 +773,7 @@ export const browserActions = [
 	"resize",
 	"close",
 	"screenshot",
+	"dom_extract", // Extract DOM structure for UI verification without vision
 ] as const
 
 export type BrowserAction = (typeof browserActions)[number]
@@ -785,6 +793,7 @@ export type BrowserActionResult = {
 	currentMousePosition?: string
 	viewportWidth?: number
 	viewportHeight?: number
+	domStructure?: string // DOM structure text for UI verification without vision
 }
 
 export interface ClineAskUseMcpServer {

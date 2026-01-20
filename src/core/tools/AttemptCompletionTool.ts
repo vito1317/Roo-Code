@@ -85,6 +85,101 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 			task.consecutiveMistakeCount = 0
 
+			// ========================================
+			// Sentinel Edition: FSM Interception
+			// ========================================
+			// When Sentinel FSM is active and we're not at the final SENTINEL agent,
+			// intercept the completion and trigger a handoff to the next agent.
+			const sentinelFSM = task.sentinelStateMachine
+			if (sentinelFSM && sentinelFSM.isActive()) {
+				const { AgentState } = await import("../sentinel/StateMachine")
+				const currentState = sentinelFSM.getCurrentState()
+
+				// Only intercept if not at the final SENTINEL stage
+				// (SENTINEL agent completing means the workflow is done)
+				// Only intercept if not at terminal/review states
+			// Review states auto-pass and shouldn't be intercepted (they use Architect mode)
+			const isTerminalState =
+				currentState === AgentState.SENTINEL ||
+				currentState === AgentState.COMPLETED
+			if (!isTerminalState) {
+					// Extract handoff context from the result
+					const handoffData = this.extractHandoffContextFromResult(result, currentState)
+
+					await task.say(
+						"text",
+						`\ud83d\udd04 **Sentinel Mode:** Intercepting completion from ${currentState}. Initiating handoff...`,
+					)
+
+					// Trigger FSM transition
+					const transitionResult = await sentinelFSM.handleAgentCompletion(handoffData)
+
+					if (transitionResult.success) {
+						// Inject the handoff context summary into the next agent's prompt
+						const contextSummary = sentinelFSM.getContextSummary()
+
+						// Get the next agent's persona information
+						const { getAgentPersona } = await import("../sentinel/personas")
+						const nextAgentSlug = sentinelFSM.getCurrentAgent()
+						const nextPersona = getAgentPersona(nextAgentSlug)
+
+						// Create a handoff message that will be sent as a "user" message
+						// to continue the conversation with the next agent
+						const handoffMessage =
+							`# 🔄 Sentinel Handoff\n\n` +
+							`**Previous Agent:** ${transitionResult.fromState}\n` +
+							`**Current Agent:** ${nextPersona?.name || transitionResult.toState}\n\n` +
+							`---\n\n` +
+							`## Handoff Context\n\n` +
+							`${contextSummary || result}\n\n` +
+							`---\n\n` +
+							`**${nextPersona?.name || "Next Agent"}**: Please continue the workflow based on the context above. ` +
+							`Follow your role definition and complete your tasks. When done, use attempt_completion to hand off to the next agent.`
+
+						await task.say(
+							"text",
+							`✅ **Sentinel Handoff Complete**\n\n` +
+								`- **From:** ${transitionResult.fromState}\n` +
+								`- **To:** ${transitionResult.toState}\n\n` +
+								`The workflow continues with **${nextPersona?.name || transitionResult.toState}**.`,
+						)
+
+						// Resume the conversation by sending the handoff as a follow-up message
+						// This triggers the next agent to start working immediately
+						const provider = task.providerRef.deref()
+						if (provider) {
+							// Queue the handoff message to continue the conversation
+							setTimeout(async () => {
+								try {
+									await task.handleWebviewAskResponse("messageResponse", handoffMessage)
+								} catch (err) {
+									console.error("[Sentinel] Failed to send handoff continuation:", err)
+								}
+							}, 500) // Small delay to ensure current execution completes
+						}
+
+						return // Don't proceed with normal completion
+					} else {
+						// Transition failed (possibly blocked)
+						if (transitionResult.toState === AgentState.BLOCKED) {
+							pushToolResult(
+								`⚠️ **Workflow Blocked**\n\n` +
+									`- **Reason:** ${transitionResult.error}\n\n` +
+									`Human intervention is required. Please review the issues and decide how to proceed.`,
+							)
+						} else {
+							pushToolResult(
+								`❌ **Handoff Failed**\n\n` +
+									`- **Error:** ${transitionResult.error}\n\n` +
+									`Please provide the required context and try again.`,
+							)
+						}
+					}
+
+					return // Don't proceed with normal completion
+				}
+			}
+
 			await task.say("completion_result", result, undefined, false)
 
 			// Force final token usage update before emitting TaskCompleted
@@ -222,6 +317,88 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				undefined,
 				block.partial,
 			)
+		}
+	}
+
+	/**
+	 * Sentinel Edition: Extract handoff context from completion result
+	 *
+	 * Attempts to parse JSON from the result, or creates a basic context
+	 * with the result as notes if JSON parsing fails.
+	 */
+	private extractHandoffContextFromResult(
+		result: string,
+		currentState: string,
+	): Partial<import("../sentinel/HandoffContext").HandoffContext> {
+		// Try to extract JSON from the result
+		const jsonMatch = result.match(/```json\s*([\s\S]*?)```/)
+		if (jsonMatch) {
+			try {
+				const parsed = JSON.parse(jsonMatch[1])
+				return this.buildHandoffDataFromParsed(parsed, currentState, result)
+			} catch {
+				// JSON parsing failed, fall through
+			}
+		}
+
+		// Try to parse the entire result as JSON
+		try {
+			const trimmed = result.trim()
+			if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+				const parsed = JSON.parse(trimmed)
+				return this.buildHandoffDataFromParsed(parsed, currentState, result)
+			}
+		} catch {
+			// Not valid JSON, fall through
+		}
+
+		// Return basic context with result as notes
+		return {
+			previousAgentNotes: result,
+		}
+	}
+
+	/**
+	 * Build typed handoff data from parsed JSON based on current agent
+	 */
+	private buildHandoffDataFromParsed(
+		parsed: Record<string, unknown>,
+		currentState: string,
+		originalResult: string,
+	): Partial<import("../sentinel/HandoffContext").HandoffContext> {
+		const base: Partial<import("../sentinel/HandoffContext").HandoffContext> = {
+			previousAgentNotes: originalResult,
+		}
+
+		// Import AgentState enum for comparison
+		// Note: Using string comparison since we can't import statically
+		switch (currentState) {
+			case "sentinel-architect":
+				return {
+					...base,
+					architectPlan: parsed as unknown as import("../sentinel/HandoffContext").ArchitectPlan,
+				}
+
+			case "sentinel-builder":
+				return {
+					...base,
+					builderTestContext: parsed as unknown as import("../sentinel/HandoffContext").BuilderTestContext,
+				}
+
+			case "sentinel-qa":
+				return {
+					...base,
+					qaAuditContext: parsed as unknown as import("../sentinel/HandoffContext").QAAuditContext,
+				}
+
+			case "sentinel-security":
+				return {
+					...base,
+					sentinelResult: parsed as unknown as import("../sentinel/HandoffContext").SentinelAuditResult,
+				}
+
+			default:
+				return base
 		}
 	}
 }

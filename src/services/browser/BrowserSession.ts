@@ -910,4 +910,122 @@ export class BrowserSession {
 		const { width, height } = this.getViewport()
 		return { width, height }
 	}
+
+	/**
+	 * Extracts DOM structure with element positions for UI verification without vision
+	 * Returns structured text describing all interactive elements and their positions
+	 */
+	async extractDOMStructure(): Promise<BrowserActionResult & { domStructure: string }> {
+		if (!this.page) {
+			throw new Error("Cannot extract DOM: no active browser session")
+		}
+
+		const page = this.page
+
+		// Extract all interactive elements with their positions
+		const elements = await page.evaluate(() => {
+			const selectors = 'button, input, select, a, [role="button"], [onclick], label, h1, h2, h3, span, div'
+			const els = document.querySelectorAll(selectors)
+
+			return Array.from(els)
+				.map(el => {
+					const rect = el.getBoundingClientRect()
+					// Skip elements that are not visible or too small
+					if (rect.width < 5 || rect.height < 5 || rect.top < -100 || rect.left < -100) {
+						return null
+					}
+
+					const text = (el.textContent || '').trim().substring(0, 50)
+					if (!text && el.tagName !== 'INPUT') return null
+
+					return {
+						tag: el.tagName.toLowerCase(),
+						text: text || (el as HTMLInputElement).placeholder || (el as HTMLInputElement).value || '',
+						x: Math.round(rect.left),
+						y: Math.round(rect.top),
+						width: Math.round(rect.width),
+						height: Math.round(rect.height),
+						id: el.id || undefined,
+						className: el.className?.toString()?.split(' ')[0] || undefined,
+					}
+				})
+				.filter(Boolean)
+		})
+
+		// Group elements by rows (similar Y position within 20px)
+		const rows: Map<number, typeof elements> = new Map()
+		for (const el of elements) {
+			if (!el) continue
+			// Round Y to nearest 20 for grouping
+			const rowY = Math.round(el.y / 20) * 20
+			if (!rows.has(rowY)) rows.set(rowY, [])
+			rows.get(rowY)!.push(el)
+		}
+
+		// Sort rows by Y position and elements within rows by X position
+		const sortedRows = Array.from(rows.entries())
+			.sort((a, b) => a[0] - b[0])
+			.map(([y, els]) => ({
+				y,
+				elements: els.sort((a, b) => (a?.x || 0) - (b?.x || 0))
+			}))
+
+		// Format as readable text
+		let output = '## DOM Structure (UI Elements Layout)\n\n'
+
+		// Extract page title for verification
+		const pageTitle = await page.title()
+		const h1Text = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '')
+
+		output += '### 📄 PAGE IDENTIFICATION\n'
+		output += `- **URL:** ${page.url()}\n`
+		output += `- **Title:** ${pageTitle || '(no title)'}\n`
+		output += `- **Main Heading (h1):** ${h1Text || '(no h1)'}\n\n`
+		output += '⚠️ **VERIFY:** Does this page match what you expect? If not, you opened the WRONG application!\n\n'
+
+		// Collect button texts by row for validation
+		const buttonsByRow: string[][] = []
+
+		for (const row of sortedRows) {
+			output += `**Row (y≈${row.y}):**\n`
+			const rowButtons: string[] = []
+			for (const el of row.elements) {
+				if (!el) continue
+				const idPart = el.id ? `#${el.id}` : ''
+				output += `  - [${el.tag}${idPart}] "${el.text}" at (${el.x}, ${el.y}) size ${el.width}x${el.height}\n`
+				// Collect button texts for validation
+				if (el.tag === 'button' && el.text.length <= 2) {
+					rowButtons.push(el.text)
+				}
+			}
+			if (rowButtons.length > 0) {
+				buttonsByRow.push(rowButtons)
+			}
+			output += '\n'
+		}
+
+		// Add generic layout summary for any UI (not just calculators)
+		output += '\n## 📊 LAYOUT SUMMARY\n\n'
+		output += '**Detected UI elements by row:**\n'
+		buttonsByRow.forEach((row, i) => {
+			output += `- Row ${i + 1}: ${row.join(', ')}\n`
+		})
+
+		output += '\n🔍 **VERIFICATION REQUIRED:**\n'
+		output += '1. Compare this layout against the ORIGINAL PLAN from Architect\n'
+		output += '2. Check if elements are in the correct rows/positions\n'
+		output += '3. Verify all expected elements are present\n'
+		output += '4. If layout doesn\'t match plan → REJECT with specific fix instructions\n'
+		output += '\n⚠️ Do NOT approve if layout differs from the original design!\n'
+
+		// Get viewport info
+		const viewport = page.viewport()
+
+		return {
+			domStructure: output,
+			currentUrl: page.url(),
+			viewportWidth: viewport?.width,
+			viewportHeight: viewport?.height,
+		}
+	}
 }

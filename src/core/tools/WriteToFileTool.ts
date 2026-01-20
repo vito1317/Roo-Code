@@ -114,6 +114,62 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				state?.experiments ?? {},
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
 			)
+		// Sentinel Mode: For .md files (like plan.md), skip diff view entirely and save silently
+			const isSentinelMode = state?.mode?.startsWith("sentinel-") ?? false
+			const isSentinelPlanFile = isSentinelMode && relPath.endsWith(".md")
+
+			if (isSentinelPlanFile) {
+				// Save directly without showing any diff view
+				const absolutePath = path.resolve(task.cwd, relPath)
+				await fs.mkdir(path.dirname(absolutePath), { recursive: true })
+				await fs.writeFile(absolutePath, newContent, "utf-8")
+
+				// Track file and mark as edited
+				await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+				task.didEditFile = true
+
+				// Push tool result
+				const toolResultMessage = `✅ Created ${relPath}`
+				pushToolResult(toolResultMessage)
+
+				// Open preview
+				try {
+					const vscode = await import("vscode")
+
+					// Ensure Kroki extension is installed
+					const krokiExtId = "pomdtr.markdown-kroki"
+					const krokiExt = vscode.extensions.getExtension(krokiExtId)
+					if (!krokiExt) {
+						await task.say("text", `📦 Installing Kroki extension for diagram support...`)
+						await vscode.commands.executeCommand("workbench.extensions.installExtension", krokiExtId)
+						await delay(2000)
+						await task.say("text", `✅ Kroki extension installed!`)
+					}
+
+					await delay(500)
+					const fileUri = vscode.Uri.file(absolutePath)
+					await vscode.commands.executeCommand("markdown.showPreview", fileUri)
+
+					// Close source tabs
+					for (const group of vscode.window.tabGroups.all) {
+						for (const tab of group.tabs) {
+							if (tab.input && (tab.input as any).uri?.fsPath === absolutePath) {
+								const isPreview = tab.label.startsWith("Preview ")
+								if (!isPreview) {
+									await vscode.window.tabGroups.close(tab)
+								}
+							}
+						}
+					}
+
+					await task.say("text", `📝 **Plan created:** \`${relPath}\` - Preview is now open.`)
+				} catch (previewError) {
+					console.log("[WriteToFileTool] Failed to open markdown preview:", previewError)
+				}
+
+				task.processQueuedMessages()
+				return  // Early return - skip all diffViewProvider logic
+			}
 
 			if (isPreventFocusDisruptionEnabled) {
 				task.diffViewProvider.editType = fileExists ? "modify" : "create"
@@ -189,6 +245,55 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
 
+			// Auto-open markdown preview for .md files in Sentinel mode
+			if (relPath.endsWith(".md")) {
+				const isSentinelMode = state?.mode?.startsWith("sentinel-") ?? false
+				if (isSentinelMode) {
+					try {
+						// Import vscode dynamically to avoid circular dependencies
+						const vscode = await import("vscode")
+						const absolutePath = path.resolve(task.cwd, relPath)
+
+						// Ensure Kroki extension is installed for proper diagram rendering
+						const krokiExtId = "pomdtr.markdown-kroki"
+						const krokiExt = vscode.extensions.getExtension(krokiExtId)
+						if (!krokiExt) {
+							await task.say("text", `📦 Installing Kroki extension for diagram support...`)
+							await vscode.commands.executeCommand("workbench.extensions.installExtension", krokiExtId)
+							// Wait for extension to be ready
+							await delay(2000)
+							await task.say("text", `✅ Kroki extension installed! Diagrams will render correctly.`)
+						}
+
+						// Wait for file system to sync before opening
+						await delay(500)
+
+						// Open preview directly without showing source code
+						const fileUri = vscode.Uri.file(absolutePath)
+						// Use markdown.showPreview to open only preview (not the source)
+						await vscode.commands.executeCommand("markdown.showPreview", fileUri)
+
+						// Close any source code tabs for this file that may have opened
+						for (const group of vscode.window.tabGroups.all) {
+							for (const tab of group.tabs) {
+								if (tab.input && (tab.input as any).uri?.fsPath === absolutePath) {
+									// Don't close preview tabs, only source tabs
+									const isPreview = tab.label.startsWith("Preview ")
+									if (!isPreview) {
+										await vscode.window.tabGroups.close(tab)
+									}
+								}
+							}
+						}
+
+						await task.say("text", `📝 **Plan created:** \`${relPath}\` - Preview is now open.`)
+					} catch (previewError) {
+						// Silently fail - preview is a nice-to-have, not critical
+						console.log("[WriteToFileTool] Failed to open markdown preview:", previewError)
+					}
+				}
+			}
+
 			task.processQueuedMessages()
 
 			return
@@ -217,6 +322,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		)
 
 		if (isPreventFocusDisruptionEnabled) {
+			return
+		}
+
+		// Skip streaming/diff view for .md files in Sentinel mode (they open in preview instead)
+		const isSentinelMode = state?.mode?.startsWith("sentinel-") ?? false
+		if (isSentinelMode && relPath?.endsWith(".md")) {
 			return
 		}
 

@@ -46,6 +46,7 @@ import ProfileViolationWarning from "./ProfileViolationWarning"
 import { CheckpointWarning } from "./CheckpointWarning"
 import { QueuedMessages } from "./QueuedMessages"
 import DismissibleUpsell from "../common/DismissibleUpsell"
+import { SentinelAgentIndicator } from "./SentinelAgentIndicator"
 import { useCloudUpsell } from "@src/hooks/useCloudUpsell"
 import { Cloud } from "lucide-react"
 
@@ -95,6 +96,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		cloudIsAuthenticated,
 		messageQueue = [],
 		isBrowserSessionActive,
+		sentinelAgentState,
 	} = useExtensionState()
 
 	const messagesRef = useRef(messages)
@@ -1266,8 +1268,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// Check if we need to switch modes
 			if (suggestion.mode) {
 				// Only switch modes if it's a manual click (event exists) or auto-approval is allowed
+				// BUT skip mode switch if Sentinel workflow is active (feedback goes back to the workflow)
 				const isManualClick = !!event
-				if (isManualClick || alwaysAllowModeSwitch) {
+				const isSentinelActive = sentinelAgentState?.enabled === true
+				if ((isManualClick || alwaysAllowModeSwitch) && !isSentinelActive) {
 					// Switch mode without waiting
 					switchToMode(suggestion.mode)
 				}
@@ -1287,7 +1291,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				setInputValue(preservedInput)
 			}
 		},
-		[handleSendMessage, setInputValue, switchToMode, alwaysAllowModeSwitch, clineAsk, markFollowUpAsAnswered],
+		[handleSendMessage, setInputValue, switchToMode, alwaysAllowModeSwitch, clineAsk, markFollowUpAsAnswered, sentinelAgentState],
 	)
 
 	const handleBatchFileResponse = useCallback((response: { [key: string]: boolean }) => {
@@ -1544,6 +1548,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			{task && (
 				<>
+					{/* Sentinel Agent Status Indicator */}
+					<div className="px-4 pt-2">
+						<SentinelAgentIndicator variant="full" />
+					</div>
 					<div className="grow flex" ref={scrollContainerRef}>
 						<Virtuoso
 							ref={virtuosoRef}

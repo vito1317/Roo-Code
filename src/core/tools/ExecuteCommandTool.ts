@@ -36,6 +36,46 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 		}
 	}
 
+	/**
+	 * Detect if command is a server/long-running command that should run in background
+	 */
+	private isServerCommand(command: string): boolean {
+		const serverPatterns = [
+			/python3?\s+(-m\s+)?http\.server/i,          // python http.server
+			/npm\s+(run\s+)?(dev|start|serve)/i,          // npm run dev/start/serve
+			/yarn\s+(run\s+)?(dev|start|serve)/i,         // yarn run dev/start
+			/pnpm\s+(run\s+)?(dev|start|serve)/i,         // pnpm run dev/start
+			/node\s+.*server/i,                           // node server.js
+			/npx\s+(vite|next|nuxt|webpack)/i,            // npx vite/next/nuxt
+			/php\s+-S/i,                                  // php built-in server
+			/flask\s+run/i,                               // flask run
+			/uvicorn/i,                                   // uvicorn
+			/ng\s+serve/i,                                // angular serve
+			/live-server/i,                               // live-server
+		]
+		return serverPatterns.some(pattern => pattern.test(command))
+	}
+
+	/**
+	 * Extract port number from command if specified
+	 */
+	private extractPortFromCommand(command: string): number | undefined {
+		// Match patterns like: --port 3000, -p 8080, :8000
+		const portPatterns = [
+			/--port[=\s]+([\d]+)/i,
+			/-p[=\s]+([\d]+)/i,
+			/:([\d]{4,5})\b/,
+			/\s([\d]{4,5})\s*$/,  // trailing port number like 'python -m http.server 8000'
+		]
+		for (const pattern of portPatterns) {
+			const match = command.match(pattern)
+			if (match && match[1]) {
+				return parseInt(match[1], 10)
+			}
+		}
+		return undefined
+	}
+
 	async execute(params: ExecuteCommandParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { command, cwd: customCwd } = params
 		const { handleError, pushToolResult, askApproval, removeClosingTag, toolProtocol } = callbacks
@@ -59,10 +99,44 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			task.consecutiveMistakeCount = 0
 
 			const unescapedCommand = unescapeHtmlEntities(command)
-			const didApprove = await askApproval("command", unescapedCommand)
+
+			// Auto-approve commands in Sentinel workflow mode
+			const currentMode = (await task.providerRef.deref()?.getState())?.mode ?? ""
+			const isSentinelMode = currentMode.startsWith("sentinel-")
+
+			let didApprove: boolean
+			if (isSentinelMode) {
+				await task.say("text", `⚡ **Auto-approved command:** \`${unescapedCommand.substring(0, 50)}${unescapedCommand.length > 50 ? "..." : ""}\``)
+				didApprove = true
+			} else {
+				didApprove = await askApproval("command", unescapedCommand)
+			}
 
 			if (!didApprove) {
 				return
+			}
+
+			// Auto-detect server commands and run them in background
+			if (this.isServerCommand(unescapedCommand)) {
+				const port = this.extractPortFromCommand(unescapedCommand)
+				const backgroundServiceTool = await import("./StartBackgroundServiceTool")
+
+				await task.say(
+					"text",
+					`🔄 **Auto-Background**: Detected server command, running in background.\n` +
+					`Command: \`${unescapedCommand}\`${port ? ` | Port: ${port}` : ""}`
+				)
+
+				try {
+					await backgroundServiceTool.startBackgroundServiceTool.execute(
+						{ command: unescapedCommand, port: port ?? 0 },
+						task,
+						callbacks
+					)
+					return
+				} catch (error) {
+					console.error("[ExecuteCommand] Background service failed:", error)
+				}
 			}
 
 			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()

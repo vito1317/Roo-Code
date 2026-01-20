@@ -26,27 +26,37 @@ export const VALID_ANTHROPIC_BLOCK_TYPES = new Set([
 export function filterNonAnthropicBlocks(
 	messages: Anthropic.Messages.MessageParam[],
 ): Anthropic.Messages.MessageParam[] {
-	return messages
-		.map((message) => {
-			if (typeof message.content === "string") {
-				return message
-			}
+	const result: Anthropic.Messages.MessageParam[] = []
 
-			const filteredContent = message.content.filter((block) => {
-				const blockType = (block as { type: string }).type
-				// Only keep block types that Anthropic recognizes
-				return VALID_ANTHROPIC_BLOCK_TYPES.has(blockType)
-			})
+	for (const message of messages) {
+		// Extract ONLY the standard Anthropic message fields (role, content)
+		// This strips out any extra fields like `reasoning_details` that other providers
+		// may have added to the messages (e.g., OpenRouter adds reasoning_details for Gemini/o-series)
+		const { role, content } = message
 
-			// If all content was filtered out, return undefined to filter the message later
-			if (filteredContent.length === 0) {
-				return undefined
-			}
+		if (typeof content === "string") {
+			// Return a clean message with only role and content
+			result.push({ role, content })
+			continue
+		}
 
-			return {
-				...message,
-				content: filteredContent,
-			}
+		const filteredContent = content.filter((block) => {
+			const blockType = (block as { type: string }).type
+			// Only keep block types that Anthropic recognizes
+			return VALID_ANTHROPIC_BLOCK_TYPES.has(blockType)
 		})
-		.filter((message): message is Anthropic.Messages.MessageParam => message !== undefined)
+
+		// If all content was filtered out, skip this message
+		if (filteredContent.length === 0) {
+			continue
+		}
+
+		// Return a clean message with only role and content (no extra fields like reasoning_details)
+		result.push({
+			role,
+			content: filteredContent,
+		})
+	}
+
+	return result
 }

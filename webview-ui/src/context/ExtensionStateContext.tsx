@@ -52,6 +52,12 @@ export interface ExtensionStateContextType extends ExtensionState {
 	mdmCompliant?: boolean
 	hasOpenedModeSelector: boolean // New property to track if user has opened mode selector
 	setHasOpenedModeSelector: (value: boolean) => void // Setter for the new property
+	// Sentinel Edition: Current agent state display
+	sentinelAgentState?: {
+		enabled: boolean
+		currentAgent: "IDLE" | "ARCHITECT" | "BUILDER" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
+		agentName: string
+	}
 	alwaysAllowFollowupQuestions: boolean // New property for follow-up questions auto-approve
 	setAlwaysAllowFollowupQuestions: (value: boolean) => void // Setter for the new property
 	followupAutoApproveTimeoutMs: number | undefined // Timeout in ms for auto-approving follow-up questions
@@ -421,6 +427,17 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 					}
 					if (message.marketplaceInstalledMetadata !== undefined) {
 						setMarketplaceInstalledMetadata(message.marketplaceInstalledMetadata)
+					}
+					break
+				}
+				// Sentinel Edition: Handle agent state updates
+				case "sentinelAgentState": {
+					const agentState = (message as any).sentinelAgentState
+					if (agentState) {
+						setState((prevState) => ({
+							...prevState,
+							sentinelAgentState: agentState,
+						}))
 					}
 					break
 				}

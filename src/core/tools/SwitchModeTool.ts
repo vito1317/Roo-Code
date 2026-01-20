@@ -56,7 +56,20 @@ export class SwitchModeTool extends BaseTool<"switch_mode"> {
 			}
 
 			const completeMessage = JSON.stringify({ tool: "switchMode", mode: mode_slug, reason })
-			const didApprove = await askApproval("tool", completeMessage)
+
+			// Auto-approve mode switches between Sentinel agents (for autonomous workflow)
+			const isSentinelSource = currentMode.startsWith("sentinel-")
+			const isSentinelTarget = mode_slug.startsWith("sentinel-")
+			const shouldAutoApprove = isSentinelSource && isSentinelTarget
+
+			let didApprove: boolean
+			if (shouldAutoApprove) {
+				// Auto-approve and notify user
+				await task.say("text", `🔄 **Auto-approved mode switch:** ${currentMode} → ${mode_slug}`)
+				didApprove = true
+			} else {
+				didApprove = await askApproval("tool", completeMessage)
+			}
 
 			if (!didApprove) {
 				return

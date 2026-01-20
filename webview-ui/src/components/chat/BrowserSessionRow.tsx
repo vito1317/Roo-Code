@@ -316,7 +316,7 @@ const BrowserSessionRow = memo((props: BrowserSessionRowProps) => {
 	// Find last mouse position up to current page (not from future pages)
 	const lastPageWithMousePositionUpToCurrent = useMemo(() => {
 		for (let i = currentPageIndex; i >= 0; i--) {
-			if (pages[i].mousePosition) {
+			if (pages[i]?.mousePosition) {
 				return pages[i]
 			}
 		}
