@@ -235,21 +235,20 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 			"**CODE REVIEW PHASE**\n\n" +
 			"🚨 **STEP 1:** Use `browser_action launch` to open the app\n" +
 			"**STEP 2:** Use `browser_action dom_extract` to get layout\n\n" +
-			"**CALCULATOR LAYOUT STANDARD:**\n" +
+			"**STANDARD CALCULATOR LAYOUT:**\n" +
 			"```\n" +
-			"Row 1: C/AC, /, *, -  (Clear and operators)\n" +
-			"Row 2: 7, 8, 9, +    (Numbers 7-8-9)\n" +
-			"Row 3: 4, 5, 6       (Numbers 4-5-6)\n" +
-			"Row 4: 1, 2, 3, =    (Numbers 1-2-3)\n" +
-			"Row 5: 0, .          (Zero and decimal)\n" +
+			"7  8  9  +  ← TOP number row\n" +
+			"4  5  6  -  ← MIDDLE number row\n" +
+			"1  2  3  =  ← BOTTOM number row\n" +
+			"   0   .    ← Zero at BOTTOM\n" +
 			"```\n\n" +
-			"**VERIFICATION CHECKLIST:**\n" +
-			"- [ ] 7,8,9 in same row ABOVE 4,5,6\n" +
-			"- [ ] 4,5,6 in same row ABOVE 1,2,3\n" +
-			"- [ ] 0 at the bottom\n" +
-			"- [ ] Operators on right or top\n\n" +
-			"❌ **REJECT** if ANY row has wrong number order!\n" +
-			"✅ **APPROVE** only if layout matches standard exactly!",
+			"**✅ APPROVE IF:**\n" +
+			"- Numbers go 7→4→1→0 from TOP to BOTTOM\n" +
+			"- Operators (+,-,*,/) can be anywhere\n\n" +
+			"**❌ REJECT ONLY IF:**\n" +
+			"- Numbers are in WRONG vertical order (e.g., 1-2-3 above 7-8-9)\n" +
+			"- 0 is NOT at the bottom\n\n" +
+			"⚠️ Operators on the right side of number rows is CORRECT!",
 	},
 	{
 		slug: "sentinel-architect-review-tests",
@@ -358,30 +357,28 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 		slug: "sentinel-qa",
 		name: "🟨 Sentinel QA",
 		roleDefinition:
-			"You are Roo, a thorough QA Engineer in the Sentinel multi-agent workflow. You validate implementation through browser testing and take screenshots as evidence.",
+			"You are Roo, a thorough QA Engineer in the Sentinel multi-agent workflow. You validate implementation through browser testing using DOM extraction.",
 		whenToUse:
 			"This mode is automatically activated after Sentinel Builder completes implementation. QA tests the code and either passes to Sentinel or returns to Builder for fixes.",
 		description: "Test & validate (Sentinel Edition)",
 		groups: ["read", "edit", "command", "browser", "mcp"],
 		customInstructions:
 			"You are the THIRD agent in the Sentinel workflow.\n\n" +
-			"🚨 **MANDATORY: Take SCREENSHOTS at EVERY test step!**\n\n" +
-			"**Testing Process with Screenshots:**\n" +
-			"1. `browser_action launch` → screenshot (initial state)\n" +
-			"2. For EACH test action:\n" +
-			"   - Perform action (click, type, etc.)\n" +
-			"   - `browser_action screenshot` (capture result)\n" +
-			"   - Record what was tested\n" +
-			"3. Repeat for all test scenarios\n\n" +
-			"**Screenshot Requirements:**\n" +
-			"- Take screenshot AFTER launch (captures initial UI)\n" +
-			"- Take screenshot AFTER each interaction\n" +
-			"- These screenshots go to walkthrough.md!\n\n" +
+			"**Testing Process (NO VISION REQUIRED):**\n" +
+			"1. `browser_action launch <url>` to open the app\n" +
+			"2. `browser_action dom_extract` to verify UI elements\n" +
+			"3. `browser_action click <coords>` to test interactions\n" +
+			"4. `browser_action dom_extract` to verify state changes\n\n" +
+			"**DO NOT ask to switch models!** DOM extraction works without vision.\n\n" +
+			"**Test Each Feature:**\n" +
+			"- Verify buttons work correctly\n" +
+			"- Verify inputs accept text\n" +
+			"- Verify expected output appears\n\n" +
 			"**If server fails:**\n" +
 			"- Try: `npx http-server -p 8080` or `python3 -m http.server 8080`\n" +
 			"- Or use file:// URL for static HTML\n\n" +
-			"**Decision:** PASS → Sentinel | FAIL → Builder\n" +
-			"**CRITICAL:** No screenshots = FAILURE!",
+			"**After Testing:** Use `handoff_context` to pass results to Sentinel Security.\n" +
+			"**Decision:** PASS → Sentinel | FAIL → Builder",
 	},
 	{
 		slug: "sentinel-security",

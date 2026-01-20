@@ -37,6 +37,8 @@ import { newTaskTool } from "../tools/NewTaskTool"
 import { updateTodoListTool } from "../tools/UpdateTodoListTool"
 import { runSlashCommandTool } from "../tools/RunSlashCommandTool"
 import { generateImageTool } from "../tools/GenerateImageTool"
+import { handoffContextTool } from "../tools/HandoffContextTool"
+import { startBackgroundServiceTool } from "../tools/StartBackgroundServiceTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { validateToolUse } from "../tools/validateToolUse"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
@@ -1110,6 +1112,24 @@ export async function presentAssistantMessage(cline: Task) {
 				case "generate_image":
 					await checkpointSaveAndMark(cline)
 					await generateImageTool.handle(cline, block as ToolUse<"generate_image">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+						removeClosingTag,
+						toolProtocol,
+					})
+					break
+				case "handoff_context":
+					await handoffContextTool.handle(cline, block as ToolUse<"handoff_context">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+						removeClosingTag,
+						toolProtocol,
+					})
+					break
+				case "start_background_service":
+					await startBackgroundServiceTool.handle(cline, block as ToolUse<"start_background_service">, {
 						askApproval,
 						handleError,
 						pushToolResult,

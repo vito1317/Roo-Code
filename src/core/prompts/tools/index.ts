@@ -26,6 +26,8 @@ import { getCodebaseSearchDescription } from "./codebase-search"
 import { getUpdateTodoListDescription } from "./update-todo-list"
 import { getRunSlashCommandDescription } from "./run-slash-command"
 import { getGenerateImageDescription } from "./generate-image"
+import { getHandoffContextDescription } from "./handoff-context"
+import { getStartBackgroundServiceDescription } from "./start-background-service"
 
 // Map of tool names to their description functions
 const toolDescriptionMap: Record<string, (args: ToolArgs) => string | undefined> = {
@@ -48,6 +50,8 @@ const toolDescriptionMap: Record<string, (args: ToolArgs) => string | undefined>
 	update_todo_list: (args) => getUpdateTodoListDescription(args),
 	run_slash_command: () => getRunSlashCommandDescription(),
 	generate_image: (args) => getGenerateImageDescription(args),
+	handoff_context: () => getHandoffContextDescription(),
+	start_background_service: () => getStartBackgroundServiceDescription(),
 }
 
 export function getToolDescriptionsForMode(
