@@ -149,6 +149,14 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 					`---\n\n` +
 					`The workflow will now continue with the ${result.toState} agent.`
 				)
+				
+				// CRITICAL: Add auto-continue message to trigger next agent
+				// This tells the next agent what to do based on their role
+				const continueMessage = this.buildContinueMessage(result.toState, parsedContext)
+				task.userMessageContent.push({
+					type: "text",
+					text: continueMessage,
+				})
 			} else {
 				if (result.toState === AgentState.BLOCKED) {
 					pushToolResult(
@@ -237,6 +245,31 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 		})
 
 		await task.ask("tool", partialMessage, block.partial).catch(() => {})
+	}
+
+	/**
+	 * Build a continue message for the next agent based on their role
+	 */
+	private buildContinueMessage(toState: AgentState, context: Record<string, unknown>): string {
+		switch (toState) {
+			case AgentState.ARCHITECT:
+				return `[AUTO-CONTINUE] You are the Architect. Review the feedback and create/update the implementation plan.`
+			case AgentState.BUILDER:
+				return `[AUTO-CONTINUE] You are the Builder. Implement according to the Architect's plan: ${JSON.stringify(context).slice(0, 500)}`
+			case AgentState.QA_ENGINEER:
+				return `[AUTO-CONTINUE] You are QA. Test the implementation using browser_action and dom_extract.`
+			case AgentState.ARCHITECT_REVIEW_CODE:
+			case AgentState.ARCHITECT_REVIEW_TESTS:
+				return `[AUTO-CONTINUE] Review the work and decide: approve or reject with feedback.`
+			case AgentState.SENTINEL:
+				return `[AUTO-CONTINUE] You are Sentinel Security. Perform security audit. After audit, use handoff_context to pass to Architect Final.`
+			case AgentState.ARCHITECT_REVIEW_FINAL:
+				return `[AUTO-CONTINUE] You are Architect Final Review. Create a walkthrough.md summarizing all work completed, then use attempt_completion.`
+			case AgentState.COMPLETED:
+				return `[AUTO-CONTINUE] Workflow completed. Use attempt_completion to finish.`
+			default:
+				return `[AUTO-CONTINUE] Continue with your assigned role.`
+		}
 	}
 }
 
