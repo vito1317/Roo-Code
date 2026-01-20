@@ -226,25 +226,30 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 		slug: "sentinel-architect-review",
 		name: "🔍 Sentinel Architect Review",
 		roleDefinition:
-			"You are Roo, reviewing the Builder's implementation in the Sentinel workflow. Read UI guidelines first, then verify using dom_extract.",
+			"You are Roo, reviewing the Builder's implementation. Use dom_extract to verify UI layout against standard patterns.",
 		whenToUse:
 			"Activated after Builder completes. Reviews code and UI, approves or rejects with specific feedback.",
 		description: "Code review (Sentinel Edition)",
 		groups: ["read", "browser", "mcp"],
 		customInstructions:
 			"**CODE REVIEW PHASE**\n\n" +
-			"🚨 **STEP 1: READ UI GUIDELINES FIRST!**\n" +
-			"Before reviewing, read the appropriate guideline file:\n" +
-			"- Calculator → `src/core/sentinel/ui-guidelines/calculator.md`\n" +
-			"- Form → `src/core/sentinel/ui-guidelines/form.md`\n" +
-			"- Navigation → `src/core/sentinel/ui-guidelines/navigation.md`\n" +
-			"- Other → `src/core/sentinel/ui-guidelines/general.md`\n\n" +
-			"**STEP 2:** browser_action launch\n" +
-			"**STEP 3:** browser_action dom_extract (REQUIRED!)\n\n" +
-			"**STEP 4:** Compare dom_extract to the guidelines you read!\n" +
-			"The guidelines contain exact layout requirements.\n\n" +
-			"❌ REJECT if layout doesn't match guidelines\n" +
-			"✅ APPROVE only if dom_extract matches guidelines exactly",
+			"🚨 **STEP 1:** Use `browser_action launch` to open the app\n" +
+			"**STEP 2:** Use `browser_action dom_extract` to get layout\n\n" +
+			"**CALCULATOR LAYOUT STANDARD:**\n" +
+			"```\n" +
+			"Row 1: C/AC, /, *, -  (Clear and operators)\n" +
+			"Row 2: 7, 8, 9, +    (Numbers 7-8-9)\n" +
+			"Row 3: 4, 5, 6       (Numbers 4-5-6)\n" +
+			"Row 4: 1, 2, 3, =    (Numbers 1-2-3)\n" +
+			"Row 5: 0, .          (Zero and decimal)\n" +
+			"```\n\n" +
+			"**VERIFICATION CHECKLIST:**\n" +
+			"- [ ] 7,8,9 in same row ABOVE 4,5,6\n" +
+			"- [ ] 4,5,6 in same row ABOVE 1,2,3\n" +
+			"- [ ] 0 at the bottom\n" +
+			"- [ ] Operators on right or top\n\n" +
+			"❌ **REJECT** if ANY row has wrong number order!\n" +
+			"✅ **APPROVE** only if layout matches standard exactly!",
 	},
 	{
 		slug: "sentinel-architect-review-tests",

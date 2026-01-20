@@ -68,7 +68,7 @@ export function TodoListDisplay({ todos }: { todos: any[] }) {
 					{isCollapsed
 						? allCompleted
 							? t("chat:todo.complete", { total: completedCount })
-							: mostImportantTodo?.content // show current todo while not done
+							: mostImportantTodo?.content?.replace(/\\n/g, " ") // Replace literal \n with space
 						: t("chat:todo.partial", { completed: completedCount, total: totalCount })}
 				</span>
 				{isCollapsed && completedCount < totalCount && (
@@ -92,7 +92,7 @@ export function TodoListDisplay({ todos }: { todos: any[] }) {
 									todo.status !== "in_progress" && todo.status !== "completed" && "opacity-60",
 								)}>
 								{icon}
-								<span>{todo.content}</span>
+								<span>{todo.content?.replace(/\\n/g, " ")}</span>
 							</li>
 						)
 					})}

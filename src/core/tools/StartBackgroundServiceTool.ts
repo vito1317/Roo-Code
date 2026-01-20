@@ -90,20 +90,29 @@ export class StartBackgroundServiceTool extends BaseTool<"start_background_servi
 				return
 			}
 
-			if (!port || isNaN(port)) {
-				task.consecutiveMistakeCount++
-				task.recordToolError("start_background_service")
-				pushToolResult(await task.sayAndCreateMissingParamError("start_background_service", "port"))
-				return
+			// Auto-detect port from command if not provided
+			let effectivePort = port
+			if (!effectivePort || isNaN(effectivePort)) {
+				// Try to detect port from common dev server commands
+				const portMatch = command.match(/(?:-p|--port|PORT=)\s*(\d+)/) || 
+				                  command.match(/:(\d{4,5})/)
+				if (portMatch) {
+					effectivePort = parseInt(portMatch[1], 10)
+				} else if (command.includes("vite") || command.includes("npm run dev")) {
+					effectivePort = 5173 // Default Vite port
+				} else {
+					effectivePort = 3000 // Fallback default
+				}
+				console.log(`[BackgroundService] Auto-detected port: ${effectivePort}`)
 			}
 
 			task.consecutiveMistakeCount = 0
 
 			// Check if port is already in use by our services
-			if (task.backgroundServices?.has(port)) {
-				const existing = task.backgroundServices.get(port)!
+			if (task.backgroundServices?.has(effectivePort)) {
+				const existing = task.backgroundServices.get(effectivePort)!
 				pushToolResult(
-					`Port ${port} is already in use by a background service (PID: ${existing.pid}). ` +
+					`Port ${effectivePort} is already in use by a background service (PID: ${existing.pid}). ` +
 					`Use the existing service or stop it first.`
 				)
 				return
@@ -113,7 +122,7 @@ export class StartBackgroundServiceTool extends BaseTool<"start_background_servi
 			const approvalMessage = JSON.stringify({
 				tool: "start_background_service",
 				command,
-				port,
+				port: effectivePort,
 				workingDirectory,
 				timeout,
 			})
@@ -124,7 +133,7 @@ export class StartBackgroundServiceTool extends BaseTool<"start_background_servi
 			
 			let didApprove: boolean
 			if (isSentinelMode) {
-				await task.say("text", `🚀 **Auto-approved:** Starting background service \`${command}\` on port ${port}...`)
+				await task.say("text", `🚀 **Auto-approved:** Starting background service \`${command}\` on port ${effectivePort}...`)
 				didApprove = true
 			} else {
 				didApprove = await askApproval("tool", approvalMessage)
@@ -137,7 +146,7 @@ export class StartBackgroundServiceTool extends BaseTool<"start_background_servi
 			// Show status
 			await task.say(
 				"text",
-				`🚀 Starting background service: \`${command}\` on port ${port}...`,
+				`🚀 Starting background service: \`${command}\` on port ${effectivePort}...`,
 			)
 
 			// Spawn the process
@@ -151,20 +160,20 @@ export class StartBackgroundServiceTool extends BaseTool<"start_background_servi
 			// Store service info
 			const serviceInfo: BackgroundServiceInfo = {
 				pid: child.pid,
-				port,
+				port: effectivePort,
 				command,
 				startedAt: new Date(),
-				url: `http://localhost:${port}`,
+				url: `http://localhost:${effectivePort}`,
 			}
 
 			// Initialize backgroundServices map if needed
 			if (!task.backgroundServices) {
 				task.backgroundServices = new Map()
 			}
-			task.backgroundServices.set(port, serviceInfo)
+			task.backgroundServices.set(effectivePort, serviceInfo)
 
 			// Poll for readiness
-			const url = `http://localhost:${port}${healthCheckPath}`
+			const url = `http://localhost:${effectivePort}${healthCheckPath}`
 			const isReady = await this.pollForReadiness(url, timeout)
 
 			if (isReady) {
