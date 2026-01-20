@@ -65,9 +65,9 @@ const AGENT_CONFIG = {
 		spinning: true,
 	},
 	COMPLETED: {
-		borderColor: "border-purple-500/50",
-		bgColor: "bg-purple-500/10",
-		textColor: "text-purple-400",
+		borderColor: "border-emerald-500/50",
+		bgColor: "bg-emerald-500/10",
+		textColor: "text-emerald-400",
 		icon: "✅",
 		label: "Completed",
 		statusMessage: "✅ Workflow complete!",
@@ -104,6 +104,8 @@ export const SentinelAgentIndicator: React.FC<SentinelAgentIndicatorProps> = ({
 
 	const currentAgent = (sentinelAgentState.currentAgent || "IDLE") as AgentState
 	const config = AGENT_CONFIG[currentAgent] || AGENT_CONFIG.IDLE
+	const activity = sentinelAgentState.currentActivity || config.statusMessage
+	const handoff = sentinelAgentState.lastHandoff
 
 	// Compact variant - just icon and label
 	if (variant === "compact") {
@@ -162,11 +164,11 @@ export const SentinelAgentIndicator: React.FC<SentinelAgentIndicatorProps> = ({
 		)
 	}
 
-	// Full variant - with status message and prominent styling
+	// Full variant - with status message, activity, and handoff info
 	return (
 		<div
 			className={cn(
-				"flex items-center gap-3 px-3 py-2 rounded-lg",
+				"flex flex-col gap-2 px-4 py-3 rounded-lg",
 				config.bgColor,
 				"border-2",
 				config.borderColor,
@@ -174,55 +176,71 @@ export const SentinelAgentIndicator: React.FC<SentinelAgentIndicatorProps> = ({
 				className,
 			)}
 			data-testid="sentinel-agent-indicator-full">
-			{/* Agent icon with glow effect */}
-			<div className="flex items-center justify-center w-8 h-8 rounded-full bg-black/20">
-				<span className="text-xl">{config.icon}</span>
-			</div>
+			
+			{/* Header with icon and name */}
+			<div className="flex items-center gap-3">
+				<div className="flex items-center justify-center w-10 h-10 rounded-full bg-black/20 shadow-lg">
+					<span className="text-2xl">{config.icon}</span>
+				</div>
 
-			{/* Agent info */}
-			<div className="flex flex-col">
-				<span className={cn("text-sm font-semibold", config.textColor)}>
-					{config.label}
-					{config.spinning && (
-						<svg
-							className="animate-spin h-3 w-3 inline-block ml-2"
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24">
-							<circle
-								className="opacity-25"
-								cx="12"
-								cy="12"
-								r="10"
-								stroke="currentColor"
-								strokeWidth="4"
-							/>
-							<path
-								className="opacity-75"
-								fill="currentColor"
-								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-							/>
-						</svg>
+				<div className="flex flex-col flex-1">
+					<span className={cn("text-sm font-bold", config.textColor)}>
+						{config.label}
+						{config.spinning && (
+							<svg
+								className="animate-spin h-3 w-3 inline-block ml-2"
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24">
+								<circle
+									className="opacity-25"
+									cx="12"
+									cy="12"
+									r="10"
+									stroke="currentColor"
+									strokeWidth="4"
+								/>
+								<path
+									className="opacity-75"
+									fill="currentColor"
+									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+								/>
+							</svg>
+						)}
+					</span>
+					{activity && (
+						<span className="text-xs text-vscode-descriptionForeground animate-pulse">
+							{activity}
+						</span>
 					)}
-				</span>
-				{config.statusMessage && (
-					<span className="text-xs text-vscode-descriptionForeground">{config.statusMessage}</span>
+				</div>
+
+				{/* Animated pulse indicator */}
+				{currentAgent !== "IDLE" && currentAgent !== "COMPLETED" && !config.spinning && (
+					<span className="relative flex h-3 w-3">
+						<span
+							className={cn(
+								"animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+								config.bgColor.replace("/10", "/50"),
+							)}
+						/>
+						<span
+							className={cn("relative inline-flex rounded-full h-3 w-3", config.bgColor.replace("/10", ""))}
+						/>
+					</span>
 				)}
 			</div>
 
-			{/* Animated pulse indicator */}
-			{currentAgent !== "IDLE" && currentAgent !== "COMPLETED" && !config.spinning && (
-				<span className="relative flex h-3 w-3 ml-auto">
-					<span
-						className={cn(
-							"animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-							config.bgColor.replace("/10", "/50"),
-						)}
-					/>
-					<span
-						className={cn("relative inline-flex rounded-full h-3 w-3", config.bgColor.replace("/10", ""))}
-					/>
-				</span>
+			{/* Handoff summary bar */}
+			{handoff && handoff.summary && (
+				<div className="mt-1 px-3 py-2 bg-black/20 rounded-md border border-white/10">
+					<div className="text-xs text-vscode-descriptionForeground mb-1">
+						📤 <span className="font-medium">{handoff.from}</span> → <span className="font-medium">{handoff.to}</span>
+					</div>
+					<div className="text-xs opacity-80 flex flex-wrap gap-2">
+						{handoff.summary}
+					</div>
+				</div>
 			)}
 		</div>
 	)

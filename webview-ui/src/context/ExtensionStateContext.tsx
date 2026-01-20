@@ -55,8 +55,15 @@ export interface ExtensionStateContextType extends ExtensionState {
 	// Sentinel Edition: Current agent state display
 	sentinelAgentState?: {
 		enabled: boolean
-		currentAgent: "IDLE" | "ARCHITECT" | "BUILDER" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
+		currentAgent: "IDLE" | "ARCHITECT" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
 		agentName: string
+		currentActivity?: string  // What agent is currently doing
+		lastHandoff?: {
+			from: string
+			to: string
+			summary: string
+			timestamp: number
+		}
 	}
 	alwaysAllowFollowupQuestions: boolean // New property for follow-up questions auto-approve
 	setAlwaysAllowFollowupQuestions: (value: boolean) => void // Setter for the new property

@@ -235,6 +235,17 @@ export async function browserActionTool(
 					} catch (e) {
 						console.log("[DOM Extract] Failed after action:", e)
 					}
+					
+					// Auto-save screenshot for test evidence
+					try {
+						const timestamp = Date.now()
+						const screenshotName = `test_screenshot_${timestamp}.png`
+						const screenshotPath = `${cline.cwd}/${screenshotName}`
+						await cline.browserSession.saveScreenshot(screenshotPath, cline.cwd)
+						console.log(`[Auto Screenshot] Saved: ${screenshotName}`)
+					} catch (e) {
+						console.log("[Auto Screenshot] Failed:", e)
+					}
 				}
 			}
 

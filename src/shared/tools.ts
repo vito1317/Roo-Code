@@ -304,6 +304,8 @@ export const ALWAYS_AVAILABLE_TOOLS: ToolName[] = [
 	"new_task",
 	"update_todo_list",
 	"run_slash_command",
+	"handoff_context", // Sentinel Edition: Always available for agent handoffs
+	"start_background_service", // Sentinel Edition: Always available for starting servers
 ] as const
 
 /**

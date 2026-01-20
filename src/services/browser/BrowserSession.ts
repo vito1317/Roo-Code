@@ -1011,6 +1011,31 @@ export class BrowserSession {
 			output += `- Row ${i + 1}: ${row.join(', ')}\n`
 		})
 
+		// AI-based layout validation instructions (not programmatic)
+		const allButtons = buttonsByRow.flat()
+		const isCalculator = allButtons.some(b => ['7', '8', '9', '4', '5', '6', '1', '2', '3', '0'].includes(b))
+		
+		if (isCalculator) {
+			output += '\n## 🔍 AI LAYOUT REVIEW REQUIRED\n\n'
+			output += '**You must visually verify the calculator layout:**\n\n'
+			output += '**Standard Calculator Layout (compare with above):**\n'
+			output += '```\n'
+			output += 'Row 1: C/AC  /   *   -  (Clear and operators)\n'
+			output += 'Row 2: 7    8   9   +  (Top number row)\n'
+			output += 'Row 3: 4    5   6      (Middle number row)\n'
+			output += 'Row 4: 1    2   3   =  (Bottom number row)\n'
+			output += 'Row 5: 0        .      (Zero and decimal)\n'
+			output += '```\n\n'
+			output += '**Check these items:**\n'
+			output += '- [ ] Are 7,8,9 in a single row ABOVE 4,5,6?\n'
+			output += '- [ ] Are 4,5,6 in a single row ABOVE 1,2,3?\n'
+			output += '- [ ] Is 0 at the bottom?\n'
+			output += '- [ ] Are operators (+,-,*,/) on the right or top?\n'
+			output += '- [ ] Is the layout matching the standard above?\n\n'
+			output += '**❌ REJECT if any check fails!**\n'
+			output += '**✅ APPROVE only if ALL checks pass!**\n\n'
+		}
+
 		output += '\n🔍 **VERIFICATION REQUIRED:**\n'
 		output += '1. Compare this layout against the ORIGINAL PLAN from Architect\n'
 		output += '2. Check if elements are in the correct rows/positions\n'
