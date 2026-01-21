@@ -45,6 +45,7 @@ import {
 } from "./activate"
 import { initializeI18n } from "./i18n"
 import { flushModels, initializeModelCacheRefresh, refreshModels } from "./api/providers/fetchers/modelCache"
+import { FigmaConfigService } from "./services/figma/FigmaConfigService"
 
 /**
  * Built using https://github.com/microsoft/vscode-webview-ui-toolkit
@@ -117,6 +118,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	const contextProxy = await ContextProxy.getInstance(context)
+
+	// Initialize Figma configuration service for Figma MCP integration
+	FigmaConfigService.initialize(context)
 
 	// Initialize code index managers for all workspace folders.
 	const codeIndexManagers: CodeIndexManager[] = []

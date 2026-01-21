@@ -314,21 +314,22 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		executionId: string,
 		pushToolResult: (content: string | Array<any>) => void,
 	): Promise<void> {
-		await task.say("mcp_server_request_started")
-
-		// Send started status
-		await this.sendExecutionStatus(task, {
-			executionId,
-			status: "started",
-			serverName,
-			toolName,
-		})
-
-		// Route to internal Figma server if applicable
+		// Route to internal Figma server if applicable (treat as built-in tool)
 		let toolResult: any
 		if (serverName === "figma") {
+			// For Figma, use "text" say type instead of MCP style
+			await task.say("text", `🎨 Calling Figma API: \`${toolName}\``)
 			toolResult = await this.executeFigmaTool(toolName, parsedArguments)
 		} else {
+			// Standard MCP tool handling
+			await task.say("mcp_server_request_started")
+			// Send started status
+			await this.sendExecutionStatus(task, {
+				executionId,
+				status: "started",
+				serverName,
+				toolName,
+			})
 			toolResult = await task.providerRef.deref()?.getMcpHub()?.callTool(serverName, toolName, parsedArguments)
 		}
 
