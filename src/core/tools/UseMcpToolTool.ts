@@ -361,6 +361,8 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	): Promise<void> {
 		// Route to internal Figma server if applicable (treat as built-in tool)
 		let toolResult: any
+		const isFigmaServer = serverName === "figma" || serverName === "figma-write"
+		
 		if (serverName === "figma") {
 			// For Figma Read, use "text" say type instead of MCP style
 			await task.say("text", `🎨 Calling Figma API: \`${toolName}\``)
@@ -389,22 +391,27 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			const outputText = this.processToolContent(toolResult)
 
 			if (outputText) {
-				await this.sendExecutionStatus(task, {
-					executionId,
-					status: "output",
-					response: outputText,
-				})
+				// Only send execution status for non-Figma servers (to avoid UI clutter)
+				if (!isFigmaServer) {
+					await this.sendExecutionStatus(task, {
+						executionId,
+						status: "output",
+						response: outputText,
+					})
+				}
 
 				toolResultPretty = (toolResult.isError ? "Error:\n" : "") + outputText
 			}
 
-			// Send completion status
-			await this.sendExecutionStatus(task, {
-				executionId,
-				status: toolResult.isError ? "error" : "completed",
-				response: toolResultPretty,
-				error: toolResult.isError ? "Error executing MCP tool" : undefined,
-			})
+			// Send completion status only for non-Figma servers
+			if (!isFigmaServer) {
+				await this.sendExecutionStatus(task, {
+					executionId,
+					status: toolResult.isError ? "error" : "completed",
+					response: toolResultPretty,
+					error: toolResult.isError ? "Error executing MCP tool" : undefined,
+				})
+			}
 		} else {
 			// Send error status if no result
 			await this.sendExecutionStatus(task, {
@@ -414,7 +421,18 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			})
 		}
 
-		await task.say("mcp_server_response", toolResultPretty)
+		// For Figma servers, show simplified result instead of full JSON
+		if (isFigmaServer) {
+			// For figma-write, extract just the success/node info
+			const simplifiedResult = toolResult?.isError
+				? `❌ Figma Error: ${toolResultPretty}`
+				: `✅ Figma: ${toolName} completed`
+			await task.say("text", simplifiedResult)
+		} else {
+			await task.say("mcp_server_response", toolResultPretty)
+		}
+		
+		// Still push full result to LLM context (just not displayed verbosely in UI)
 		pushToolResult(formatResponse.toolResult(toolResultPretty))
 	}
 

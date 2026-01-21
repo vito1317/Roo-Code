@@ -150,21 +150,48 @@ export const FigmaSettings = ({
 							)}
 						</SearchableSetting>
 
-						{/* Figma Write MCP Toggle */}
+						{/* Figma Write Tools */}
 						<SearchableSetting
-							settingId="figma-write-mcp"
+							settingId="figma-write-tools"
 							section="figma"
-							label="Figma Write MCP">
-							<div className="mt-2 p-3 bg-vscode-input-background rounded-md border border-vscode-input-border">
-								<div className="flex items-center justify-between">
-									<div>
-										<span className="font-medium">✏️ Figma Write MCP</span>
-										<div className="text-vscode-descriptionForeground text-sm mt-1">
-											Enable the figma-write MCP server to allow AI to create and modify Figma designs.
-											This is auto-enabled when Figma Integration is enabled.
+							label="Figma Write Tools">
+							<div className="mt-2 space-y-3">
+								{/* Tools Header */}
+								<div className="p-3 bg-vscode-input-background rounded-md border border-vscode-input-border">
+									<div className="flex items-center justify-between">
+										<div>
+											<span className="font-medium">✏️ Figma Write Tools</span>
+											<div className="text-vscode-descriptionForeground text-sm mt-1">
+												Allows AI to create and modify Figma designs directly.
+											</div>
 										</div>
+										<span className={`text-sm ${isEnabled ? "text-green-400" : "text-gray-500"}`}>
+											{isEnabled ? "● Enabled" : "○ Disabled"}
+										</span>
 									</div>
-									<span className="text-green-400 text-sm">● Active</span>
+								</div>
+
+								{/* Auto-allow MCP Tools */}
+								<VSCodeCheckbox
+									checked={true}
+									disabled={true}>
+									<span className="font-medium">Auto-allow Figma tools</span>
+								</VSCodeCheckbox>
+								<div className="text-vscode-descriptionForeground text-xs ml-6 -mt-2">
+									Figma tools (find_nodes, create_frame, etc.) are auto-approved without confirmation dialogs.
+								</div>
+
+								{/* Available Tools List */}
+								<div className="text-xs text-vscode-descriptionForeground">
+									<span className="font-medium block mb-1">Available Tools:</span>
+									<div className="grid grid-cols-2 gap-1 ml-2">
+										<span>• create_frame</span>
+										<span>• create_rectangle</span>
+										<span>• add_text</span>
+										<span>• set_fill</span>
+										<span>• set_position</span>
+										<span>• find_nodes</span>
+									</div>
 								</div>
 							</div>
 						</SearchableSetting>
