@@ -149,6 +149,25 @@ export const FigmaSettings = ({
 								</div>
 							)}
 						</SearchableSetting>
+
+						{/* Figma Write MCP Toggle */}
+						<SearchableSetting
+							settingId="figma-write-mcp"
+							section="figma"
+							label="Figma Write MCP">
+							<div className="mt-2 p-3 bg-vscode-input-background rounded-md border border-vscode-input-border">
+								<div className="flex items-center justify-between">
+									<div>
+										<span className="font-medium">✏️ Figma Write MCP</span>
+										<div className="text-vscode-descriptionForeground text-sm mt-1">
+											Enable the figma-write MCP server to allow AI to create and modify Figma designs.
+											This is auto-enabled when Figma Integration is enabled.
+										</div>
+									</div>
+									<span className="text-green-400 text-sm">● Active</span>
+								</div>
+							</div>
+						</SearchableSetting>
 					</div>
 				)}
 			</Section>
