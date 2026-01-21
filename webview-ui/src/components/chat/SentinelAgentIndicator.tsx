@@ -28,6 +28,15 @@ const AGENT_CONFIG = {
 		statusMessage: "📐 Designing architecture...",
 		spinning: false,
 	},
+	DESIGNER: {
+		borderColor: "border-pink-500/50",
+		bgColor: "bg-pink-500/10",
+		textColor: "text-pink-400",
+		icon: "🎨",
+		label: "Designer",
+		statusMessage: "🎨 Creating UI design...",
+		spinning: false,
+	},
 	BUILDER: {
 		borderColor: "border-green-500/50",
 		bgColor: "bg-green-500/10",

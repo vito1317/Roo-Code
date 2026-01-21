@@ -29,6 +29,8 @@ export enum AgentState {
 	ARCHITECT = "sentinel-architect",
 	// UI/UX Design phase (optional, when Figma is enabled)
 	DESIGNER = "sentinel-designer",
+	// Design verification phase (verifies Designer completed all elements)
+	DESIGN_REVIEW = "sentinel-design-review",
 	// Implementation phase
 	BUILDER = "sentinel-builder",
 	// Architect reviews Builder's code
@@ -143,12 +145,28 @@ export class SentinelStateMachine {
 			label: "Plan completed, handoff to Builder",
 		},
 
-		// Designer completes → Builder implements
+		// Designer completes → Design Review verifies
 		{
 			from: AgentState.DESIGNER,
+			to: AgentState.DESIGN_REVIEW,
+			condition: (ctx) => !!ctx?.designSpecs || ctx?.expectedElements !== undefined,
+			label: "Design submitted, handoff to Design Review for verification",
+		},
+
+		// Design Review approves → Builder implements
+		{
+			from: AgentState.DESIGN_REVIEW,
 			to: AgentState.BUILDER,
-			condition: (ctx) => !!ctx?.designSpecs,
-			label: "Design specs completed, handoff to Builder",
+			condition: (ctx) => ctx?.designReviewPassed === true,
+			label: "Design verified complete, handoff to Builder",
+		},
+
+		// Design Review rejects → Designer fixes
+		{
+			from: AgentState.DESIGN_REVIEW,
+			to: AgentState.DESIGNER,
+			condition: (ctx) => ctx?.designReviewPassed === false,
+			label: "Design incomplete, return to Designer",
 		},
 
 		// ===== PHASE 2: IMPLEMENTATION & CODE REVIEW =====
@@ -251,6 +269,7 @@ export class SentinelStateMachine {
 			[AgentState.BLOCKED]: "sentinel-builder", // Stay in workflow, let Builder try to fix
 			[AgentState.ARCHITECT]: "sentinel-architect",
 			[AgentState.DESIGNER]: "sentinel-designer",
+			[AgentState.DESIGN_REVIEW]: "sentinel-design-review",
 			[AgentState.BUILDER]: "sentinel-builder",
 			[AgentState.ARCHITECT_REVIEW_CODE]: "sentinel-architect-review",
 			[AgentState.QA_ENGINEER]: "sentinel-qa",
@@ -382,8 +401,16 @@ export class SentinelStateMachine {
 				return AgentState.BUILDER
 			}
 
-			// Phase 1b: Designer → Builder
+			// Phase 1b: Designer → Design Review
 			case AgentState.DESIGNER:
+				return AgentState.DESIGN_REVIEW
+
+			// Phase 1c: Design Review → Builder (if approved) or Designer (if rejected)
+			case AgentState.DESIGN_REVIEW:
+				if (handoffData.designReviewPassed === false) {
+					console.log("[SentinelFSM] Design Review REJECTED - returning to Designer")
+					return AgentState.DESIGNER
+				}
 				return AgentState.BUILDER
 
 			// Phase 2: Builder → Architect reviews code
@@ -817,6 +844,7 @@ export class SentinelStateMachine {
 			[AgentState.IDLE]: "Idle",
 			[AgentState.ARCHITECT]: "🟦 Architect",
 			[AgentState.DESIGNER]: "🎨 Designer",
+			[AgentState.DESIGN_REVIEW]: "🔎 Design Review",
 			[AgentState.BUILDER]: "🟩 Builder",
 			[AgentState.ARCHITECT_REVIEW_CODE]: "🔍 Architect (Code Review)",
 			[AgentState.QA_ENGINEER]: "🟨 QA Engineer",
@@ -834,14 +862,15 @@ export class SentinelStateMachine {
 	 */
 	private mapToWebviewState(
 		state: AgentState,
-	): "IDLE" | "ARCHITECT" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED" {
+	): "IDLE" | "ARCHITECT" | "DESIGNER" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED" {
 		const mapping: Record<
 			AgentState,
-			"IDLE" | "ARCHITECT" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
+			"IDLE" | "ARCHITECT" | "DESIGNER" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
 		> = {
 			[AgentState.IDLE]: "IDLE",
 			[AgentState.ARCHITECT]: "ARCHITECT",
-			[AgentState.DESIGNER]: "ARCHITECT",
+			[AgentState.DESIGNER]: "DESIGNER",
+			[AgentState.DESIGN_REVIEW]: "DESIGNER",
 			[AgentState.BUILDER]: "BUILDER",
 			[AgentState.ARCHITECT_REVIEW_CODE]: "ARCHITECT_REVIEW",
 			[AgentState.QA_ENGINEER]: "QA",
@@ -870,6 +899,7 @@ export class SentinelStateMachine {
 				[AgentState.IDLE]: "",
 				[AgentState.ARCHITECT]: "Creating implementation plan with Mermaid diagrams...",
 				[AgentState.DESIGNER]: "Analyzing Figma designs and creating UI specifications...",
+				[AgentState.DESIGN_REVIEW]: "Verifying design completeness...",
 				[AgentState.BUILDER]: "Writing code and implementing features...",
 				[AgentState.ARCHITECT_REVIEW_CODE]: "Reviewing code quality and UI layout...",
 				[AgentState.QA_ENGINEER]: "Running browser tests and taking screenshots...",

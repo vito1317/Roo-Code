@@ -34,3 +34,6 @@
 
 # Include .env file for telemetry
 !.env
+
+# Include tools (figma-write-bridge for built-in MCP server)
+!tools/figma-write-bridge/**

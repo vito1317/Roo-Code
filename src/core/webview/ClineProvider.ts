@@ -1350,6 +1350,7 @@ export class ClineProvider
 			// Map mode to agent display name for UI update
 			const modeToAgentName: Record<string, string> = {
 				"sentinel-architect": "Architect",
+				"sentinel-designer": "Designer",
 				"sentinel-builder": "Builder",
 				"sentinel-architect-review": "Architect Review",
 				"sentinel-qa": "QA Engineer",
@@ -1359,6 +1360,7 @@ export class ClineProvider
 			}
 			const modeToAgentState: Record<string, string> = {
 				"sentinel-architect": "ARCHITECT",
+				"sentinel-designer": "DESIGNER",
 				"sentinel-builder": "BUILDER",
 				"sentinel-architect-review": "ARCHITECT_REVIEW",
 				"sentinel-qa": "QA",
@@ -1367,7 +1369,7 @@ export class ClineProvider
 				"sentinel-architect-final": "ARCHITECT_REVIEW",
 			}
 			const agentName = modeToAgentName[newMode] || "Agent"
-			const currentAgent = (modeToAgentState[newMode] || "IDLE") as "ARCHITECT" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "IDLE" | "COMPLETED"
+			const currentAgent = (modeToAgentState[newMode] || "IDLE") as "ARCHITECT" | "DESIGNER" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "IDLE" | "COMPLETED" | "BLOCKED"
 
 			// Update the webview with current agent state
 			this.postMessageToWebview({

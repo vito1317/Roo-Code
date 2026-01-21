@@ -169,6 +169,7 @@ export class McpHub {
 		this.setupWorkspaceFoldersWatcher()
 		this.initializeGlobalMcpServers()
 		this.initializeProjectMcpServers()
+		this.initializeBuiltInFigmaWriteServer(provider)
 	}
 	/**
 	 * Registers a client (e.g., ClineProvider) using this hub.
@@ -596,6 +597,63 @@ export class McpHub {
 	// Initialize project-level MCP servers
 	private async initializeProjectMcpServers(): Promise<void> {
 		await this.initializeMcpServers("project")
+	}
+
+	/**
+	 * Initialize the built-in figma-write server for seamless Figma integration
+	 * This server is automatically registered without user configuration
+	 */
+	private async initializeBuiltInFigmaWriteServer(provider: ClineProvider): Promise<void> {
+		try {
+			// Get the extension path to locate the figma-write-bridge
+			const extensionPath = provider.context?.extensionPath
+			if (!extensionPath) {
+				console.log("[McpHub] Extension path not available, skipping built-in figma-write server")
+				return
+			}
+
+			const serverPath = `${extensionPath}/tools/figma-write-bridge/server.ts`
+			
+			// Check if the server file exists
+			try {
+				await fs.access(serverPath)
+			} catch {
+				console.log("[McpHub] figma-write-bridge not found, skipping built-in server")
+				return
+			}
+
+			// Check if figma-write is already configured by user (don't override)
+			const existingConnection = this.connections.find((conn) => conn.server.name === "figma-write")
+			if (existingConnection) {
+				console.log("[McpHub] figma-write already configured, skipping built-in server")
+				return
+			}
+
+			// Register the built-in figma-write server using node with tsx loader
+			// Note: We use node --import tsx/esm to run TypeScript directly, avoiding npx PATH issues and bundling issues with zod schemas
+			const nodeModulesPath = `${extensionPath}/tools/figma-write-bridge/node_modules`
+			const tsxPath = `${nodeModulesPath}/tsx/dist/esm/index.mjs`
+			const config = {
+				command: "node",
+				args: ["--import", tsxPath, serverPath],
+				type: "stdio" as const,
+				timeout: 30000,
+				alwaysAllow: [] as string[],
+				disabledTools: [] as string[],
+				cwd: `${extensionPath}/tools/figma-write-bridge`,
+				env: {
+					...process.env,
+					NODE_PATH: nodeModulesPath,
+				},
+			}
+
+			console.log("[McpHub] Initializing built-in figma-write server")
+			await this.connectToServer("figma-write", config, "global")
+			console.log("[McpHub] Built-in figma-write server initialized")
+		} catch (error) {
+			// Don't fail if figma-write can't be initialized - it's optional
+			console.log("[McpHub] Could not initialize built-in figma-write server:", error)
+		}
 	}
 
 	/**
@@ -1233,6 +1291,22 @@ export class McpHub {
 			return
 		}
 
+		// Special handling for built-in figma-write server
+		if (serverName === "figma-write") {
+			vscode.window.showInformationMessage(t("mcp:info.server_restarting", { serverName }))
+			await delay(500)
+			// Delete existing connection first
+			await this.deleteConnection(serverName, source)
+			// Re-initialize the built-in server
+			const provider = this.providerRef.deref()
+			if (provider) {
+				await this.initializeBuiltInFigmaWriteServer(provider)
+			}
+			await this.notifyWebviewOfServerChanges()
+			this.isConnecting = false
+			return
+		}
+
 		// Get existing connection and update its status
 		const connection = this.findConnection(serverName, source)
 		const config = connection?.server.config
@@ -1324,6 +1398,12 @@ export class McpHub {
 			// This ensures proper initialization including fetching tools, resources, etc.
 			await this.initializeMcpServers("global")
 			await this.initializeMcpServers("project")
+			
+			// Re-initialize built-in figma-write server if not already configured
+			const provider = this.providerRef.deref()
+			if (provider) {
+				await this.initializeBuiltInFigmaWriteServer(provider)
+			}
 
 			await delay(100)
 

@@ -200,7 +200,7 @@ export interface ExtensionMessage {
 	// Sentinel Edition: Current agent state for UI indicator
 	sentinelAgentState?: {
 		enabled: boolean
-		currentAgent: "IDLE" | "ARCHITECT" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
+		currentAgent: "IDLE" | "ARCHITECT" | "DESIGNER" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
 		agentName: string
 		currentActivity?: string
 		lastHandoff?: {

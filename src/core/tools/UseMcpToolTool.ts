@@ -5,6 +5,7 @@ import { formatResponse } from "../prompts/responses"
 import { t } from "../../i18n"
 import type { ToolUse } from "../../shared/tools"
 import { getFigmaService, extractFileKey, extractNodeIds, formatForLLM } from "../../services/figma"
+import { FigmaWriteService, FIGMA_WRITE_TOOLS, getFigmaWriteService } from "../../services/figma/FigmaWriteService"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
@@ -81,6 +82,19 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				return
 			}
 
+			// For internal Figma Write server, skip MCP-style approval (treat as built-in tool)
+			if (serverName === "figma-write") {
+				await this.executeToolAndProcessResult(
+					task,
+					serverName,
+					toolName,
+					parsedArguments,
+					executionId,
+					pushToolResult,
+				)
+				return
+			}
+
 			// Get user approval for external MCP servers
 			const completeMessage = JSON.stringify({
 				type: "use_mcp_tool",
@@ -113,8 +127,8 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		const params = block.params
 		const serverName = this.removeClosingTag("server_name", params.server_name, block.partial)
 		
-		// Skip MCP-style partial message for internal Figma server
-		if (serverName === "figma") {
+		// Skip MCP-style partial message for internal Figma servers
+		if (serverName === "figma" || serverName === "figma-write") {
 			return
 		}
 		
@@ -198,6 +212,10 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				if (serverName === "figma") {
 					return this.validateFigmaToolExists(toolName, pushToolResult, task)
 				}
+				// Check for internal figma-write server
+				if (serverName === "figma-write") {
+					return this.validateFigmaWriteToolExists(toolName, pushToolResult, task)
+				}
 				return { isValid: true }
 			}
 
@@ -208,6 +226,11 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			// Check for internal figma server first
 			if (!server && serverName === "figma") {
 				return this.validateFigmaToolExists(toolName, pushToolResult, task)
+			}
+
+			// Check for internal figma-write server
+			if (!server && serverName === "figma-write") {
+				return this.validateFigmaWriteToolExists(toolName, pushToolResult, task)
 			}
 
 			if (!server) {
@@ -339,9 +362,14 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		// Route to internal Figma server if applicable (treat as built-in tool)
 		let toolResult: any
 		if (serverName === "figma") {
-			// For Figma, use "text" say type instead of MCP style
+			// For Figma Read, use "text" say type instead of MCP style
 			await task.say("text", `🎨 Calling Figma API: \`${toolName}\``)
 			toolResult = await this.executeFigmaTool(toolName, parsedArguments)
+		} else if (serverName === "figma-write") {
+			// For Figma Write, use standard MCP flow but with custom message
+			await task.say("text", `🎨 Creating in Figma: \`${toolName}\``)
+			// Use the standard MCP callTool - figma-write is registered as built-in server in McpHub
+			toolResult = await task.providerRef.deref()?.getMcpHub()?.callTool(serverName, toolName, parsedArguments)
 		} else {
 			// Standard MCP tool handling
 			await task.say("mcp_server_request_started")
@@ -416,6 +444,34 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			return { isValid: false, availableTools: availableToolNames }
 		}
 		return { isValid: true, availableTools: FIGMA_TOOLS.map((t) => t.name) }
+	}
+
+	/**
+	 * Validate that a Figma Write tool exists (internal server)
+	 */
+	private async validateFigmaWriteToolExists(
+		toolName: string,
+		pushToolResult: (content: string) => void,
+		task: Task,
+	): Promise<{ isValid: boolean; availableTools?: string[] }> {
+		const tool = FIGMA_WRITE_TOOLS.find((t) => t.name === toolName)
+		if (!tool) {
+			const availableToolNames = FIGMA_WRITE_TOOLS.map((t) => t.name)
+			task.consecutiveMistakeCount++
+			task.recordToolError("use_mcp_tool")
+			await task.say(
+				"error",
+				t("mcp:errors.toolNotFound", {
+					toolName,
+					serverName: "figma-write",
+					availableTools: availableToolNames.join(", "),
+				}),
+			)
+			task.didToolFailInCurrentTurn = true
+			pushToolResult(formatResponse.unknownMcpToolError("figma-write", toolName, availableToolNames))
+			return { isValid: false, availableTools: availableToolNames }
+		}
+		return { isValid: true, availableTools: FIGMA_WRITE_TOOLS.map((t) => t.name) }
 	}
 
 	/**
@@ -512,6 +568,59 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				content: [{ type: "text", text: `Figma API Error: ${error instanceof Error ? error.message : String(error)}` }],
 				isError: true,
 			}
+		}
+	}
+
+	/**
+	 * Execute a Figma Write tool (internal server)
+	 */
+	private async executeFigmaWriteTool(
+		toolName: string,
+		args: Record<string, unknown> | undefined,
+		task: Task,
+	): Promise<{ content: Array<{ type: string; text: string }>; isError: boolean }> {
+		// Initialize Figma Write Service if needed
+		let figmaWriteService = getFigmaWriteService()
+		if (!figmaWriteService) {
+			// Get extension path from provider
+			const provider = task.providerRef.deref()
+			const extensionPath = provider?.context?.extensionPath || ""
+			figmaWriteService = FigmaWriteService.initialize(extensionPath)
+		}
+
+		// Check if the service is available
+		const isAvailable = await figmaWriteService.isAvailable()
+		if (!isAvailable) {
+			return {
+				content: [{
+					type: "text",
+					text: "Error: Figma Write Bridge not available.\n\n" +
+						"Please ensure the Figma plugin is running:\n" +
+						"1. Open Figma\n" +
+						"2. Go to Plugins → Development → MCP Figma Write Bridge\n\n" +
+						"Falling back to ASCII design mode..."
+				}],
+				isError: true,
+			}
+		}
+
+		// Call the tool
+		const result = await figmaWriteService.callTool(toolName, args || {})
+
+		if (!result.success) {
+			return {
+				content: [{ type: "text", text: `Figma Write Error: ${result.error}` }],
+				isError: true,
+			}
+		}
+
+		const responseText = result.nodeId
+			? `✅ Created in Figma: ${result.nodeId}\n${JSON.stringify(result.data, null, 2)}`
+			: JSON.stringify(result.data, null, 2)
+
+		return {
+			content: [{ type: "text", text: responseText }],
+			isError: false,
 		}
 	}
 }

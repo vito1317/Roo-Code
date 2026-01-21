@@ -713,6 +713,10 @@ export const webviewMessageHandler = async (
 			}
 			break
 
+		// Figma Write MCP setting - handled via updateSettings with figmaWriteEnabled
+		// The figma-write MCP server is controlled by the existing mcpEnabled pattern
+		// Users can enable/disable it through the MCP settings panel
+
 		case "clearTask":
 			// Clear task resets the current session. Delegation flows are
 			// handled via metadata; parent resumption occurs through

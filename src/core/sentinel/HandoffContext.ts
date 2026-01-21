@@ -225,6 +225,12 @@ export interface HandoffContext {
 	figmaUrl?: string
 	designSpecs?: string // Path to design-specs.md or inline specs
 
+	// Design Review context
+	expectedElements?: number // Number of expected UI elements
+	actualElements?: number // Number of elements found by Design Review
+	designReviewPassed?: boolean // Whether Design Review approved the design
+	missingComponents?: string[] // List of missing components if rejected
+
 	// Common fields
 	previousAgentNotes: string
 	failureHistory: FailureRecord[]
