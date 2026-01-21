@@ -460,38 +460,54 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 		groups: ["read", "edit", "command", "browser", "mcp"],
 		customInstructions:
 			"You are the THIRD agent in the Sentinel workflow.\n\n" +
-			"**🚨 CRITICAL: YOU MUST ACTUALLY RUN BROWSER TESTS!**\n" +
-			"DO NOT approve without opening the browser and testing the app!\n\n" +
+			"**🚨 CRITICAL: COMPARE BUILD RESULT WITH DESIGN!**\n" +
+			"You MUST verify the implementation matches the design specifications!\n\n" +
+			"**STEP 0: READ DESIGN SPECS (BEFORE TESTING)**\n" +
+			"1. Read `design-specs.md` if it exists in the project\n" +
+			"2. Note expected: colors, layout (rows/columns), button count, typography\n" +
+			"3. If `figmaUrl` in context, use the built-in Figma server:\n" +
+			"   ```xml\n" +
+			"   <use_mcp_tool>\n" +
+			"   <server_name>figma</server_name>\n" +
+			"   <tool_name>get_simplified_structure</tool_name>\n" +
+			"   <arguments>{\"file_key\": \"FROM_URL\"}</arguments>\n" +
+			"   </use_mcp_tool>\n" +
+			"   ```\n\n" +
 			"**MANDATORY Testing Process:**\n" +
-			"1. `browser_action launch <url>` - REQUIRED: Open the app\n" +
-			"2. `browser_action dom_extract` - REQUIRED: Check for errors + verify UI\n" +
-			"3. `browser_action click <coords>` - REQUIRED: Test interactions\n" +
-			"4. `browser_action type <text>` - Test input fields if applicable\n" +
+			"1. `browser_action launch <url>` - Open the app\n" +
+			"2. `browser_action dom_extract` - Get actual DOM structure\n" +
+			"3. **COMPARE:** DOM vs design-specs.md / Figma structure\n" +
+			"4. `browser_action click <coords>` - Test interactions\n" +
 			"5. `browser_action dom_extract` - Verify state changes\n\n" +
-			"**🔴 ERROR DETECTION (CRITICAL!):**\n" +
-			"- The browser returns `logs` with console errors - CHECK THEM!\n" +
-			"- DOM may contain visible error messages - LOOK FOR:\n" +
-			"  - Webpack/Vite compilation errors (red overlay)\n" +
-			"  - React error boundaries (red text)\n" +
-			"  - 'Module not found', 'Failed to compile', 'Error: '\n" +
-			"- If you see ANY errors in logs or DOM, report them as FAILED\n\n" +
+			"**🔴 DESIGN COMPARISON CHECKLIST:**\n" +
+			"| Check | Expected (from specs) | Actual (from DOM) | Match? |\n" +
+			"|-------|----------------------|-------------------|--------|\n" +
+			"| Button count | 20 (4x5 grid) | ??? | ✓/✗ |\n" +
+			"| Layout | Grid | ??? | ✓/✗ |\n" +
+			"| Colors | #FF6B00, #1E1E1E | ??? | ✓/✗ |\n\n" +
+			"**🔴 AUTOMATIC FAILURES:**\n" +
+			"- Layout doesn't match design specs → FAIL\n" +
+			"- Single column when grid expected → FAIL\n" +
+			"- Missing buttons/elements → FAIL\n" +
+			"- Wrong colors (if verifiable) → FAIL\n" +
+			"- Console errors (CORS, Failed, Error) → FAIL\n\n" +
+			"**🔴 ERROR DETECTION:**\n" +
+			"- Check `logs` for console errors\n" +
+			"- Check DOM for error overlays (red text, 'Error:', 'Failed')\n\n" +
 			"**⛔ YOU CANNOT PASS WITHOUT:**\n" +
-			"- Actually launching the browser\n" +
-			"- Actually extracting DOM to verify elements\n" +
-			"- Checking for console errors in `logs`\n" +
-			"- Actually clicking/typing to test functionality\n\n" +
-			"**DO NOT ask to switch models!** DOM extraction works without vision.\n\n" +
-			"**If server fails:**\n" +
-			"- Try: `npx http-server -p 8080` or `python3 -m http.server 8080`\n" +
-			"- Or use file:// URL for static HTML\n\n" +
+			"- Reading design-specs.md (if exists)\n" +
+			"- Comparing DOM structure to specs\n" +
+			"- Verifying button count and layout\n" +
+			"- Checking console errors\n" +
+			"- Testing functionality\n\n" +
 			"**After Testing:** Use `handoff_context` with:\n" +
 			"```xml\n" +
 			"<handoff_context>\n" +
-			"<notes>QA testing complete. [X] tests passed, [Y] failed. Console errors: [list if any]</notes>\n" +
-			'<context_json>{"testsPassed": true/false, "testsRun": ["list of tests"], "consoleErrors": [], "issues": []}</context_json>\n' +
+			"<notes>QA: Compared DOM vs design-specs.md. Expected: [X] buttons in grid. Actual: [Y]. Match: [YES/NO]</notes>\n" +
+			'<context_json>{"testsPassed": true/false, "designMatch": true/false, "expected": {...}, "actual": {...}, "issues": []}</context_json>\n' +
 			"</handoff_context>\n" +
 			"```\n\n" +
-			"**Decision:** PASS → Sentinel Security | FAIL (any issue/error) → Builder",
+			"**Decision:** PASS (design match + no errors) → Security | FAIL → Builder",
 	},
 	{
 		slug: "sentinel-security",

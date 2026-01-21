@@ -65,7 +65,23 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			// Reset mistake count on successful validation
 			task.consecutiveMistakeCount = 0
 
-			// Get user approval
+			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
+
+			// For internal Figma server, skip MCP-style approval (treat as built-in tool)
+			if (serverName === "figma") {
+				// Execute directly without MCP approval dialog
+				await this.executeToolAndProcessResult(
+					task,
+					serverName,
+					toolName,
+					parsedArguments,
+					executionId,
+					pushToolResult,
+				)
+				return
+			}
+
+			// Get user approval for external MCP servers
 			const completeMessage = JSON.stringify({
 				type: "use_mcp_tool",
 				serverName,
@@ -73,7 +89,6 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				arguments: params.arguments ? JSON.stringify(params.arguments) : undefined,
 			} satisfies ClineAskUseMcpServer)
 
-			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
 			const didApprove = await askApproval("use_mcp_server", completeMessage)
 
 			if (!didApprove) {
@@ -96,9 +111,16 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 
 	override async handlePartial(task: Task, block: ToolUse<"use_mcp_tool">): Promise<void> {
 		const params = block.params
+		const serverName = this.removeClosingTag("server_name", params.server_name, block.partial)
+		
+		// Skip MCP-style partial message for internal Figma server
+		if (serverName === "figma") {
+			return
+		}
+		
 		const partialMessage = JSON.stringify({
 			type: "use_mcp_tool",
-			serverName: this.removeClosingTag("server_name", params.server_name, block.partial),
+			serverName,
 			toolName: this.removeClosingTag("tool_name", params.tool_name, block.partial),
 			arguments: this.removeClosingTag("arguments", params.arguments, block.partial),
 		} satisfies ClineAskUseMcpServer)
