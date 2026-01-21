@@ -286,7 +286,20 @@ export async function browserActionTool(
 						messageText += `\nCursor position: ${browserActionResult.currentMousePosition}`
 					}
 
-					messageText += `\n\nConsole logs:\n${browserActionResult?.logs || "(No new logs)"}\n`
+					// Console logs section - prominently displayed for AI debugging
+					const logs = browserActionResult?.logs || ""
+					const hasErrors = logs.includes("[error]") || logs.includes("[Page Error]") || 
+						logs.includes("Error") || logs.includes("CORS") || logs.includes("Failed")
+					
+					if (hasErrors) {
+						messageText += `\n\n🚨 **CONSOLE ERRORS DETECTED - ACTION REQUIRED:**\n`
+						messageText += `\`\`\`\n${logs}\n\`\`\`\n`
+						messageText += `⚠️ **You MUST fix these errors before proceeding!**\n`
+					} else if (logs.trim()) {
+						messageText += `\n\n📋 **Console Logs:**\n\`\`\`\n${logs}\n\`\`\`\n`
+					} else {
+						messageText += `\n\n📋 Console logs: (No new logs)\n`
+					}
 
 					// Include DOM structure for UI verification (auto-extracted on launch)
 					if (browserActionResult?.domStructure) {
