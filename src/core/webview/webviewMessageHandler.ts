@@ -657,6 +657,62 @@ export const webviewMessageHandler = async (
 				provider.getCurrentTask()?.handleTerminalOperation(message.terminalOperation)
 			}
 			break
+
+		// Figma Integration handlers
+		case "setFigmaApiToken":
+			if (message.text) {
+				try {
+					await provider.context.secrets.store("roo.figmaApiToken", message.text)
+					console.log("[Figma] API token saved successfully")
+				} catch (error) {
+					console.error("[Figma] Failed to save API token:", error)
+				}
+			}
+			break
+
+		case "testFigmaConnection":
+			try {
+				const token = await provider.context.secrets.get("roo.figmaApiToken")
+				if (!token) {
+					await provider.postMessageToWebview({
+						type: "figmaConnectionResult",
+						success: false,
+						message: "No API token saved. Please save your token first.",
+					})
+					break
+				}
+
+				// Test the Figma API connection
+				const testResponse = await fetch("https://api.figma.com/v1/me", {
+					headers: {
+						"X-Figma-Token": token,
+					},
+				})
+
+				if (testResponse.ok) {
+					const userData = await testResponse.json()
+					await provider.postMessageToWebview({
+						type: "figmaConnectionResult",
+						success: true,
+						message: `Connected successfully! Logged in as: ${userData.handle || userData.email}`,
+					})
+				} else {
+					await provider.postMessageToWebview({
+						type: "figmaConnectionResult",
+						success: false,
+						message: `Connection failed: ${testResponse.status} ${testResponse.statusText}`,
+					})
+				}
+			} catch (error) {
+				console.error("[Figma] Connection test failed:", error)
+				await provider.postMessageToWebview({
+					type: "figmaConnectionResult",
+					success: false,
+					message: `Connection failed: ${error instanceof Error ? error.message : String(error)}`,
+				})
+			}
+			break
+
 		case "clearTask":
 			// Clear task resets the current session. Delegation flows are
 			// handled via metadata; parent resumption occurs through

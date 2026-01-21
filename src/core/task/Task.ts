@@ -137,6 +137,7 @@ import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
+import options from "partial-json/options"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -481,6 +482,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		initialTodos,
 		workspacePath,
 		initialStatus,
+		mode,
 	}: TaskOptions) {
 		super()
 
@@ -585,7 +587,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} else {
 			// For new tasks, don't set the mode/apiConfigName yet - wait for async initialization.
 			// However, if mode is provided in options, use it immediately to resolve protocol.
-			this._taskMode = options.mode
+			this._taskMode = mode
 			this._taskApiConfigName = undefined
 			this.taskModeReady = this.initializeTaskMode(provider)
 			this.taskApiConfigReady = this.initializeTaskApiConfigName(provider)

@@ -189,11 +189,27 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 			previousAgentNotes: notes,
 		}
 
+		// Extract figmaUrl if present in context (for Designer routing)
+		if (parsedContext.figmaUrl && typeof parsedContext.figmaUrl === "string") {
+			base.figmaUrl = parsedContext.figmaUrl
+		}
+
+		// Extract designSpecs if present
+		if (parsedContext.designSpecs && typeof parsedContext.designSpecs === "string") {
+			base.designSpecs = parsedContext.designSpecs
+		}
+
 		switch (currentState) {
 			case AgentState.ARCHITECT:
 				return {
 					...base,
 					architectPlan: parsedContext as unknown as ArchitectPlan,
+				}
+
+			case AgentState.DESIGNER:
+				return {
+					...base,
+					designSpecs: parsedContext.designSpecs as string || JSON.stringify(parsedContext),
 				}
 
 			case AgentState.BUILDER:
@@ -254,8 +270,33 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 		switch (toState) {
 			case AgentState.ARCHITECT:
 				return `[AUTO-CONTINUE] You are the Architect. Review the feedback and create/update the implementation plan.`
+			case AgentState.DESIGNER:
+				if (context.figmaUrl) {
+					return `[AUTO-CONTINUE] You are the Designer.\n\n` +
+						`**YOUR MISSION:** Analyze the Figma design and create design-specs.md\n\n` +
+						`**STEP 0:** Launch browser to show the Figma design to the user:\n` +
+						`\`\`\`xml\n<browser_action>\n<action>launch</action>\n<url>${context.figmaUrl}</url>\n</browser_action>\n\`\`\`\n\n` +
+						`**STEP 1:** Use the BUILT-IN figma server (NO installation needed):\n` +
+						'```xml\n<use_mcp_tool>\n<server_name>figma</server_name>\n<tool_name>get_simplified_structure</tool_name>\n<arguments>{"file_key": "EXTRACT_FROM_URL"}</arguments>\n</use_mcp_tool>\n```\n\n' +
+						`Extract file_key from URL: ${context.figmaUrl}\n\n` +
+						`**STEP 2:** Create design-specs.md with colors, fonts, spacing\n\n` +
+						`**STEP 3:** ONLY THEN use handoff_context to pass to Builder\n\n` +
+						`⚠️ DO NOT handoff until design-specs.md is created!`
+				} else {
+					return `[AUTO-CONTINUE] You are the Designer.\n\n` +
+						`**YOUR MISSION:** Create design-specs.md for the UI\n\n` + 
+						`**OPTION A:** Use generate_image (if available) to create mockup\n\n` +
+						`**OPTION B (FALLBACK):** Create text-only design-specs.md with:\n` +
+						`- ASCII layout diagram\n` +
+						`- Color palette (hex codes): e.g. primary: #FF6B00, bg: #1E1E1E\n` +
+						`- Typography: font-family, sizes, weights\n` +
+						`- Spacing: padding, margins, gaps\n` +
+						`- Component hierarchy and states\n\n` +
+						`**STEP FINAL:** Use handoff_context ONLY AFTER design-specs.md exists\n\n` +
+						`⚠️ DO NOT handoff until design-specs.md is created!`
+				}
 			case AgentState.BUILDER:
-				return `[AUTO-CONTINUE] You are the Builder. Implement according to the Architect's plan: ${JSON.stringify(context).slice(0, 500)}`
+				return `[AUTO-CONTINUE] You are the Builder. Implement according to the plan and design specs: ${JSON.stringify(context).slice(0, 500)}`
 			case AgentState.QA_ENGINEER:
 				return `[AUTO-CONTINUE] You are QA. Test the implementation using browser_action and dom_extract.`
 			case AgentState.ARCHITECT_REVIEW_CODE:

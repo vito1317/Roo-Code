@@ -27,6 +27,8 @@ export enum AgentState {
 	IDLE = "idle",
 	// Initial planning phase
 	ARCHITECT = "sentinel-architect",
+	// UI/UX Design phase (optional, when Figma is enabled)
+	DESIGNER = "sentinel-designer",
 	// Implementation phase
 	BUILDER = "sentinel-builder",
 	// Architect reviews Builder's code
@@ -127,12 +129,26 @@ export class SentinelStateMachine {
 			label: "User initiates development",
 		},
 
-		// Architect completes planning → Builder implements
+		// Architect completes planning → Designer (if Figma URL present) or Builder
+		{
+			from: AgentState.ARCHITECT,
+			to: AgentState.DESIGNER,
+			condition: (ctx) => !!ctx?.architectPlan && !!ctx?.figmaUrl,
+			label: "Plan completed with Figma design, handoff to Designer",
+		},
 		{
 			from: AgentState.ARCHITECT,
 			to: AgentState.BUILDER,
-			condition: (ctx) => !!ctx?.architectPlan,
+			condition: (ctx) => !!ctx?.architectPlan && !ctx?.figmaUrl,
 			label: "Plan completed, handoff to Builder",
+		},
+
+		// Designer completes → Builder implements
+		{
+			from: AgentState.DESIGNER,
+			to: AgentState.BUILDER,
+			condition: (ctx) => !!ctx?.designSpecs,
+			label: "Design specs completed, handoff to Builder",
 		},
 
 		// ===== PHASE 2: IMPLEMENTATION & CODE REVIEW =====
@@ -229,11 +245,12 @@ export class SentinelStateMachine {
 	 */
 	getCurrentAgent(): string {
 		// Map AgentState to actual mode slugs
-		const stateToModeSlug: Record<AgentState, string> = {
+			const stateToModeSlug: Record<AgentState, string> = {
 			[AgentState.IDLE]: "code",
 			[AgentState.COMPLETED]: "code",
-			[AgentState.BLOCKED]: "code",
+			[AgentState.BLOCKED]: "sentinel-builder", // Stay in workflow, let Builder try to fix
 			[AgentState.ARCHITECT]: "sentinel-architect",
+			[AgentState.DESIGNER]: "sentinel-designer",
 			[AgentState.BUILDER]: "sentinel-builder",
 			[AgentState.ARCHITECT_REVIEW_CODE]: "sentinel-architect-review",
 			[AgentState.QA_ENGINEER]: "sentinel-qa",
@@ -313,8 +330,10 @@ export class SentinelStateMachine {
 
 		// Check for loop prevention
 		if (nextState === AgentState.BUILDER) {
-			if (fromState === AgentState.QA_ENGINEER) {
+			// Count as QA failure if returning from QA or Architect Test Review
+			if (fromState === AgentState.QA_ENGINEER || fromState === AgentState.ARCHITECT_REVIEW_TESTS) {
 				this.qaRejectionCount++
+				console.log(`[SentinelFSM] QA rejection count: ${this.qaRejectionCount}/${this.config.maxQARetries}`)
 				if (this.qaRejectionCount >= this.config.maxQARetries) {
 					return this.triggerHumanIntervention(
 						`QA tests failed ${this.qaRejectionCount} times. Human intervention required.`,
@@ -322,6 +341,7 @@ export class SentinelStateMachine {
 				}
 			} else if (fromState === AgentState.SENTINEL) {
 				this.securityRejectionCount++
+				console.log(`[SentinelFSM] Security rejection count: ${this.securityRejectionCount}/${this.config.maxSecurityRetries}`)
 				if (this.securityRejectionCount >= this.config.maxSecurityRetries) {
 					return this.triggerHumanIntervention(
 						`Security audit failed ${this.securityRejectionCount} times. Human intervention required.`,
@@ -346,8 +366,24 @@ export class SentinelStateMachine {
 	 */
 	private determineNextState(handoffData: Partial<HandoffContext>): AgentState {
 		switch (this.currentState) {
-			// Phase 1: Initial planning → Builder
-			case AgentState.ARCHITECT:
+			// Phase 1: Initial planning → Designer (if Figma or UI needed) or Builder
+			case AgentState.ARCHITECT: {
+				// Check if there's a Figma URL to route to Designer first
+				if (handoffData.figmaUrl) {
+					console.log("[SentinelFSM] Figma URL detected - routing to Designer:", handoffData.figmaUrl)
+					return AgentState.DESIGNER
+				}
+				// Check if Designer should create UI mockup (when needsDesign or hasUI flag is set)
+				const plan = handoffData.architectPlan as Record<string, unknown> | undefined
+				if (plan?.needsDesign === true || plan?.hasUI === true) {
+					console.log("[SentinelFSM] UI design requested - routing to Designer for mockup generation")
+					return AgentState.DESIGNER
+				}
+				return AgentState.BUILDER
+			}
+
+			// Phase 1b: Designer → Builder
+			case AgentState.DESIGNER:
 				return AgentState.BUILDER
 
 			// Phase 2: Builder → Architect reviews code
@@ -361,16 +397,50 @@ export class SentinelStateMachine {
 				}
 				return AgentState.QA_ENGINEER
 
-			// Phase 3: QA → Architect reviews tests
-			case AgentState.QA_ENGINEER:
+			// Phase 3: QA → Builder (if tests failed) or Architect reviews tests (if passed)
+			case AgentState.QA_ENGINEER: {
+				// Check if QA tests failed - need to go back to Builder to fix issues
+				// Method 1: Explicit testsPassed flag
+				if (handoffData.qaAuditContext?.testsPassed === false) {
+					console.log("[SentinelFSM] QA tests FAILED (explicit flag) - returning to Builder for fixes")
+					return AgentState.BUILDER
+				}
+				// Method 2: Check for failure indicators in the notes if no explicit flag
+				const notes = handoffData.previousAgentNotes?.toLowerCase() || ""
+				const failureIndicators = [
+					"critical issue", "failed", "error", "not working", "broken",
+					"❌", "x critical", "tests failed", "test failed", "failure"
+				]
+				const hasFailure = failureIndicators.some(indicator => notes.includes(indicator))
+				if (hasFailure && !notes.includes("all tests pass") && !notes.includes("tests passed")) {
+					console.log("[SentinelFSM] QA tests FAILED (detected from notes) - returning to Builder for fixes")
+					return AgentState.BUILDER
+				}
 				return AgentState.ARCHITECT_REVIEW_TESTS
+			}
 
-			// Phase 3b: Architect reviews tests → Sentinel (auto-approve unless rejected)
-			case AgentState.ARCHITECT_REVIEW_TESTS:
+			// Phase 3b: Architect reviews tests → Sentinel (auto-approve unless rejected OR tests failed)
+			case AgentState.ARCHITECT_REVIEW_TESTS: {
+				// Method 1: Explicit rejection from architect
 				if (handoffData.architectReviewTests?.approved === false) {
+					console.log("[SentinelFSM] Architect rejected tests - returning to Architect for re-planning")
 					return AgentState.ARCHITECT // Re-plan before Builder
 				}
+				// Method 2: Check if QA tests actually failed (from context)
+				if (this.currentContext?.qaAuditContext?.testsPassed === false) {
+					console.log("[SentinelFSM] QA tests were marked as FAILED in context - returning to Builder")
+					return AgentState.BUILDER
+				}
+				// Method 3: Check for failure keywords in current handoff notes
+				const reviewNotes = handoffData.previousAgentNotes?.toLowerCase() || ""
+				const testFailIndicators = ["tests: failed", "test failed", "tests failed", "critical issue", "❌"]
+				const hasTestFailure = testFailIndicators.some(indicator => reviewNotes.includes(indicator))
+				if (hasTestFailure) {
+					console.log("[SentinelFSM] Test failure detected in review notes - returning to Builder")
+					return AgentState.BUILDER
+				}
 				return AgentState.SENTINEL
+			}
 
 			// Phase 4: Sentinel security audit → Architect final review (or back to Builder if failed)
 			case AgentState.SENTINEL:
@@ -427,8 +497,9 @@ export class SentinelStateMachine {
 		// Perform transition
 		this.currentState = targetState
 
-		// Update context
+		// Update context - track the actual fromState for each transition
 		if (this.currentContext) {
+			this.currentContext.fromAgent = fromState  // Update fromAgent to reflect current transition
 			this.currentContext.toAgent = targetState
 			this.currentContext.status = "in_progress"
 		} else {
@@ -464,17 +535,31 @@ export class SentinelStateMachine {
 	 */
 	private async switchToAgentMode(agentState: AgentState): Promise<void> {
 		const provider = this.providerRef.deref()
-		if (!provider) return
+		if (!provider) {
+			console.error("[SentinelFSM] switchToAgentMode: No provider available")
+			return
+		}
 
+		let targetModeSlug: string
 		if (agentState === AgentState.COMPLETED || agentState === AgentState.IDLE) {
 			// Return to default mode
-			await provider.handleModeSwitch("code")
+			targetModeSlug = "code"
 		} else if (agentState === AgentState.BLOCKED) {
 			// Stay in current mode
+			console.log("[SentinelFSM] switchToAgentMode: BLOCKED state - staying in current mode")
+			return
 		} else {
 			// Switch to agent mode using the correct mode slug
-			const modeSlug = this.getCurrentAgent()
-			await provider.handleModeSwitch(modeSlug)
+			targetModeSlug = this.getCurrentAgent()
+		}
+
+		console.log(`[SentinelFSM] switchToAgentMode: Switching to mode "${targetModeSlug}" for state ${agentState}`)
+		
+		try {
+			await provider.handleModeSwitch(targetModeSlug)
+			console.log(`[SentinelFSM] switchToAgentMode: Successfully switched to "${targetModeSlug}"`)
+		} catch (error) {
+			console.error(`[SentinelFSM] switchToAgentMode: Failed to switch to "${targetModeSlug}":`, error)
 		}
 	}
 
@@ -529,13 +614,19 @@ export class SentinelStateMachine {
 	/**
 	 * Generate walkthrough document on workflow completion
 	 */
-	private async generateWalkthrough(): Promise<void> {
+	private async generateWalkthrough(): Promise<boolean> {
 		const provider = this.providerRef.deref()
-		if (!provider || !this.currentContext) return
+		if (!provider || !this.currentContext) {
+			console.error("[SentinelFSM] generateWalkthrough: No provider or context")
+			return false
+		}
 
 		const context = this.currentContext
 		const task = provider.getCurrentTask()
-		if (!task) return
+		if (!task) {
+			console.error("[SentinelFSM] generateWalkthrough: No current task")
+			return false
+		}
 		
 		let walkthrough = "# 📋 Workflow Walkthrough\n\n"
 		walkthrough += `**Status:** ✅ Completed\n`
@@ -568,8 +659,8 @@ export class SentinelStateMachine {
 		if (context.architectPlan) {
 			walkthrough += "## 🏗️ Architect Plan\n\n"
 			const plan = context.architectPlan
-			walkthrough += `**Project:** ${plan.projectName}\n`
-			walkthrough += `**Summary:** ${plan.summary}\n\n`
+			walkthrough += `**Project:** ${plan.projectName || "N/A"}\n`
+			walkthrough += `**Summary:** ${plan.summary || "N/A"}\n\n`
 			if (plan.tasks && plan.tasks.length > 0) {
 				walkthrough += "**Tasks:**\n"
 				plan.tasks.forEach((t) => {
@@ -583,8 +674,8 @@ export class SentinelStateMachine {
 		if (context.builderTestContext) {
 			walkthrough += "## 🔨 Builder Implementation\n\n"
 			const builder = context.builderTestContext
-			walkthrough += `**Test URL:** ${builder.targetUrl}\n`
-			walkthrough += `**Run Command:** ${builder.runCommand}\n\n`
+			walkthrough += `**Test URL:** ${builder.targetUrl || "N/A"}\n`
+			walkthrough += `**Run Command:** ${builder.runCommand || "N/A"}\n\n`
 			if (builder.changedFiles && builder.changedFiles.length > 0) {
 				walkthrough += "**Changed Files:**\n"
 				builder.changedFiles.forEach((f) => {
@@ -632,9 +723,10 @@ export class SentinelStateMachine {
 		const cwd = task.cwd
 		const walkthroughPath = `${cwd}/walkthrough.md`
 		
+		console.log(`[SentinelFSM] Attempting to write walkthrough to: ${walkthroughPath}`)
+		
 		try {
 			const fs = await import("fs/promises")
-			const path = await import("path")
 			
 			// Collect screenshots from workspace
 			let screenshotSection = ""
@@ -653,6 +745,7 @@ export class SentinelStateMachine {
 				}
 			} catch (e) {
 				// Ignore errors reading screenshots
+				console.warn("[SentinelFSM] Could not read screenshots:", e)
 			}
 			
 			// Insert screenshots before the divider
@@ -662,10 +755,14 @@ export class SentinelStateMachine {
 			)
 			
 			await fs.writeFile(walkthroughPath, finalWalkthrough, "utf-8")
-			await task.say("text", `📋 **Walkthrough saved to:** \`walkthrough.md\`\n\n${finalWalkthrough}`)
+			console.log(`[SentinelFSM] Successfully wrote walkthrough to: ${walkthroughPath}`)
+			await task.say("text", `📋 **Walkthrough saved to:** \`${walkthroughPath}\``)
+			return true
 		} catch (error) {
-			// Fallback to just displaying in chat
-			await task.say("text", walkthrough)
+			// Log the error and notify user
+			console.error(`[SentinelFSM] Failed to write walkthrough to ${walkthroughPath}:`, error)
+			await task.say("text", `⚠️ **Could not save walkthrough file**\n\nError: ${(error as Error).message}\n\nPath attempted: \`${walkthroughPath}\`\n\n---\n\n${walkthrough}`)
+			return false
 		}
 	}
 
@@ -715,10 +812,11 @@ export class SentinelStateMachine {
 	/**
 	 * Get human-readable agent name
 	 */
-	private getAgentDisplayName(state: AgentState): string {
+	public getAgentDisplayName(state: AgentState): string {
 		const names: Record<AgentState, string> = {
 			[AgentState.IDLE]: "Idle",
 			[AgentState.ARCHITECT]: "🟦 Architect",
+			[AgentState.DESIGNER]: "🎨 Designer",
 			[AgentState.BUILDER]: "🟩 Builder",
 			[AgentState.ARCHITECT_REVIEW_CODE]: "🔍 Architect (Code Review)",
 			[AgentState.QA_ENGINEER]: "🟨 QA Engineer",
@@ -743,6 +841,7 @@ export class SentinelStateMachine {
 		> = {
 			[AgentState.IDLE]: "IDLE",
 			[AgentState.ARCHITECT]: "ARCHITECT",
+			[AgentState.DESIGNER]: "ARCHITECT",
 			[AgentState.BUILDER]: "BUILDER",
 			[AgentState.ARCHITECT_REVIEW_CODE]: "ARCHITECT_REVIEW",
 			[AgentState.QA_ENGINEER]: "QA",
@@ -770,6 +869,7 @@ export class SentinelStateMachine {
 			const activities: Record<AgentState, string> = {
 				[AgentState.IDLE]: "",
 				[AgentState.ARCHITECT]: "Creating implementation plan with Mermaid diagrams...",
+				[AgentState.DESIGNER]: "Analyzing Figma designs and creating UI specifications...",
 				[AgentState.BUILDER]: "Writing code and implementing features...",
 				[AgentState.ARCHITECT_REVIEW_CODE]: "Reviewing code quality and UI layout...",
 				[AgentState.QA_ENGINEER]: "Running browser tests and taking screenshots...",
@@ -784,9 +884,12 @@ export class SentinelStateMachine {
 			let lastHandoff = undefined
 			if (this.currentContext) {
 				const ctx = this.currentContext
+				// Use display names instead of raw state values for better UI
+				const fromDisplayName = this.getAgentDisplayName(ctx.fromAgent as AgentState) || ctx.fromAgent
+				const toDisplayName = this.getAgentDisplayName(ctx.toAgent as AgentState) || ctx.toAgent
 				lastHandoff = {
-					from: ctx.fromAgent,
-					to: ctx.toAgent,
+					from: fromDisplayName,
+					to: toDisplayName,
 					summary: this.getHandoffSummaryForUI(),
 					timestamp: Date.now(),
 				}
@@ -816,7 +919,7 @@ export class SentinelStateMachine {
 		const ctx = this.currentContext
 		const parts: string[] = []
 		
-		if (ctx.architectPlan) {
+		if (ctx.architectPlan?.projectName) {
 			parts.push(`📐 Plan: ${ctx.architectPlan.projectName}`)
 		}
 		if (ctx.builderTestContext) {

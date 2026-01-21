@@ -4,8 +4,17 @@ import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { t } from "../../i18n"
 import type { ToolUse } from "../../shared/tools"
+import { getFigmaService, extractFileKey, extractNodeIds, formatForLLM } from "../../services/figma"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+
+// Internal Figma server tool definitions
+const FIGMA_TOOLS = [
+	{ name: "get_file", description: "Get complete Figma file structure" },
+	{ name: "get_nodes", description: "Get specific nodes from a Figma file" },
+	{ name: "get_images", description: "Export nodes as images" },
+	{ name: "get_simplified_structure", description: "Get simplified structure for AI consumption" },
+]
 
 interface UseMcpToolParams {
 	server_name: string
@@ -163,13 +172,21 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			const mcpHub = provider?.getMcpHub()
 
 			if (!mcpHub) {
-				// If we can't get the MCP hub, we can't validate, so proceed with caution
+				// If we can't get the MCP hub, check if this is the internal figma server
+				if (serverName === "figma") {
+					return this.validateFigmaToolExists(toolName, pushToolResult, task)
+				}
 				return { isValid: true }
 			}
 
 			// Get all servers to find the specific one
 			const servers = mcpHub.getAllServers()
 			const server = servers.find((s) => s.name === serverName)
+
+			// Check for internal figma server first
+			if (!server && serverName === "figma") {
+				return this.validateFigmaToolExists(toolName, pushToolResult, task)
+			}
 
 			if (!server) {
 				// Fail fast when server is unknown
@@ -307,7 +324,13 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			toolName,
 		})
 
-		const toolResult = await task.providerRef.deref()?.getMcpHub()?.callTool(serverName, toolName, parsedArguments)
+		// Route to internal Figma server if applicable
+		let toolResult: any
+		if (serverName === "figma") {
+			toolResult = await this.executeFigmaTool(toolName, parsedArguments)
+		} else {
+			toolResult = await task.providerRef.deref()?.getMcpHub()?.callTool(serverName, toolName, parsedArguments)
+		}
 
 		let toolResultPretty = "(No response)"
 
@@ -342,6 +365,131 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 
 		await task.say("mcp_server_response", toolResultPretty)
 		pushToolResult(formatResponse.toolResult(toolResultPretty))
+	}
+
+	/**
+	 * Validate that a Figma tool exists (internal server)
+	 */
+	private async validateFigmaToolExists(
+		toolName: string,
+		pushToolResult: (content: string) => void,
+		task: Task,
+	): Promise<{ isValid: boolean; availableTools?: string[] }> {
+		const tool = FIGMA_TOOLS.find((t) => t.name === toolName)
+		if (!tool) {
+			const availableToolNames = FIGMA_TOOLS.map((t) => t.name)
+			task.consecutiveMistakeCount++
+			task.recordToolError("use_mcp_tool")
+			await task.say(
+				"error",
+				t("mcp:errors.toolNotFound", {
+					toolName,
+					serverName: "figma",
+					availableTools: availableToolNames.join(", "),
+				}),
+			)
+			task.didToolFailInCurrentTurn = true
+			pushToolResult(formatResponse.unknownMcpToolError("figma", toolName, availableToolNames))
+			return { isValid: false, availableTools: availableToolNames }
+		}
+		return { isValid: true, availableTools: FIGMA_TOOLS.map((t) => t.name) }
+	}
+
+	/**
+	 * Execute a Figma tool (internal server)
+	 */
+	private async executeFigmaTool(
+		toolName: string,
+		args: Record<string, unknown> | undefined,
+	): Promise<{ content: Array<{ type: string; text: string }>; isError: boolean }> {
+		const figmaService = await getFigmaService()
+		if (!figmaService) {
+			return {
+				content: [{ type: "text", text: "Error: Figma API token not configured. Please set it in Settings → Figma Integration." }],
+				isError: true,
+			}
+		}
+
+		try {
+			let result: string
+
+			switch (toolName) {
+				case "get_file": {
+					const fileKeyOrUrl = args?.file_key as string || args?.url as string
+					if (!fileKeyOrUrl) {
+						return {
+							content: [{ type: "text", text: "Error: file_key or url is required" }],
+							isError: true,
+						}
+					}
+					const fileKey = extractFileKey(fileKeyOrUrl) || fileKeyOrUrl
+					const depth = (args?.depth as number) || 2
+					const file = await figmaService.getFile(fileKey, { depth })
+					result = `# Figma File: ${file.name}\n\nLast Modified: ${file.lastModified}\nVersion: ${file.version}\n\n## Document Structure:\n${JSON.stringify(file.document, null, 2).substring(0, 10000)}...`
+					break
+				}
+
+				case "get_nodes": {
+					const fileKeyOrUrl = args?.file_key as string || args?.url as string
+					const nodeIds = args?.node_ids as string[] || (args?.url ? extractNodeIds(args.url as string) : [])
+					if (!fileKeyOrUrl) {
+						return {
+							content: [{ type: "text", text: "Error: file_key or url is required" }],
+							isError: true,
+						}
+					}
+					const fileKey = extractFileKey(fileKeyOrUrl) || fileKeyOrUrl
+					const nodes = await figmaService.getNodes(fileKey, nodeIds)
+					result = `# Figma Nodes\n\n${JSON.stringify(nodes, null, 2)}`
+					break
+				}
+
+				case "get_images": {
+					const fileKeyOrUrl = args?.file_key as string || args?.url as string
+					const nodeIds = args?.node_ids as string[] || []
+					const format = (args?.format as "png" | "jpg" | "svg") || "png"
+					const scale = (args?.scale as number) || 2
+					if (!fileKeyOrUrl || nodeIds.length === 0) {
+						return {
+							content: [{ type: "text", text: "Error: file_key and node_ids are required" }],
+							isError: true,
+						}
+					}
+					const fileKey = extractFileKey(fileKeyOrUrl) || fileKeyOrUrl
+					const images = await figmaService.getImages(fileKey, nodeIds, { format, scale })
+					result = `# Figma Image URLs\n\n${Object.entries(images.images).map(([id, url]) => `- ${id}: ${url}`).join("\n")}`
+					break
+				}
+
+				case "get_simplified_structure": {
+					const fileKeyOrUrl = args?.file_key as string || args?.url as string
+					if (!fileKeyOrUrl) {
+						return {
+							content: [{ type: "text", text: "Error: file_key or url is required" }],
+							isError: true,
+						}
+					}
+					const fileKey = extractFileKey(fileKeyOrUrl) || fileKeyOrUrl
+					const maxDepth = (args?.max_depth as number) || 3
+					const structure = await figmaService.getSimplifiedStructure(fileKey, { maxDepth })
+					result = `# ${structure.name}\n\n## Component Hierarchy:\n${formatForLLM(structure.structure)}`
+					break
+				}
+
+				default:
+					return {
+						content: [{ type: "text", text: `Unknown Figma tool: ${toolName}` }],
+						isError: true,
+					}
+			}
+
+			return { content: [{ type: "text", text: result }], isError: false }
+		} catch (error) {
+			return {
+				content: [{ type: "text", text: `Figma API Error: ${error instanceof Error ? error.message : String(error)}` }],
+				isError: true,
+			}
+		}
 	}
 }
 

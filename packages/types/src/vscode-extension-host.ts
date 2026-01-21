@@ -98,6 +98,7 @@ export interface ExtensionMessage {
 		| "taskWithAggregatedCosts"
 		| "openAiCodexRateLimits"
 		| "sentinelAgentState" // Sentinel Edition: Current agent state update
+		| "figmaConnectionResult" // Figma connection test result
 	text?: string
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	checkpointWarning?: {
@@ -177,6 +178,7 @@ export interface ExtensionMessage {
 	rulesFolderPath?: string
 	settings?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	messageTs?: number
+	message?: string // For figmaConnectionResult and similar status messages
 	hasCheckpoint?: boolean
 	context?: string
 	commands?: Command[]
@@ -200,6 +202,13 @@ export interface ExtensionMessage {
 		enabled: boolean
 		currentAgent: "IDLE" | "ARCHITECT" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
 		agentName: string
+		currentActivity?: string
+		lastHandoff?: {
+			from: string
+			to: string
+			summary: string
+			timestamp: number
+		}
 	}
 }
 
@@ -279,6 +288,7 @@ export type ExtensionState = Pick<
 	| "includeCurrentCost"
 	| "maxGitStatusFiles"
 	| "requestDelaySeconds"
+	| "figmaEnabled"
 > & {
 	version: string
 	clineMessages: ClineMessage[]
@@ -469,6 +479,8 @@ export interface WebviewMessage {
 		| "telemetrySetting"
 		| "testBrowserConnection"
 		| "browserConnectionResult"
+		| "setFigmaApiToken"
+		| "testFigmaConnection"
 		| "searchFiles"
 		| "toggleApiConfigPin"
 		| "hasOpenedModeSelector"

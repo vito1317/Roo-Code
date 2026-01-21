@@ -100,10 +100,46 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				// Only intercept if not at terminal/review states
 			// Only intercept if not at terminal/review states
 			// Review states auto-pass and shouldn't be intercepted (they use Architect mode)
-			const isTerminalState =
-				currentState === AgentState.ARCHITECT_REVIEW_FINAL ||
-				currentState === AgentState.COMPLETED
-			if (!isTerminalState) {
+			// BUT ARCHITECT_REVIEW_FINAL should trigger COMPLETED transition for walkthrough
+			const isCompleted = currentState === AgentState.COMPLETED
+			const isFinalReview = currentState === AgentState.ARCHITECT_REVIEW_FINAL
+			
+			if (isFinalReview) {
+				// ARCHITECT_REVIEW_FINAL completing means workflow is done
+				// Trigger transition to COMPLETED which generates the walkthrough
+				await task.say(
+					"text",
+					`🎉 **Final Review Complete!** Transitioning to COMPLETED state and generating walkthrough...`,
+				)
+				
+				// Build handoff data for final review
+				const handoffData: Partial<import("../sentinel/HandoffContext").HandoffContext> = {
+					architectFinalReview: {
+						approved: true,
+						finalFeedback: result,
+						securityAcceptable: true,
+						readyForDeployment: true,
+					},
+					previousAgentNotes: result,
+				}
+				
+				// Trigger FSM transition to COMPLETED (this generates the walkthrough)
+				const transitionResult = await sentinelFSM.handleAgentCompletion(handoffData)
+				
+				if (transitionResult.success) {
+					await task.say(
+						"text",
+						`✅ **Sentinel Workflow Complete!**`,
+					)
+				} else {
+					await task.say(
+						"text",
+						`⚠️ **Workflow transition failed:** ${transitionResult.error}`,
+					)
+				}
+				
+				// Continue with normal completion flow (shows result to user)
+			} else if (!isCompleted) {
 					// Extract handoff context from the result
 					const handoffData = this.extractHandoffContextFromResult(result, currentState)
 
@@ -177,9 +213,9 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 						}
 					}
 
-					return // Don't proceed with normal completion
-				}
+				return // Don't proceed with normal completion
 			}
+		}
 
 			await task.say("completion_result", result, undefined, false)
 

@@ -2104,6 +2104,7 @@ export class ClineProvider
 			openRouterImageGenerationSelectedModel,
 			featureRoomoteControlEnabled,
 			isBrowserSessionActive,
+			figmaEnabled,
 		} = await this.getState()
 
 		let cloudOrganizations: CloudOrganizationMembership[] = []
@@ -2153,6 +2154,7 @@ export class ClineProvider
 			alwaysAllowModeSwitch: alwaysAllowModeSwitch ?? false,
 			alwaysAllowSubtasks: alwaysAllowSubtasks ?? false,
 			isBrowserSessionActive,
+			figmaEnabled: figmaEnabled ?? false,
 			allowedMaxRequests,
 			allowedMaxCost,
 			autoCondenseContext: autoCondenseContext ?? true,
@@ -2545,6 +2547,7 @@ export class ClineProvider
 					return false
 				}
 			})(),
+			figmaEnabled: stateValues.figmaEnabled ?? false,
 		}
 	}
 

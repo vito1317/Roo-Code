@@ -221,6 +221,10 @@ export interface HandoffContext {
 	architectReviewTests?: ArchitectTestReview
 	architectFinalReview?: ArchitectFinalReview
 
+	// Designer context (Figma integration)
+	figmaUrl?: string
+	designSpecs?: string // Path to design-specs.md or inline specs
+
 	// Common fields
 	previousAgentNotes: string
 	failureHistory: FailureRecord[]
@@ -310,9 +314,10 @@ export function getHandoffSummary(context: HandoffContext): string {
 		lines.push("")
 	}
 
-	if (context.failureHistory.length > 0) {
-		lines.push(`### Previous Failures (${context.failureHistory.length})`)
-		for (const failure of context.failureHistory) {
+	const failureHistory = context.failureHistory ?? []
+	if (failureHistory.length > 0) {
+		lines.push(`### Previous Failures (${failureHistory.length})`)
+		for (const failure of failureHistory) {
 			lines.push(`- [${failure.agent}] ${failure.reason}`)
 		}
 		lines.push("")
@@ -320,32 +325,37 @@ export function getHandoffSummary(context: HandoffContext): string {
 
 	if (context.architectPlan) {
 		lines.push(`### Architect Plan`)
-		lines.push(`Project: ${context.architectPlan.projectName}`)
-		lines.push(`Tasks: ${context.architectPlan.tasks.length}`)
-		lines.push(`Tech Stack: ${JSON.stringify(context.architectPlan.techStack)}`)
+		lines.push(`Project: ${context.architectPlan.projectName ?? "Unnamed Project"}`)
+		const tasks = context.architectPlan.tasks ?? []
+		lines.push(`Tasks: ${tasks.length}`)
+		lines.push(`Tech Stack: ${JSON.stringify(context.architectPlan.techStack ?? {})}`)
 		lines.push("")
 	}
 
 	if (context.builderTestContext) {
 		lines.push(`### Builder Test Context`)
-		lines.push(`Target URL: ${context.builderTestContext.targetUrl}`)
-		lines.push(`Changed Files: ${context.builderTestContext.changedFiles.length}`)
-		lines.push(`Test Scenarios: ${context.builderTestContext.testScenarios.length}`)
+		lines.push(`Target URL: ${context.builderTestContext.targetUrl ?? "Not specified"}`)
+		const changedFiles = context.builderTestContext.changedFiles ?? []
+		const testScenarios = context.builderTestContext.testScenarios ?? []
+		lines.push(`Changed Files: ${changedFiles.length}`)
+		lines.push(`Test Scenarios: ${testScenarios.length}`)
 		lines.push("")
 	}
 
 	if (context.qaAuditContext) {
 		lines.push(`### QA Results`)
-		lines.push(`Tests Passed: ${context.qaAuditContext.testsPassed}`)
-		lines.push(`Sensitive Operations: ${context.qaAuditContext.sensitiveOperations.length}`)
+		lines.push(`Tests Passed: ${context.qaAuditContext.testsPassed ?? "Unknown"}`)
+		const sensitiveOps = context.qaAuditContext.sensitiveOperations ?? []
+		lines.push(`Sensitive Operations: ${sensitiveOps.length}`)
 		lines.push("")
 	}
 
 	if (context.sentinelResult) {
 		lines.push(`### Sentinel Audit`)
-		lines.push(`Security Passed: ${context.sentinelResult.securityPassed}`)
-		lines.push(`Vulnerabilities: ${context.sentinelResult.vulnerabilities.length}`)
-		lines.push(`Recommendation: ${context.sentinelResult.recommendation}`)
+		lines.push(`Security Passed: ${context.sentinelResult.securityPassed ?? "Unknown"}`)
+		const vulnerabilities = context.sentinelResult.vulnerabilities ?? []
+		lines.push(`Vulnerabilities: ${vulnerabilities.length}`)
+		lines.push(`Recommendation: ${context.sentinelResult.recommendation ?? "None"}`)
 		lines.push("")
 	}
 

@@ -28,6 +28,7 @@ import {
 	Server,
 	Users2,
 	ArrowLeft,
+	PenTool,
 } from "lucide-react"
 
 import {
@@ -81,6 +82,7 @@ import ModesView from "../modes/ModesView"
 import McpView from "../mcp/McpView"
 import { SettingsSearch } from "./SettingsSearch"
 import { useSearchIndexRegistry, SearchIndexProvider } from "./useSettingsSearch"
+import { FigmaSettings } from "./FigmaSettings"
 
 export const settingsTabsContainer = "flex flex-1 overflow-hidden [&.narrow_.tab-label]:hidden"
 export const settingsTabList =
@@ -98,6 +100,7 @@ export const sectionNames = [
 	"autoApprove",
 	"slashCommands",
 	"browser",
+	"figma",
 	"checkpoints",
 	"notifications",
 	"contextManagement",
@@ -171,6 +174,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		maxOpenTabsContext,
 		maxWorkspaceFiles,
 		mcpEnabled,
+		figmaEnabled,
 		remoteBrowserHost,
 		screenshotQuality,
 		soundEnabled,
@@ -433,6 +437,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					openRouterImageGenerationSelectedModel,
 					experiments,
 					customSupportPrompts,
+					figmaEnabled: figmaEnabled ?? false,
 				},
 			})
 
@@ -526,6 +531,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			{ id: "autoApprove", icon: CheckCheck },
 			{ id: "slashCommands", icon: SquareSlash },
 			{ id: "browser", icon: SquareMousePointer },
+			{ id: "figma", icon: PenTool },
 			{ id: "checkpoints", icon: GitBranch },
 			{ id: "notifications", icon: Bell },
 			{ id: "contextManagement", icon: Database },
@@ -822,6 +828,14 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								screenshotQuality={screenshotQuality}
 								remoteBrowserHost={remoteBrowserHost}
 								remoteBrowserEnabled={remoteBrowserEnabled}
+								setCachedStateField={setCachedStateField}
+							/>
+						)}
+
+						{/* Figma Section */}
+						{renderTab === "figma" && (
+							<FigmaSettings
+								figmaEnabled={cachedState.figmaEnabled}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

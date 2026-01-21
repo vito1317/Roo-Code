@@ -177,6 +177,8 @@ export const globalSettingsSchema = z.object({
 	mcpEnabled: z.boolean().optional(),
 	enableMcpServerCreation: z.boolean().optional(),
 
+	figmaEnabled: z.boolean().optional(),
+
 	mode: z.string().optional(),
 	modeApiConfigs: z.record(z.string(), z.string()).optional(),
 	customModes: z.array(modeConfigSchema).optional(),
@@ -253,6 +255,7 @@ export const SECRET_STATE_KEYS = [
 	"ioIntelligenceApiKey",
 	"vercelAiGatewayApiKey",
 	"basetenApiKey",
+	"figmaApiToken",
 ] as const
 
 // Global secrets that are part of GlobalSettings (not ProviderSettings)
