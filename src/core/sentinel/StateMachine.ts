@@ -472,6 +472,12 @@ export class SentinelStateMachine {
 			// BLOCKED state recovery - allow handoff to continue the workflow
 			case AgentState.BLOCKED: {
 				console.log("[SentinelFSM] BLOCKED state handoff - attempting recovery")
+				
+				// CRITICAL: Reset rejection counters on recovery to prevent immediate re-blocking
+				this.qaRejectionCount = 0
+				this.securityRejectionCount = 0
+				console.log("[SentinelFSM] BLOCKED recovery: Reset rejection counters")
+				
 				// If tests passed in the handoff, go to Architect Code Review for verification
 				const qaResult = handoffData.qaAuditContext
 				if (qaResult?.testsPassed === true) {
