@@ -574,54 +574,44 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 		groups: ["read", "edit", "command", "browser", "mcp"],
 		customInstructions:
 			"You are the THIRD agent in the Sentinel workflow.\n\n" +
-			"**🚨 CRITICAL: COMPARE BUILD RESULT WITH DESIGN!**\n" +
-			"You MUST verify the implementation matches the design specifications!\n\n" +
-			"**STEP 0: READ DESIGN SPECS (BEFORE TESTING)**\n" +
-			"1. Read `design-specs.md` if it exists in the project\n" +
-			"2. Note expected: colors, layout (rows/columns), button count, typography\n" +
-			"3. If `figmaUrl` in context, use the built-in Figma server:\n" +
-			"   ```xml\n" +
-			"   <use_mcp_tool>\n" +
-			"   <server_name>figma</server_name>\n" +
-			"   <tool_name>get_simplified_structure</tool_name>\n" +
-			"   <arguments>{\"file_key\": \"FROM_URL\"}</arguments>\n" +
-			"   </use_mcp_tool>\n" +
-			"   ```\n\n" +
-			"**MANDATORY Testing Process:**\n" +
-			"1. `browser_action launch <url>` - Open the app\n" +
-			"2. `browser_action dom_extract` - Get actual DOM structure\n" +
-			"3. **COMPARE:** DOM vs design-specs.md / Figma structure\n" +
-			"4. `browser_action click <coords>` - Test interactions\n" +
-			"5. `browser_action dom_extract` - Verify state changes\n\n" +
-			"**🔴 DESIGN COMPARISON CHECKLIST:**\n" +
-			"| Check | Expected (from specs) | Actual (from DOM) | Match? |\n" +
-			"|-------|----------------------|-------------------|--------|\n" +
-			"| Button count | 20 (4x5 grid) | ??? | ✓/✗ |\n" +
-			"| Layout | Grid | ??? | ✓/✗ |\n" +
-			"| Colors | #FF6B00, #1E1E1E | ??? | ✓/✗ |\n\n" +
-			"**🔴 AUTOMATIC FAILURES:**\n" +
-			"- Layout doesn't match design specs → FAIL\n" +
-			"- Single column when grid expected → FAIL\n" +
-			"- Missing buttons/elements → FAIL\n" +
-			"- Wrong colors (if verifiable) → FAIL\n" +
-			"- Console errors (CORS, Failed, Error) → FAIL\n\n" +
-			"**🔴 ERROR DETECTION:**\n" +
-			"- Check `logs` for console errors\n" +
-			"- Check DOM for error overlays (red text, 'Error:', 'Failed')\n\n" +
-			"**⛔ YOU CANNOT PASS WITHOUT:**\n" +
-			"- Reading design-specs.md (if exists)\n" +
-			"- Comparing DOM structure to specs\n" +
-			"- Verifying button count and layout\n" +
-			"- Checking console errors\n" +
-			"- Testing functionality\n\n" +
-			"**After Testing:** Use `handoff_context` with:\n" +
+			"**🚨 IMPORTANT: browser_action is a BUILT-IN tool, NOT an MCP server!**\n" +
+			"Use XML format directly - do NOT use use_mcp_tool for browser!\n\n" +
+			"**STEP 1: Launch the app in browser**\n" +
+			"```xml\n" +
+			"<browser_action>\n" +
+			"<action>launch</action>\n" +
+			"<url>http://localhost:3000</url>\n" +
+			"</browser_action>\n" +
+			"```\n\n" +
+			"**STEP 2: Extract DOM to see actual structure**\n" +
+			"```xml\n" +
+			"<browser_action>\n" +
+			"<action>dom_extract</action>\n" +
+			"</browser_action>\n" +
+			"```\n\n" +
+			"**STEP 3: Test interactions (click buttons)**\n" +
+			"```xml\n" +
+			"<browser_action>\n" +
+			"<action>click</action>\n" +
+			"<coordinate>160,400</coordinate>\n" +
+			"</browser_action>\n" +
+			"```\n\n" +
+			"**STEP 4: Read design-specs.md and compare with DOM**\n" +
+			"| Check | Expected | Actual | Match? |\n" +
+			"|-------|----------|--------|--------|\n" +
+			"| Button count | 20 | ? | ✓/✗ |\n" +
+			"| Layout | Grid | ? | ✓/✗ |\n\n" +
+			"**FAILURES:**\n" +
+			"- Layout doesn't match specs → FAIL\n" +
+			"- Missing elements → FAIL\n" +
+			"- Console errors → FAIL\n\n" +
+			"**After Testing:** Use handoff_context with:\n" +
 			"```xml\n" +
 			"<handoff_context>\n" +
-			"<notes>QA: Compared DOM vs design-specs.md. Expected: [X] buttons in grid. Actual: [Y]. Match: [YES/NO]</notes>\n" +
-			'<context_json>{"testsPassed": true/false, "designMatch": true/false, "expected": {...}, "actual": {...}, "issues": []}</context_json>\n' +
+			"<notes>QA: DOM matches design? [YES/NO]. Issues: [list]</notes>\n" +
+			"<context_json>{\"testsPassed\": true, \"designMatch\": true}</context_json>\n" +
 			"</handoff_context>\n" +
-			"```\n\n" +
-			"**Decision:** PASS (design match + no errors) → Security | FAIL → Builder",
+			"```",
 	},
 	{
 		slug: "sentinel-security",

@@ -469,6 +469,25 @@ export class SentinelStateMachine {
 				return AgentState.SENTINEL
 			}
 
+			// BLOCKED state recovery - allow handoff to continue the workflow
+			case AgentState.BLOCKED: {
+				console.log("[SentinelFSM] BLOCKED state handoff - attempting recovery")
+				// If tests passed in the handoff, go to Architect Code Review for verification
+				const qaResult = handoffData.qaAuditContext
+				if (qaResult?.testsPassed === true) {
+					console.log("[SentinelFSM] BLOCKED recovery: QA tests passed, proceeding to Architect Code Review")
+					return AgentState.ARCHITECT_REVIEW_CODE
+				}
+				// If tests failed, go back to Builder
+				if (qaResult?.testsPassed === false) {
+					console.log("[SentinelFSM] BLOCKED recovery: QA tests failed, returning to Builder")
+					return AgentState.BUILDER
+				}
+				// Default: go to Architect Review to verify what happened
+				console.log("[SentinelFSM] BLOCKED recovery: No clear indication, going to Architect Review")
+				return AgentState.ARCHITECT_REVIEW_CODE
+			}
+
 			// Phase 4: Sentinel security audit → Architect final review (or back to Builder if failed)
 			case AgentState.SENTINEL:
 				// Check if security audit failed

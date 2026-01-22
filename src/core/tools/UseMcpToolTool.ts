@@ -68,22 +68,29 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 
 			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
 
-			// For internal Figma server, skip MCP-style approval (treat as built-in tool)
-			if (serverName === "figma") {
-				// Execute directly without MCP approval dialog
-				await this.executeToolAndProcessResult(
-					task,
-					serverName,
-					toolName,
-					parsedArguments,
-					executionId,
-					pushToolResult,
+			// Handle common LLM mistake: trying to use "browser" as MCP server
+			// Instead, browser_action is a BUILT-IN tool, not an MCP server
+			if (serverName.toLowerCase() === "browser") {
+				task.recordToolError("use_mcp_tool")
+				pushToolResult(
+					`❌ ERROR: "browser" is NOT an MCP server!\n\n` +
+					`browser_action is a BUILT-IN tool. Use this format instead:\n\n` +
+					`\`\`\`xml\n` +
+					`<browser_action>\n` +
+					`<action>launch</action>\n` +
+					`<url>http://localhost:3000</url>\n` +
+					`</browser_action>\n` +
+					`\`\`\`\n\n` +
+					`Available actions: launch, click, type, scroll_down, scroll_up, dom_extract, close`
 				)
 				return
 			}
 
-			// For internal Figma Write server, skip MCP-style approval (treat as built-in tool)
-			if (serverName === "figma-write") {
+			// For internal Figma servers, skip MCP-style approval (treat as built-in tool)
+			// Match any variation: figma, figma-write, fig, figma-read, etc.
+			const isFigmaServer = serverName.toLowerCase().startsWith("fig")
+			if (isFigmaServer) {
+				// Execute directly without MCP approval dialog
 				await this.executeToolAndProcessResult(
 					task,
 					serverName,
@@ -127,8 +134,19 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		const params = block.params
 		const serverName = this.removeClosingTag("server_name", params.server_name, block.partial)
 		
+		// Skip if no server name yet (still streaming)
+		if (!serverName || serverName.trim() === "") {
+			return
+		}
+		
+		// Skip partial for "browser" - LLM is making a mistake, will get error in execute
+		if (serverName.toLowerCase() === "browser") {
+			return
+		}
+		
 		// Skip MCP-style partial message for internal Figma servers
-		if (serverName === "figma" || serverName === "figma-write") {
+		// Match any variation: figma, figma-write, fig, etc.
+		if (serverName.toLowerCase().startsWith("fig")) {
 			return
 		}
 		
@@ -208,13 +226,15 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			const mcpHub = provider?.getMcpHub()
 
 			if (!mcpHub) {
-				// If we can't get the MCP hub, check if this is the internal figma server
-				if (serverName === "figma") {
+				// If we can't get the MCP hub, check if this is an internal figma server
+				// Match any variation: figma, figma-write, fig, etc.
+				const isFigmaServer = serverName.toLowerCase().startsWith("fig")
+				if (isFigmaServer) {
+					const isFigmaWrite = serverName.toLowerCase().includes("write") || serverName === "fig"
+					if (isFigmaWrite) {
+						return this.validateFigmaWriteToolExists(toolName, pushToolResult, task)
+					}
 					return this.validateFigmaToolExists(toolName, pushToolResult, task)
-				}
-				// Check for internal figma-write server
-				if (serverName === "figma-write") {
-					return this.validateFigmaWriteToolExists(toolName, pushToolResult, task)
 				}
 				return { isValid: true }
 			}
@@ -223,14 +243,14 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			const servers = mcpHub.getAllServers()
 			const server = servers.find((s) => s.name === serverName)
 
-			// Check for internal figma server first
-			if (!server && serverName === "figma") {
+			// Check for internal figma servers (any variation)
+			const isFigmaServer = serverName.toLowerCase().startsWith("fig")
+			if (!server && isFigmaServer) {
+				const isFigmaWrite = serverName.toLowerCase().includes("write") || serverName === "fig"
+				if (isFigmaWrite) {
+					return this.validateFigmaWriteToolExists(toolName, pushToolResult, task)
+				}
 				return this.validateFigmaToolExists(toolName, pushToolResult, task)
-			}
-
-			// Check for internal figma-write server
-			if (!server && serverName === "figma-write") {
-				return this.validateFigmaWriteToolExists(toolName, pushToolResult, task)
 			}
 
 			if (!server) {
@@ -361,13 +381,15 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	): Promise<void> {
 		// Route to internal Figma server if applicable (treat as built-in tool)
 		let toolResult: any
-		const isFigmaServer = serverName === "figma" || serverName === "figma-write"
+		// Match any figma variation: figma, figma-write, fig, etc.
+		const isFigmaServer = serverName.toLowerCase().startsWith("fig")
+		const isFigmaWrite = serverName.toLowerCase().includes("write") || serverName === "fig"
 		
-		if (serverName === "figma") {
+		if (isFigmaServer && !isFigmaWrite) {
 			// For Figma Read, use "text" say type instead of MCP style
 			await task.say("text", `🎨 Calling Figma API: \`${toolName}\``)
 			toolResult = await this.executeFigmaTool(toolName, parsedArguments)
-		} else if (serverName === "figma-write") {
+		} else if (isFigmaServer) {
 			// For Figma Write, use standard MCP flow but with custom message
 			await task.say("text", `🎨 Creating in Figma: \`${toolName}\``)
 			// Use the standard MCP callTool - figma-write is registered as built-in server in McpHub

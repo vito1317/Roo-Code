@@ -297,9 +297,46 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 				}
 			case AgentState.BUILDER:
 				return `[AUTO-CONTINUE] You are the Builder. Implement according to the plan and design specs: ${JSON.stringify(context).slice(0, 500)}`
-			case AgentState.QA_ENGINEER:
-				return `[AUTO-CONTINUE] You are QA. Test the implementation using browser_action and dom_extract.`
-			case AgentState.ARCHITECT_REVIEW_CODE:
+			case AgentState.QA_ENGINEER: {
+				// Extract targetUrl from context if available
+				const targetUrl = (context as any).targetUrl || 
+					(context as any).runCommand?.includes('localhost') ? 'http://localhost:3000' : 
+					'http://localhost:3000'
+				
+				return `[AUTO-CONTINUE] You are QA. Test the implementation.
+
+**CRITICAL: YOU MUST OPEN THE BROWSER!**
+
+**🚀 STEP 1: Launch the app in browser:**
+\`\`\`xml
+<browser_action>
+<action>launch</action>
+<url>${targetUrl}</url>
+</browser_action>
+\`\`\`
+
+**🔍 STEP 2: Extract DOM to see actual structure:**
+\`\`\`xml
+<browser_action>
+<action>dom_extract</action>
+</browser_action>
+\`\`\`
+
+**🧪 STEP 3: Test interactions (click buttons, verify display):**
+\`\`\`xml
+<browser_action>
+<action>click</action>
+<coordinate>160,400</coordinate>
+</browser_action>
+\`\`\`
+
+**📊 STEP 4: Compare DOM vs design-specs.md**
+- Read design-specs.md first
+- Count elements: buttons, text, layout
+- Check if layout matches (grid vs column)
+
+**⚠️ YOU CANNOT PASS WITHOUT OPENING THE BROWSER!**`
+			}
 			case AgentState.ARCHITECT_REVIEW_TESTS: {
 				// Inject RAG UI guidelines based on detected UI type
 				const guidelines = this.getRAGGuidelinesForContext(context)
