@@ -69,10 +69,6 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setAlwaysAllowFollowupQuestions: (value: boolean) => void // Setter for the new property
 	followupAutoApproveTimeoutMs: number | undefined // Timeout in ms for auto-approving follow-up questions
 	setFollowupAutoApproveTimeoutMs: (value: number) => void // Setter for the timeout
-	condensingApiConfigId?: string
-	setCondensingApiConfigId: (value: string) => void
-	customCondensingPrompt?: string
-	setCustomCondensingPrompt: (value: string) => void
 	marketplaceItems?: any[]
 	marketplaceInstalledMetadata?: MarketplaceInstalledMetadata
 	profileThresholds: Record<string, number>
@@ -184,7 +180,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 
 export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
 
-export const mergeExtensionState = (prevState: ExtensionState, newState: ExtensionState) => {
+export const mergeExtensionState = (prevState: ExtensionState, newState: Partial<ExtensionState>) => {
 	const { customModePrompts: prevCustomModePrompts, experiments: prevExperiments, ...prevRest } = prevState
 
 	const {
@@ -195,13 +191,19 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Extensi
 		...newRest
 	} = newState
 
-	const customModePrompts = { ...prevCustomModePrompts, ...newCustomModePrompts }
-	const experiments = { ...prevExperiments, ...newExperiments }
+	const customModePrompts = { ...prevCustomModePrompts, ...(newCustomModePrompts ?? {}) }
+	const experiments = { ...prevExperiments, ...(newExperiments ?? {}) }
 	const rest = { ...prevRest, ...newRest }
 
 	// Note that we completely replace the previous apiConfiguration and customSupportPrompts objects
 	// with new ones since the state that is broadcast is the entire objects so merging is not necessary.
-	return { ...rest, apiConfiguration, customModePrompts, customSupportPrompts, experiments }
+	return {
+		...rest,
+		apiConfiguration: apiConfiguration ?? prevState.apiConfiguration,
+		customModePrompts,
+		customSupportPrompts: customSupportPrompts ?? prevState.customSupportPrompts,
+		experiments,
+	}
 }
 
 export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -241,8 +243,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		customSupportPrompts: {},
 		experiments: experimentDefault,
 		enhancementApiConfigId: "",
-		condensingApiConfigId: "", // Default empty string for condensing API config ID
-		customCondensingPrompt: "", // Default empty string for custom condensing prompt
 		hasOpenedModeSelector: false, // Default to false (not opened yet)
 		autoApprovalEnabled: false,
 		customModes: [],
@@ -335,7 +335,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 			const message: ExtensionMessage = event.data
 			switch (message.type) {
 				case "state": {
-					const newState = message.state!
+					const newState = message.state ?? {}
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration))
 					setDidHydrateState(true)
@@ -437,15 +437,39 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 					}
 					break
 				}
-				// Sentinel Edition: Handle agent state updates
-				case "sentinelAgentState": {
-					const agentState = (message as any).sentinelAgentState
-					if (agentState) {
+				case "taskHistoryUpdated": {
+					// Efficiently update just the task history without replacing entire state
+					if (message.taskHistory !== undefined) {
 						setState((prevState) => ({
 							...prevState,
-							sentinelAgentState: agentState,
+							taskHistory: message.taskHistory!,
 						}))
 					}
+					break
+				}
+				case "taskHistoryItemUpdated": {
+					const item = message.taskHistoryItem
+					if (!item) {
+						break
+					}
+					setState((prevState) => {
+						const existingIndex = prevState.taskHistory.findIndex((h) => h.id === item.id)
+						let nextHistory: typeof prevState.taskHistory
+						if (existingIndex === -1) {
+							nextHistory = [item, ...prevState.taskHistory]
+						} else {
+							nextHistory = [...prevState.taskHistory]
+							nextHistory[existingIndex] = item
+						}
+						// Keep UI semantics consistent with extension: newest-first ordering.
+						nextHistory.sort((a, b) => b.ts - a.ts)
+						return {
+							...prevState,
+							taskHistory: nextHistory,
+							currentTaskItem:
+								prevState.currentTaskItem?.id === item.id ? item : prevState.currentTaskItem,
+						}
+					})
 					break
 				}
 			}
@@ -602,9 +626,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		setAutoCondenseContext: (value) => setState((prevState) => ({ ...prevState, autoCondenseContext: value })),
 		setAutoCondenseContextPercent: (value) =>
 			setState((prevState) => ({ ...prevState, autoCondenseContextPercent: value })),
-		setCondensingApiConfigId: (value) => setState((prevState) => ({ ...prevState, condensingApiConfigId: value })),
-		setCustomCondensingPrompt: (value) =>
-			setState((prevState) => ({ ...prevState, customCondensingPrompt: value })),
 		setProfileThresholds: (value) => setState((prevState) => ({ ...prevState, profileThresholds: value })),
 		includeDiagnosticMessages: state.includeDiagnosticMessages,
 		setIncludeDiagnosticMessages: (value) => {

@@ -29,56 +29,9 @@ interface ExecuteCommandParams {
 export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 	readonly name = "execute_command" as const
 
-	parseLegacy(params: Partial<Record<string, string>>): ExecuteCommandParams {
-		return {
-			command: params.command || "",
-			cwd: params.cwd,
-		}
-	}
-
-	/**
-	 * Detect if command is a server/long-running command that should run in background
-	 */
-	private isServerCommand(command: string): boolean {
-		const serverPatterns = [
-			/python3?\s+(-m\s+)?http\.server/i,          // python http.server
-			/npm\s+(run\s+)?(dev|start|serve)/i,          // npm run dev/start/serve
-			/yarn\s+(run\s+)?(dev|start|serve)/i,         // yarn run dev/start
-			/pnpm\s+(run\s+)?(dev|start|serve)/i,         // pnpm run dev/start
-			/node\s+.*server/i,                           // node server.js
-			/npx\s+(vite|next|nuxt|webpack)/i,            // npx vite/next/nuxt
-			/php\s+-S/i,                                  // php built-in server
-			/flask\s+run/i,                               // flask run
-			/uvicorn/i,                                   // uvicorn
-			/ng\s+serve/i,                                // angular serve
-			/live-server/i,                               // live-server
-		]
-		return serverPatterns.some(pattern => pattern.test(command))
-	}
-
-	/**
-	 * Extract port number from command if specified
-	 */
-	private extractPortFromCommand(command: string): number | undefined {
-		// Match patterns like: --port 3000, -p 8080, :8000
-		const portPatterns = [
-			/--port[=\s]+([\d]+)/i,
-			/-p[=\s]+([\d]+)/i,
-			/:([\d]{4,5})\b/,
-			/\s([\d]{4,5})\s*$/,  // trailing port number like 'python -m http.server 8000'
-		]
-		for (const pattern of portPatterns) {
-			const match = command.match(pattern)
-			if (match && match[1]) {
-				return parseInt(match[1], 10)
-			}
-		}
-		return undefined
-	}
-
 	async execute(params: ExecuteCommandParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { command, cwd: customCwd } = params
-		const { handleError, pushToolResult, askApproval, removeClosingTag, toolProtocol } = callbacks
+		const { handleError, pushToolResult, askApproval } = callbacks
 
 		try {
 			if (!command) {
@@ -92,7 +45,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 			if (ignoredFileAttemptedToAccess) {
 				await task.say("rooignore_error", ignoredFileAttemptedToAccess)
-				pushToolResult(formatResponse.rooIgnoreError(ignoredFileAttemptedToAccess, toolProtocol))
+				pushToolResult(formatResponse.rooIgnoreError(ignoredFileAttemptedToAccess))
 				return
 			}
 
@@ -218,9 +171,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 	override async handlePartial(task: Task, block: ToolUse<"execute_command">): Promise<void> {
 		const command = block.params.command
-		await task
-			.ask("command", this.removeClosingTag("command", command, block.partial), block.partial)
-			.catch(() => {})
+		await task.ask("command", command ?? "", block.partial).catch(() => {})
 	}
 }
 
