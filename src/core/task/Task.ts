@@ -2558,9 +2558,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// message.
 			const lastApiReqIndex = findLastIndex(this.clineMessages, (m) => m.say === "api_req_started")
 
-			this.clineMessages[lastApiReqIndex].text = JSON.stringify({
-				apiProtocol,
-			} satisfies ClineApiReqInfo)
+			if (lastApiReqIndex >= 0 && this.clineMessages[lastApiReqIndex]) {
+				this.clineMessages[lastApiReqIndex].text = JSON.stringify({
+					apiProtocol,
+				} satisfies ClineApiReqInfo)
+			}
 
 			await this.saveClineMessages()
 			await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
