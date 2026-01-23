@@ -239,24 +239,24 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 	 * Handle partial streaming
 	 */
 	override async handlePartial(task: Task, block: ToolUse<"handoff_context">): Promise<void> {
-		const params = block.params as Record<string, string | undefined>
-		const notes = params.notes
-		const contextJson = params.context_json || params.contextJson
+		const nativeArgs = block.nativeArgs as { notes?: string; context_json?: string } | undefined
+		const notes = nativeArgs?.notes
+		const contextJson = nativeArgs?.context_json
 
 		// Try to show a preview of the context
 		let preview = "(parsing...)"
-		if (contextJson && !block.partial) {
+		if (contextJson) {
 			try {
 				const parsed = JSON.parse(contextJson)
 				preview = `Keys: ${Object.keys(parsed).join(", ")}`
 			} catch {
-				preview = "(invalid JSON)"
+				preview = "(streaming...)"
 			}
 		}
 
 		const partialMessage = JSON.stringify({
 			tool: "handoff_context",
-			notes: this.removeClosingTag("notes", notes, block.partial),
+			notes: notes || "(streaming...)",
 			contextPreview: preview,
 		})
 

@@ -193,11 +193,12 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"parallel_ui_tasks">): Promise<void> {
-		const tasks = block.params.tasks
+		const nativeArgs = block.nativeArgs as { tasks?: string } | undefined
+		const tasks = nativeArgs?.tasks
 
 		const partialMessage = JSON.stringify({
 			tool: "parallelUITasks",
-			tasks: this.removeClosingTag("tasks", tasks, block.partial),
+			tasks: tasks || "(streaming...)",
 		})
 
 		await task.ask("tool", partialMessage, block.partial).catch(() => {})

@@ -281,14 +281,14 @@ export class StartBackgroundServiceTool extends BaseTool<"start_background_servi
 	 * Handle partial streaming (not really applicable for this tool)
 	 */
 	override async handlePartial(task: Task, block: ToolUse<"start_background_service">): Promise<void> {
-		const params = block.params as Record<string, string | undefined>
-		const command = params.command
-		const port = params.port
+		const nativeArgs = block.nativeArgs as { command?: string; port?: number } | undefined
+		const command = nativeArgs?.command
+		const port = nativeArgs?.port
 
 		const partialMessage = JSON.stringify({
 			tool: "start_background_service",
-			command: this.removeClosingTag("command", command, block.partial),
-			port: this.removeClosingTag("port", port, block.partial),
+			command: command || "(streaming...)",
+			port: port || "(streaming...)",
 		})
 
 		await task.ask("tool", partialMessage, block.partial).catch(() => {})

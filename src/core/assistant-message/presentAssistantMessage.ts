@@ -927,8 +927,6 @@ export async function presentAssistantMessage(cline: Task) {
 						askApproval,
 						handleError,
 						pushToolResult,
-						removeClosingTag,
-						toolProtocol,
 					})
 					break
 				case "start_background_service":
@@ -936,8 +934,6 @@ export async function presentAssistantMessage(cline: Task) {
 						askApproval,
 						handleError,
 						pushToolResult,
-						removeClosingTag,
-						toolProtocol,
 					})
 					break
 				case "parallel_ui_tasks":
@@ -945,8 +941,6 @@ export async function presentAssistantMessage(cline: Task) {
 						askApproval,
 						handleError,
 						pushToolResult,
-						removeClosingTag,
-						toolProtocol,
 					})
 					break
 				default: {
