@@ -41,6 +41,7 @@ export const toolNames = [
 	// Sentinel Edition tools
 	"start_background_service",
 	"handoff_context",
+	"parallel_ui_tasks",
 ] as const
 
 export const toolNamesSchema = z.enum(toolNames)

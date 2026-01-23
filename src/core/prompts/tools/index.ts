@@ -28,6 +28,7 @@ import { getRunSlashCommandDescription } from "./run-slash-command"
 import { getGenerateImageDescription } from "./generate-image"
 import { getHandoffContextDescription } from "./handoff-context"
 import { getStartBackgroundServiceDescription } from "./start-background-service"
+import { getParallelUITasksDescription } from "./parallel-ui-tasks"
 
 // Map of tool names to their description functions
 const toolDescriptionMap: Record<string, (args: ToolArgs) => string | undefined> = {
@@ -52,6 +53,7 @@ const toolDescriptionMap: Record<string, (args: ToolArgs) => string | undefined>
 	generate_image: (args) => getGenerateImageDescription(args),
 	handoff_context: () => getHandoffContextDescription(),
 	start_background_service: () => getStartBackgroundServiceDescription(),
+	parallel_ui_tasks: () => getParallelUITasksDescription(),
 }
 
 export function getToolDescriptionsForMode(

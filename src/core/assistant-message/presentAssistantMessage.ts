@@ -39,6 +39,7 @@ import { runSlashCommandTool } from "../tools/RunSlashCommandTool"
 import { generateImageTool } from "../tools/GenerateImageTool"
 import { handoffContextTool } from "../tools/HandoffContextTool"
 import { startBackgroundServiceTool } from "../tools/StartBackgroundServiceTool"
+import { parallelUITasksTool } from "../tools/ParallelUITasksTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { validateToolUse } from "../tools/validateToolUse"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
@@ -1130,6 +1131,15 @@ export async function presentAssistantMessage(cline: Task) {
 					break
 				case "start_background_service":
 					await startBackgroundServiceTool.handle(cline, block as ToolUse<"start_background_service">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+						removeClosingTag,
+						toolProtocol,
+					})
+					break
+				case "parallel_ui_tasks":
+					await parallelUITasksTool.handle(cline, block as ToolUse<"parallel_ui_tasks">, {
 						askApproval,
 						handleError,
 						pushToolResult,

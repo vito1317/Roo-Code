@@ -6,3 +6,8 @@ export { FigmaService, extractFileKey, extractNodeIds, formatForLLM } from "./Fi
 export type { FigmaFile, FigmaNode, SimplifiedNode, FigmaNodesResponse, FigmaImageResponse } from "./FigmaService"
 
 export { FigmaConfigService, getFigmaService } from "./FigmaConfigService"
+
+export { FigmaWriteService, getFigmaWriteService, FIGMA_WRITE_TOOLS } from "./FigmaWriteService"
+
+export { ParallelUIService, getParallelUIService } from "./ParallelUIService"
+export type { UITaskDefinition, UITaskResult, ParallelUIResult } from "./ParallelUIService"

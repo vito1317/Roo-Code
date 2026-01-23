@@ -83,6 +83,8 @@ export const toolParamNames = [
 	"service_type",
 	"port",
 	"wait_ms",
+	// Parallel UI tasks parameters
+	"tasks",
 ] as const
 
 export type ToolParamName = (typeof toolParamNames)[number]
@@ -243,6 +245,11 @@ export interface GenerateImageToolUse extends ToolUse<"generate_image"> {
 	params: Partial<Pick<Record<ToolParamName, string>, "prompt" | "path" | "image">>
 }
 
+export interface ParallelUITasksToolUse extends ToolUse<"parallel_ui_tasks"> {
+	name: "parallel_ui_tasks"
+	params: Partial<Pick<Record<ToolParamName, string>, "tasks">>
+}
+
 // Define tool group configuration
 export type ToolGroupConfig = {
 	tools: readonly string[]
@@ -277,6 +284,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	// Sentinel Edition tools
 	start_background_service: "start background services",
 	handoff_context: "handoff context to next agent",
+	parallel_ui_tasks: "execute parallel UI drawing tasks",
 } as const
 
 // Define available tool groups.
@@ -295,7 +303,7 @@ export const TOOL_GROUPS: Record<ToolGroup, ToolGroupConfig> = {
 		tools: ["execute_command"],
 	},
 	mcp: {
-		tools: ["use_mcp_tool", "access_mcp_resource"],
+		tools: ["use_mcp_tool", "access_mcp_resource", "parallel_ui_tasks"],
 	},
 	modes: {
 		tools: ["switch_mode", "new_task"],
