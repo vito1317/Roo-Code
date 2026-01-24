@@ -5,6 +5,7 @@
  * Each task is assigned to a separate AI agent that works independently.
  */
 
+import * as vscode from "vscode"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -193,6 +194,33 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 			const mcpHub = provider.getMcpHub?.()
 
 			service.configure(state.apiConfiguration, provider.context?.extensionPath || "", mcpHub)
+
+			// Open Figma for VS Code panel BEFORE starting - so user can see real-time updates
+			try {
+				// Try to open Figma for VS Code extension panel
+				await vscode.commands.executeCommand("figma.showSidebar")
+				await task.say("text", `🎨 已開啟 Figma for VS Code 面板，你可以即時觀看繪製過程`)
+			} catch (error) {
+				// If Figma for VS Code is not installed, try opening in browser as fallback
+				console.log("[ParallelUITasksTool] Figma for VS Code not available, trying browser fallback")
+				if (mcpHub) {
+					try {
+						const fileInfoResult = await mcpHub.callTool("figma-write", "get_file_url", {})
+						if (fileInfoResult && typeof fileInfoResult === "object") {
+							const content = (fileInfoResult as any).content
+							if (Array.isArray(content) && content[0]?.text) {
+								const fileInfo = JSON.parse(content[0].text)
+								if (fileInfo.url) {
+									await vscode.env.openExternal(vscode.Uri.parse(fileInfo.url))
+									await task.say("text", `🔗 已在瀏覽器開啟 Figma：${fileInfo.fileName || "Untitled"}`)
+								}
+							}
+						}
+					} catch {
+						// Silently ignore
+					}
+				}
+			}
 
 			// Separate display/container tasks from button tasks
 			const displayTasks = parsedTasks.filter(t =>
