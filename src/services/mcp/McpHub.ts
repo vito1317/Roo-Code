@@ -1050,12 +1050,26 @@ export class McpHub {
 			try {
 				console.log(`[McpHub] Auto-reconnecting to "${name}"...`)
 
-				// Read config from the connection
+				// Read config from the connection BEFORE deleting
 				const config = JSON.parse(connection.server.config)
 				const validatedConfig = this.validateServerConfig(config, name)
 
-				// Delete old connection and reconnect
-				await this.deleteConnection(name, source)
+				// Close the old transport/client but keep server info for retry
+				try {
+					if (connection.type === "connected") {
+						await connection.transport.close().catch(() => {})
+						await connection.client.close().catch(() => {})
+					}
+				} catch {
+					// Ignore close errors
+				}
+
+				// Remove from connections array
+				this.connections = this.connections.filter(
+					(conn) => !(conn.server.name === name && conn.server.source === source)
+				)
+
+				// Try to connect
 				await this.connectToServer(name, validatedConfig, source)
 
 				// Success - reset attempt counter
@@ -1063,6 +1077,25 @@ export class McpHub {
 				console.log(`[McpHub] Auto-reconnect to "${name}" successful`)
 			} catch (error) {
 				console.error(`[McpHub] Auto-reconnect to "${name}" failed:`, error)
+
+				// Re-add a placeholder connection so findConnection works for next retry
+				const existingConnection = this.findConnection(name, source)
+				if (!existingConnection) {
+					// Create a placeholder disconnected connection
+					const config = connection.server.config
+					this.connections.push({
+						type: "connecting",
+						server: {
+							name,
+							config,
+							status: "disconnected",
+							error: error instanceof Error ? error.message : String(error),
+							source,
+						},
+					})
+					await this.notifyWebviewOfServerChanges()
+				}
+
 				// Schedule another reconnect attempt
 				this.scheduleAutoReconnect(name, source)
 			}
