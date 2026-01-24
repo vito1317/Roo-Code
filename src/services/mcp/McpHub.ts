@@ -175,6 +175,7 @@ export class McpHub {
 		this.initializeGlobalMcpServers()
 		this.initializeProjectMcpServers()
 		this.initializeBuiltInFigmaWriteServer(provider)
+		this.initializeBuiltInTalkToFigmaServer()
 	}
 	/**
 	 * Registers a client (e.g., ClineProvider) using this hub.
@@ -610,6 +611,14 @@ export class McpHub {
 	 */
 	private async initializeBuiltInFigmaWriteServer(provider: ClineProvider): Promise<void> {
 		try {
+			// Check if figma-write is enabled in settings
+			const state = await provider.getState()
+			const figmaWriteEnabled = state?.figmaWriteEnabled ?? false // Default to false (TalkToFigma is preferred)
+			if (!figmaWriteEnabled) {
+				console.log("[McpHub] figma-write is disabled in settings, skipping initialization")
+				return
+			}
+
 			// Get the extension path to locate the figma-write-bridge
 			const extensionPath = provider.context?.extensionPath
 			if (!extensionPath) {
@@ -618,7 +627,7 @@ export class McpHub {
 			}
 
 			const serverPath = `${extensionPath}/tools/figma-write-bridge/server.ts`
-			
+
 			// Check if the server file exists
 			try {
 				await fs.access(serverPath)
@@ -659,6 +668,360 @@ export class McpHub {
 			// Don't fail if figma-write can't be initialized - it's optional
 			console.log("[McpHub] Could not initialize built-in figma-write server:", error)
 		}
+	}
+
+	// Track if TalkToFigma initialization is in progress to prevent duplicate initializations
+	private talkToFigmaInitializing: boolean = false
+	private lastTalkToFigmaInitTime: number = 0
+
+	/**
+	 * Initialize the built-in TalkToFigma server for Figma integration via ai-figma-mcp
+	 * This server is automatically registered without user configuration
+	 */
+	private async initializeBuiltInTalkToFigmaServer(): Promise<void> {
+		try {
+			// Check if TalkToFigma is enabled in settings
+			const provider = this.providerRef.deref()
+			if (provider) {
+				const state = await provider.getState()
+				const talkToFigmaEnabled = state?.talkToFigmaEnabled ?? true // Default to true
+				if (!talkToFigmaEnabled) {
+					console.log("[McpHub] TalkToFigma is disabled in settings, skipping initialization")
+					return
+				}
+			}
+
+			// Prevent duplicate initializations - must wait at least 5 seconds between attempts
+			const now = Date.now()
+			if (this.talkToFigmaInitializing) {
+				console.log("[McpHub] TalkToFigma initialization already in progress, skipping")
+				return
+			}
+			if (now - this.lastTalkToFigmaInitTime < 5000) {
+				console.log("[McpHub] TalkToFigma was initialized recently, skipping (debounce)")
+				return
+			}
+
+			// Check if TalkToFigma is already configured by user (don't override)
+			const existingConnection = this.connections.find((conn) => conn.server.name === "TalkToFigma")
+			if (existingConnection && existingConnection.server.status === "connected") {
+				console.log("[McpHub] TalkToFigma already configured and connected, skipping built-in server")
+				return
+			}
+
+			this.talkToFigmaInitializing = true
+			this.lastTalkToFigmaInitTime = now
+
+			// Register the built-in TalkToFigma server using npx
+			// All tools are set to always allow for seamless Figma integration
+			// Package: ai-figma-mcp (same tools as cursor-talk-to-figma-mcp)
+			const config = {
+				command: "npx",
+				args: ["-y", "ai-figma-mcp@latest"],
+				type: "stdio" as const,
+				timeout: 60, // 60 seconds
+				alwaysAllow: [
+					// Connection Management
+					"join_channel",
+					// Document & Selection
+					"get_document_info",
+					"get_selection",
+					"read_my_design",
+					"get_node_info",
+					"get_nodes_info",
+					// Annotations
+					"get_annotations",
+					"set_annotation",
+					"set_multiple_annotations",
+					"scan_nodes_by_types",
+					// Prototyping & Connections
+					"get_reactions",
+					"set_default_connector",
+					"create_connections",
+					// Creating Elements
+					"create_rectangle",
+					"create_frame",
+					"create_text",
+					// Modifying text content
+					"scan_text_nodes",
+					"set_text_content",
+					"set_multiple_text_contents",
+					// Auto Layout & Spacing
+					"set_layout_mode",
+					"set_padding",
+					"set_axis_align",
+					"set_layout_sizing",
+					"set_item_spacing",
+					// Styling
+					"set_fill_color",
+					"set_stroke_color",
+					"set_corner_radius",
+					// Layout & Organization
+					"move_node",
+					"resize_node",
+					"delete_node",
+					"delete_multiple_nodes",
+					"clone_node",
+					// Components & Styles
+					"get_styles",
+					"get_local_components",
+					"create_component_instance",
+					"get_instance_overrides",
+					"set_instance_overrides",
+					// Export
+					"export_node_as_image",
+				] as string[],
+				// Disable tools that should not be called by AI agents
+				// join_channel is handled automatically by the extension
+				disabledTools: ["join_channel"] as string[],
+			}
+
+			console.log("[McpHub] Initializing built-in TalkToFigma server")
+			await this.connectToServer("TalkToFigma", config, "global")
+			console.log("[McpHub] Built-in TalkToFigma server initialized")
+			// Note: Channel connection prompt is handled in ClineProvider.performPreparationTasks()
+		} catch (error) {
+			// Don't fail if TalkToFigma can't be initialized - it's optional
+			console.log("[McpHub] Could not initialize built-in TalkToFigma server:", error)
+		} finally {
+			this.talkToFigmaInitializing = false
+		}
+	}
+
+	// Track if Figma channel has been connected in this session
+	private figmaChannelConnected: boolean = false
+	// Prevent multiple error prompts for the same disconnection event
+	private figmaErrorPromptPending: boolean = false
+	// Store the last used channel code for auto-reconnection
+	private lastFigmaChannelCode: string | null = null
+
+	/**
+	 * Check if TalkToFigma server is connected and available
+	 */
+	isTalkToFigmaConnected(): boolean {
+		return this.connections.some((conn) => conn.server.name === "TalkToFigma" && conn.server.status === "connected")
+	}
+
+	/**
+	 * Check if Figma channel has been joined in this session
+	 */
+	isFigmaChannelConnected(): boolean {
+		return this.figmaChannelConnected
+	}
+
+	/**
+	 * Reset the Figma channel connection state
+	 * Called when connection is detected as broken
+	 */
+	resetFigmaChannelConnection(): void {
+		this.figmaChannelConnected = false
+		console.log("[McpHub] Figma channel connection state reset")
+	}
+
+	/**
+	 * Prompt user to enter the Figma channel code and connect
+	 * Called at the start of each conversation if TalkToFigma is available
+	 * @param forcePrompt If true, prompts even if already connected (for reconnection)
+	 */
+	async promptTalkToFigmaChannelConnection(forcePrompt: boolean = false): Promise<boolean> {
+		// Skip if already connected in this session (unless forcing reconnection)
+		if (this.figmaChannelConnected && !forcePrompt) {
+			console.log("[McpHub] Figma channel already connected in this session")
+			return true
+		}
+
+		// Skip if TalkToFigma server is not connected
+		if (!this.isTalkToFigmaConnected()) {
+			console.log("[McpHub] TalkToFigma server not connected, skipping channel prompt")
+			return false
+		}
+
+		try {
+			// If we have a previous channel code and this is a reconnection attempt, try auto-reconnect first
+			if (forcePrompt && this.lastFigmaChannelCode) {
+				console.log(
+					"[McpHub] Attempting auto-reconnection with previous channel code:",
+					this.lastFigmaChannelCode,
+				)
+				vscode.window.showInformationMessage(
+					`正在嘗試重新連接到頻道 ${this.lastFigmaChannelCode}... (Attempting to reconnect...)`,
+				)
+
+				try {
+					const autoResult = await this.callTool("TalkToFigma", "join_channel", {
+						channel: this.lastFigmaChannelCode,
+					})
+					if (autoResult) {
+						const textContent = autoResult.content?.find((c: { type: string }) => c.type === "text")
+						const resultText =
+							textContent && "text" in textContent ? (textContent.text as string).toLowerCase() : ""
+
+						// Check if auto-reconnect succeeded
+						if (
+							!resultText.includes("error") &&
+							!resultText.includes("failed") &&
+							!resultText.includes("not connected")
+						) {
+							this.figmaChannelConnected = true
+							vscode.window.showInformationMessage(
+								`已重新連接到頻道 ${this.lastFigmaChannelCode} (Reconnected to channel)`,
+							)
+							console.log("[McpHub] Auto-reconnected to Figma channel:", this.lastFigmaChannelCode)
+							return true
+						}
+					}
+				} catch (autoError) {
+					console.log("[McpHub] Auto-reconnection failed:", autoError)
+				}
+
+				// Auto-reconnect failed, will prompt for new code below
+				console.log("[McpHub] Auto-reconnection with previous code failed, prompting for new code")
+			}
+
+			// Ask user for the channel code
+			const promptMessage = forcePrompt
+				? `自動重連失敗。請輸入新的頻道代碼：\n(Auto-reconnect failed. Enter a new channel code:)`
+				: "請輸入 Figma 頻道代碼 (Enter Figma channel code from plugin)"
+
+			const channelCode = await vscode.window.showInputBox({
+				prompt: promptMessage,
+				placeHolder: this.lastFigmaChannelCode || "e.g., abc123",
+				value: this.lastFigmaChannelCode || undefined, // Pre-fill with last code
+				title: forcePrompt ? "重新連接 Figma (Reconnect)" : "連接 Figma (Connect)",
+				ignoreFocusOut: true,
+			})
+
+			if (!channelCode) {
+				console.log("[McpHub] User cancelled Figma channel connection")
+				vscode.window.showInformationMessage("Figma 頻道未連接。(Figma channel not connected.)")
+				return false
+			}
+
+			// Reset connection state before reconnecting
+			this.figmaChannelConnected = false
+
+			// Call the join_channel tool (correct tool name for ai-figma-mcp)
+			const result = await this.callTool("TalkToFigma", "join_channel", { channel: channelCode })
+
+			if (result) {
+				this.figmaChannelConnected = true
+				this.lastFigmaChannelCode = channelCode // Store for auto-reconnection
+				vscode.window.showInformationMessage(`已連接到 Figma 頻道: ${channelCode}`)
+				console.log("[McpHub] Successfully connected to Figma channel:", channelCode)
+				return true
+			}
+			return false
+		} catch (error) {
+			console.log("[McpHub] Failed to connect to Figma channel:", error)
+			this.figmaChannelConnected = false
+			vscode.window.showWarningMessage(
+				"Failed to connect to Figma channel. Make sure the Cursor Talk to Figma plugin is running in Figma.",
+			)
+			return false
+		}
+	}
+
+	/**
+	 * Handle Figma tool call failure - reset connection and prompt for reconnection
+	 * Returns true if reconnection was successful
+	 */
+	async handleFigmaConnectionError(errorMessage?: string): Promise<boolean> {
+		console.log("[McpHub] Figma connection error detected:", errorMessage)
+
+		// Check if this looks like a connection error
+		const lowerError = (errorMessage || "").toLowerCase()
+		const isConnectionError =
+			!errorMessage ||
+			lowerError.includes("disconnect") ||
+			lowerError.includes("timeout") ||
+			lowerError.includes("not connected") ||
+			lowerError.includes("channel not found") ||
+			lowerError.includes("no channel") ||
+			lowerError.includes("join a channel") ||
+			lowerError.includes("please join") ||
+			lowerError.includes("not joined") ||
+			lowerError.includes("channel closed") ||
+			lowerError.includes("socket closed") ||
+			lowerError.includes("websocket error") ||
+			lowerError.includes("connection lost") ||
+			lowerError.includes("connection refused") ||
+			lowerError.includes("failed to send") ||
+			lowerError.includes("no response") ||
+			lowerError.includes("no active connection") ||
+			lowerError.includes("unable to send")
+
+		if (isConnectionError) {
+			// Reset connection state
+			this.resetFigmaChannelConnection()
+
+			// Show error message and prompt for action
+			const action = await vscode.window.showWarningMessage(
+				"Figma 連線中斷或失敗。\n(Figma connection lost or failed.)",
+				"重啟伺服器 (Restart Server)",
+				"輸入新代碼 (New Code)",
+				"取消 (Cancel)",
+			)
+
+			if (action === "重啟伺服器 (Restart Server)") {
+				// Try to restart the MCP server first
+				console.log("[McpHub] Attempting to restart Figma MCP server...")
+
+				try {
+					// Find which Figma server is being used
+					const talkToFigmaConn = this.findConnection("TalkToFigma")
+					const figmaWriteConn = this.findConnection("figma-write")
+
+					if (talkToFigmaConn) {
+						vscode.window.showInformationMessage(
+							"正在重啟 TalkToFigma 伺服器... (Restarting TalkToFigma server...)",
+						)
+						await this.restartConnection("TalkToFigma", talkToFigmaConn.server.source)
+
+						// After restart, clear old channel code and prompt for new one
+						// This ensures the input dialog appears instead of auto-reconnecting
+						this.lastFigmaChannelCode = undefined
+						this.figmaChannelConnected = false
+						vscode.window.showInformationMessage(
+							"伺服器已重啟，請輸入新的連接代碼。(Server restarted, please enter new channel code.)",
+						)
+						return this.promptTalkToFigmaChannelConnection(true)
+					} else if (figmaWriteConn) {
+						vscode.window.showInformationMessage(
+							"正在重啟 figma-write 伺服器... (Restarting figma-write server...)",
+						)
+						await this.restartConnection("figma-write", figmaWriteConn.server.source)
+						vscode.window.showInformationMessage(
+							"figma-write 伺服器已重啟。(figma-write server restarted.)",
+						)
+						return true
+					} else {
+						vscode.window.showErrorMessage("找不到 Figma MCP 伺服器。(No Figma MCP server found.)")
+						return false
+					}
+				} catch (error) {
+					console.error("[McpHub] Failed to restart Figma server:", error)
+					vscode.window.showErrorMessage(
+						`重啟失敗: ${error instanceof Error ? error.message : String(error)}`,
+					)
+
+					// If restart fails, offer to enter new code
+					const retry = await vscode.window.showWarningMessage(
+						"伺服器重啟失敗，是否要輸入新的連接代碼？\n(Server restart failed. Enter new channel code?)",
+						"輸入新代碼 (New Code)",
+						"取消 (Cancel)",
+					)
+
+					if (retry === "輸入新代碼 (New Code)") {
+						return this.promptTalkToFigmaChannelConnection(true)
+					}
+					return false
+				}
+			} else if (action === "輸入新代碼 (New Code)") {
+				return this.promptTalkToFigmaChannelConnection(true)
+			}
+		}
+
+		return false
 	}
 
 	/**
@@ -813,14 +1176,15 @@ export class McpHub {
 				if (stderrStream) {
 					stderrStream.on("data", async (data: Buffer) => {
 						const output = data.toString()
-						// Check if output contains INFO level log
-						const isInfoLog = /INFO/i.test(output)
+						// Check if output contains INFO level log (without ERROR)
+						const hasInfo = /INFO/i.test(output)
+						const hasError = /ERROR/i.test(output)
 
-						if (isInfoLog) {
+						if (hasInfo && !hasError) {
 							// Log normal informational messages
 							console.log(`Server "${name}" info:`, output)
 						} else {
-							// Treat as error log
+							// Treat as error log (includes ERROR or no INFO)
 							console.error(`Server "${name}" stderr:`, output)
 							const connection = this.findConnection(name, source)
 							if (connection) {
@@ -828,6 +1192,38 @@ export class McpHub {
 								if (connection.server.status === "disconnected") {
 									await this.notifyWebviewOfServerChanges()
 								}
+							}
+						}
+
+						// Check for TalkToFigma connection errors in ANY output (info or stderr)
+						// Only trigger error handling if we HAD previously connected to a channel
+						// "Please join a channel" before connection is NOT an error
+						if (name === "TalkToFigma" && this.figmaChannelConnected) {
+							const lowerOutput = output.toLowerCase()
+							// These patterns indicate a real disconnection AFTER being connected
+							const isFigmaConnectionError =
+								lowerOutput.includes("disconnected from channel") ||
+								lowerOutput.includes("disconnected from figma") ||
+								lowerOutput.includes("left channel") ||
+								lowerOutput.includes("channel closed") ||
+								lowerOutput.includes("websocket closed") ||
+								lowerOutput.includes("connection lost") ||
+								lowerOutput.includes("socket closed") ||
+								lowerOutput.includes("socket error") ||
+								lowerOutput.includes("aggregateerror") ||
+								lowerOutput.includes("econnrefused") ||
+								lowerOutput.includes("connection error") ||
+								lowerOutput.includes("connection refused")
+
+							if (isFigmaConnectionError && !this.figmaErrorPromptPending) {
+								console.log("[McpHub] TalkToFigma disconnection detected:", output)
+								this.figmaErrorPromptPending = true
+								// Trigger reconnection prompt (with debounce to prevent multiple prompts)
+								setTimeout(() => {
+									this.handleFigmaConnectionError(output).finally(() => {
+										this.figmaErrorPromptPending = false
+									})
+								}, 500)
 							}
 						}
 					})
@@ -1011,10 +1407,7 @@ export class McpHub {
 		const attempts = this.reconnectAttempts.get(key) || 0
 
 		// Calculate delay with exponential backoff (2s, 4s, 8s, ... up to 30s)
-		const delay = Math.min(
-			McpHub.BASE_RECONNECT_DELAY * Math.pow(2, attempts),
-			McpHub.MAX_RECONNECT_DELAY
-		)
+		const delay = Math.min(McpHub.BASE_RECONNECT_DELAY * Math.pow(2, attempts), McpHub.MAX_RECONNECT_DELAY)
 
 		console.log(`[McpHub] Scheduling auto-reconnect for "${name}" in ${delay}ms (attempt ${attempts + 1})`)
 
@@ -1066,7 +1459,7 @@ export class McpHub {
 
 				// Remove from connections array
 				this.connections = this.connections.filter(
-					(conn) => !(conn.server.name === name && conn.server.source === source)
+					(conn) => !(conn.server.name === name && conn.server.source === source),
 				)
 
 				// Try to connect
@@ -1261,6 +1654,22 @@ export class McpHub {
 		for (const connection of connections) {
 			try {
 				if (connection.type === "connected") {
+					// For TalkToFigma, try to access the underlying process and kill it forcefully
+					if (name === "TalkToFigma") {
+						try {
+							// Try to kill the process more forcefully
+							const transport = connection.transport as any
+							if (transport._process) {
+								console.log(`[McpHub] Killing TalkToFigma process (pid: ${transport._process.pid})`)
+								transport._process.kill("SIGKILL")
+							} else if (transport.process) {
+								console.log(`[McpHub] Killing TalkToFigma process (pid: ${transport.process.pid})`)
+								transport.process.kill("SIGKILL")
+							}
+						} catch (killError) {
+							console.log(`[McpHub] Could not access TalkToFigma process for forceful kill:`, killError)
+						}
+					}
 					await connection.transport.close()
 					await connection.client.close()
 				}
@@ -1442,6 +1851,8 @@ export class McpHub {
 		// Special handling for built-in figma-write server
 		if (serverName === "figma-write") {
 			vscode.window.showInformationMessage(t("mcp:info.server_restarting", { serverName }))
+			// Reset Figma channel connection state
+			this.resetFigmaChannelConnection()
 			await delay(500)
 			// Delete existing connection first
 			await this.deleteConnection(serverName, source)
@@ -1451,6 +1862,48 @@ export class McpHub {
 				await this.initializeBuiltInFigmaWriteServer(provider)
 			}
 			await this.notifyWebviewOfServerChanges()
+			this.isConnecting = false
+			return
+		}
+
+		// Special handling for built-in TalkToFigma server
+		if (serverName === "TalkToFigma") {
+			vscode.window.showInformationMessage(t("mcp:info.server_restarting", { serverName }))
+			// Reset Figma channel connection state
+			this.resetFigmaChannelConnection()
+			// Reset initialization tracking to allow re-initialization
+			this.talkToFigmaInitializing = false
+			this.lastTalkToFigmaInitTime = 0
+
+			// Delete existing connection first - this should kill the process
+			await this.deleteConnection(serverName, source)
+
+			// Wait longer for the process to fully terminate and release the port
+			await delay(3000)
+
+			// Re-initialize with retry for EADDRINUSE
+			const maxRetries = 3
+			let lastError: Error | undefined
+			for (let attempt = 1; attempt <= maxRetries; attempt++) {
+				try {
+					console.log(`[McpHub] Attempting to restart TalkToFigma (attempt ${attempt}/${maxRetries})`)
+					await this.initializeBuiltInTalkToFigmaServer()
+					await this.notifyWebviewOfServerChanges()
+					this.isConnecting = false
+					return
+				} catch (error) {
+					lastError = error instanceof Error ? error : new Error(String(error))
+					console.error(`[McpHub] TalkToFigma restart attempt ${attempt} failed:`, error)
+					if (attempt < maxRetries && lastError.message.includes("EADDRINUSE")) {
+						// Wait longer between retries (exponential backoff)
+						const waitTime = 2000 * attempt
+						console.log(`[McpHub] Waiting ${waitTime}ms before retry...`)
+						await delay(waitTime)
+					}
+				}
+			}
+			// All retries failed
+			vscode.window.showErrorMessage(`TalkToFigma 伺服器重啟失敗: ${lastError?.message || "Unknown error"}`)
 			this.isConnecting = false
 			return
 		}
@@ -1542,16 +1995,25 @@ export class McpHub {
 				await this.deleteConnection(conn.server.name, conn.server.source)
 			}
 
+			// Reset TalkToFigma initialization tracking
+			this.talkToFigmaInitializing = false
+			this.lastTalkToFigmaInitTime = 0
+			this.resetFigmaChannelConnection()
+
+			// Wait for processes to fully terminate and release ports
+			await delay(3000)
+
 			// Re-initialize all servers from scratch
 			// This ensures proper initialization including fetching tools, resources, etc.
 			await this.initializeMcpServers("global")
 			await this.initializeMcpServers("project")
-			
-			// Re-initialize built-in figma-write server if not already configured
+
+			// Re-initialize built-in servers if not already configured
 			const provider = this.providerRef.deref()
 			if (provider) {
 				await this.initializeBuiltInFigmaWriteServer(provider)
 			}
+			await this.initializeBuiltInTalkToFigmaServer()
 
 			await delay(100)
 
@@ -1935,6 +2397,11 @@ export class McpHub {
 	): Promise<McpToolCallResponse> {
 		const connection = this.findConnection(serverName, source)
 		if (!connection || connection.type !== "connected") {
+			// Check if this is a Figma server and trigger reconnection
+			if (serverName === "TalkToFigma" || serverName === "figma-write") {
+				console.log(`[McpHub] Figma server "${serverName}" not connected, triggering reconnection prompt`)
+				await this.handleFigmaConnectionError(`Server ${serverName} not connected`)
+			}
 			throw new Error(
 				`No connection found for server: ${serverName}${source ? ` with source ${source}` : ""}. Please make sure to use MCP servers available under 'Connected MCP Servers'.`,
 			)
@@ -1956,23 +2423,97 @@ export class McpHub {
 		// Coerce string numbers to actual numbers for Figma tools
 		// LLMs often send "400" instead of 400 for numeric fields
 		let processedArguments = toolArguments
-		if (serverName.toLowerCase().startsWith("fig") && toolArguments) {
+		const isFigmaServer =
+			serverName === "TalkToFigma" || serverName === "figma-write" || serverName.toLowerCase().includes("figma")
+		if (isFigmaServer && toolArguments) {
 			processedArguments = this.coerceNumericArguments(toolArguments)
+			// For TalkToFigma, also map tool-specific parameters (like fillColor format)
+			if (serverName === "TalkToFigma") {
+				processedArguments = this.mapTalkToFigmaArguments(toolName, processedArguments)
+			}
 		}
 
-		return await connection.client.request(
-			{
-				method: "tools/call",
-				params: {
-					name: toolName,
-					arguments: processedArguments,
+		try {
+			const result = await connection.client.request(
+				{
+					method: "tools/call",
+					params: {
+						name: toolName,
+						arguments: processedArguments,
+					},
 				},
-			},
-			CallToolResultSchema,
-			{
-				timeout,
-			},
-		)
+				CallToolResultSchema,
+				{
+					timeout,
+				},
+			)
+
+			// Check if the result indicates a Figma connection error
+			// Only trigger error handling for tool call failures, not for "please join" messages before connection
+			if ((serverName === "TalkToFigma" || serverName === "figma-write") && result.content) {
+				const textContent = result.content.find((c: { type: string }) => c.type === "text")
+				if (textContent && "text" in textContent) {
+					const text = (textContent.text as string).toLowerCase()
+					console.log(`[McpHub] Figma tool response:`, (textContent.text as string).substring(0, 200))
+
+					// Check for connection error patterns in tool response
+					// These indicate the tool call failed due to connection issues
+					const isRealError =
+						text.includes("not connected") ||
+						text.includes("disconnected") ||
+						text.includes("channel not found") ||
+						text.includes("no channel") ||
+						text.includes("join a channel") ||
+						text.includes("please join") ||
+						text.includes("not joined") ||
+						text.includes("websocket error") ||
+						text.includes("socket closed") ||
+						text.includes("connection lost") ||
+						text.includes("failed to send") ||
+						text.includes("no active connection") ||
+						text.includes("unable to send") ||
+						text.includes("connection refused") ||
+						text.includes("timeout") ||
+						(text.includes("error") && text.includes("connection"))
+
+					if (isRealError) {
+						console.log(`[McpHub] Figma connection error detected in response:`, textContent.text)
+						// Trigger reconnection prompt asynchronously
+						this.handleFigmaConnectionError(textContent.text as string).catch(console.error)
+					}
+				}
+			}
+
+			// Also check if result has isError flag
+			if ((serverName === "TalkToFigma" || serverName === "figma-write") && result.isError) {
+				const textContent = result.content?.find((c: { type: string }) => c.type === "text")
+				const errorText = textContent && "text" in textContent ? (textContent.text as string) : "Unknown error"
+				console.log(`[McpHub] Figma tool returned error:`, errorText)
+				this.handleFigmaConnectionError(errorText).catch(console.error)
+			}
+
+			return result
+		} catch (error) {
+			// Check if this is a Figma server and the error looks like a connection issue
+			if (serverName === "TalkToFigma" || serverName === "figma-write") {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				console.log(`[McpHub] Figma tool call failed:`, errorMessage)
+
+				// Check for connection-related errors
+				if (
+					errorMessage.toLowerCase().includes("timeout") ||
+					errorMessage.toLowerCase().includes("disconnect") ||
+					errorMessage.toLowerCase().includes("socket") ||
+					errorMessage.toLowerCase().includes("connection") ||
+					errorMessage.toLowerCase().includes("econnrefused") ||
+					errorMessage.toLowerCase().includes("not connected")
+				) {
+					// Trigger reconnection prompt asynchronously
+					this.handleFigmaConnectionError(errorMessage).catch(console.error)
+				}
+			}
+			throw error
+		}
 	}
 
 	/**
@@ -1980,7 +2521,19 @@ export class McpHub {
 	 * This handles common LLM mistakes where numbers are sent as strings
 	 */
 	private coerceNumericArguments(args: Record<string, unknown>): Record<string, unknown> {
-		const numericFields = ["width", "height", "x", "y", "fontSize", "opacity", "cornerRadius", "minItems"]
+		const numericFields = [
+			"width",
+			"height",
+			"x",
+			"y",
+			"fontSize",
+			"opacity",
+			"cornerRadius",
+			"minItems",
+			"r",
+			"g",
+			"b",
+		]
 		const result: Record<string, unknown> = { ...args }
 
 		for (const [key, value] of Object.entries(args)) {
@@ -1990,6 +2543,235 @@ export class McpHub {
 					result[key] = parsed
 				}
 			}
+		}
+
+		return result
+	}
+
+	/**
+	 * Map arguments for TalkToFigma-specific tools
+	 * Handles parameter format differences like fillColor (hex string -> RGB object)
+	 */
+	private mapTalkToFigmaArguments(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+		const result = { ...args }
+
+		// TalkToFigma uses 'parentId' instead of 'parent' for specifying parent frame
+		if (result.parent && !result.parentId) {
+			result.parentId = result.parent
+			delete result.parent
+			console.log(`[McpHub] Mapped 'parent' to 'parentId': ${result.parentId}`)
+		}
+
+		// Convert color value to RGB object - handles hex strings, JSON strings, and objects
+		const toRgbObject = (value: unknown): { r: number; g: number; b: number } | null => {
+			// Already an object with r, g, b
+			if (typeof value === "object" && value !== null) {
+				const obj = value as Record<string, unknown>
+				if (typeof obj.r === "number" && typeof obj.g === "number" && typeof obj.b === "number") {
+					return { r: obj.r, g: obj.g, b: obj.b }
+				}
+			}
+
+			// String value - could be hex or JSON
+			if (typeof value === "string") {
+				const str = value.trim()
+
+				// Try parsing as JSON first (e.g., '{"r": 1, "g": 1, "b": 1}')
+				if (str.startsWith("{")) {
+					try {
+						const parsed = JSON.parse(str)
+						if (
+							typeof parsed.r === "number" &&
+							typeof parsed.g === "number" &&
+							typeof parsed.b === "number"
+						) {
+							return { r: parsed.r, g: parsed.g, b: parsed.b }
+						}
+					} catch {
+						// Not valid JSON, try hex
+					}
+				}
+
+				// Try parsing as hex color (e.g., '#ffffff' or 'ffffff')
+				const cleanHex = str.replace(/^#/, "")
+				if (/^[0-9a-fA-F]{6}$/.test(cleanHex)) {
+					return {
+						r: parseInt(cleanHex.substring(0, 2), 16) / 255,
+						g: parseInt(cleanHex.substring(2, 4), 16) / 255,
+						b: parseInt(cleanHex.substring(4, 6), 16) / 255,
+					}
+				}
+			}
+
+			return null
+		}
+
+		// create_rectangle: TalkToFigma uses 'radius' instead of 'cornerRadius', 'color' instead of 'hex'
+		if (toolName === "create_rectangle") {
+			// Map cornerRadius to radius
+			if (result.cornerRadius !== undefined && result.radius === undefined) {
+				result.radius = result.cornerRadius
+				delete result.cornerRadius
+				console.log(`[McpHub] create_rectangle: Mapped cornerRadius to radius: ${result.radius}`)
+			}
+			// Ensure radius is a number and has minimum value
+			if (typeof result.radius === "string") {
+				result.radius = parseFloat(result.radius) || 8
+			}
+			if (result.radius === undefined || result.radius < 8) {
+				result.radius = 12 // Use 12 as default for better visibility
+				console.log(`[McpHub] create_rectangle: Set default radius: ${result.radius}`)
+			}
+			// Map hex to color (TalkToFigma might expect RGB object)
+			if (result.hex && !result.color) {
+				// Try sending as hex string first, TalkToFigma may accept it
+				result.color = result.hex
+				delete result.hex
+				console.log(`[McpHub] create_rectangle: Mapped hex to color: ${result.color}`)
+			}
+			console.log(`[McpHub] create_rectangle FINAL PARAMS:`, JSON.stringify(result))
+		}
+
+		// create_frame expects fillColor as RGB object
+		if (toolName === "create_frame") {
+			if (result.fillColor) {
+				const rgb = toRgbObject(result.fillColor)
+				if (rgb) {
+					console.log(`[McpHub] Converting fillColor to RGB object:`, rgb)
+					result.fillColor = rgb
+				}
+			}
+			if (result.color) {
+				const rgb = toRgbObject(result.color)
+				if (rgb) {
+					console.log(`[McpHub] Converting color to fillColor RGB object:`, rgb)
+					result.fillColor = rgb
+					delete result.color
+				}
+			}
+			if (result.hex) {
+				const rgb = toRgbObject(result.hex)
+				if (rgb) {
+					console.log(`[McpHub] Converting hex to fillColor RGB object:`, rgb)
+					result.fillColor = rgb
+					delete result.hex
+				}
+			}
+		}
+
+		// create_text expects fontColor as RGB object
+		if (toolName === "create_text") {
+			if (result.fontColor) {
+				const rgb = toRgbObject(result.fontColor)
+				if (rgb) {
+					console.log(`[McpHub] Converting fontColor to RGB object:`, rgb)
+					result.fontColor = rgb
+				}
+			}
+			if (result.color) {
+				const rgb = toRgbObject(result.color)
+				if (rgb) {
+					console.log(`[McpHub] Converting color to fontColor RGB object:`, rgb)
+					result.fontColor = rgb
+					delete result.color
+				}
+			}
+		}
+
+		// set_fill_color, set_fill, set_text_color expect r, g, b as separate number parameters
+		if (toolName === "set_fill_color" || toolName === "set_fill" || toolName === "set_text_color") {
+			// If color object is passed instead of r, g, b separately
+			if (result.color && typeof result.color === "object") {
+				const colorObj = result.color as Record<string, unknown>
+				if (colorObj.r !== undefined) result.r = colorObj.r
+				if (colorObj.g !== undefined) result.g = colorObj.g
+				if (colorObj.b !== undefined) result.b = colorObj.b
+				delete result.color
+				console.log(`[McpHub] Extracted r, g, b from color object:`, { r: result.r, g: result.g, b: result.b })
+			}
+			// If color is a string (hex or JSON), convert it
+			if (result.color && typeof result.color === "string") {
+				const rgb = toRgbObject(result.color)
+				if (rgb) {
+					result.r = rgb.r
+					result.g = rgb.g
+					result.b = rgb.b
+					delete result.color
+					console.log(`[McpHub] Converted color string to r, g, b:`, rgb)
+				}
+			}
+			// Ensure r, g, b are numbers (coerce from string if needed)
+			for (const key of ["r", "g", "b"]) {
+				if (typeof result[key] === "string") {
+					const parsed = parseFloat(result[key] as string)
+					if (!isNaN(parsed)) {
+						result[key] = parsed
+					}
+				}
+			}
+		}
+
+		// get_nodes_info expects nodeIds as array
+		if (toolName === "get_nodes_info") {
+			if (typeof result.nodeIds === "string") {
+				// Try parsing as JSON array
+				const str = (result.nodeIds as string).trim()
+				if (str.startsWith("[")) {
+					try {
+						result.nodeIds = JSON.parse(str)
+						console.log(`[McpHub] Parsed nodeIds from JSON string:`, result.nodeIds)
+					} catch {
+						// If not valid JSON, split by comma
+						result.nodeIds = str.split(",").map((s: string) => s.trim())
+						console.log(`[McpHub] Split nodeIds by comma:`, result.nodeIds)
+					}
+				} else {
+					// Single node ID or comma-separated
+					result.nodeIds = str.split(",").map((s: string) => s.trim())
+					console.log(`[McpHub] Split nodeIds by comma:`, result.nodeIds)
+				}
+			}
+		}
+
+		// get_node_info - check if nodeId comes under different key
+		if (toolName === "get_node_info") {
+			if (result.nodeId === undefined) {
+				// Try alternative parameter names
+				if (result.id) {
+					result.nodeId = result.id
+					delete result.id
+					console.log(`[McpHub] Renamed 'id' to 'nodeId':`, result.nodeId)
+				} else if (result.node_id) {
+					result.nodeId = result.node_id
+					delete result.node_id
+					console.log(`[McpHub] Renamed 'node_id' to 'nodeId':`, result.nodeId)
+				}
+			}
+		}
+
+		// set_corner_radius - Handle different parameter names between figma-write and TalkToFigma
+		if (toolName === "set_corner_radius") {
+			// Get the radius value from any available parameter
+			let radiusValue = result.radius ?? result.cornerRadius ?? 8
+			if (typeof radiusValue === "string") {
+				radiusValue = parseFloat(radiusValue) || 8
+			}
+			// Ensure minimum visibility
+			if (radiusValue < 8) {
+				radiusValue = 8
+			}
+
+			// Send BOTH uniform radius AND per-corner parameters for maximum compatibility
+			result.radius = radiusValue
+			result.cornerRadius = radiusValue
+			result.topLeft = radiusValue
+			result.topRight = radiusValue
+			result.bottomRight = radiusValue
+			result.bottomLeft = radiusValue
+
+			console.log(
+				`[McpHub] set_corner_radius: radius=${radiusValue}, all corners=${radiusValue} (nodeId: ${result.nodeId})`,
+			)
 		}
 
 		return result

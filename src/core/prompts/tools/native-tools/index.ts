@@ -22,6 +22,7 @@ import updateTodoList from "./update_todo_list"
 import writeToFile from "./write_to_file"
 import parallelUiTasks from "./parallel_ui_tasks"
 import parallelMcpCalls from "./parallel_mcp_calls"
+import adjustLayout from "./adjust_layout"
 
 export { getMcpServerTools } from "./mcp_server"
 export { convertOpenAIToolToAnthropic, convertOpenAIToolsToAnthropic } from "./converters"
@@ -78,6 +79,7 @@ export function getNativeTools(options: NativeToolsOptions = {}): OpenAI.Chat.Ch
 		writeToFile,
 		parallelUiTasks,
 		parallelMcpCalls,
+		adjustLayout,
 	] satisfies OpenAI.Chat.ChatCompletionTool[]
 }
 

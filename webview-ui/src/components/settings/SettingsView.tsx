@@ -175,6 +175,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		maxWorkspaceFiles,
 		mcpEnabled,
 		figmaEnabled,
+		figmaWriteEnabled,
+		talkToFigmaEnabled,
 		remoteBrowserHost,
 		screenshotQuality,
 		soundEnabled,
@@ -435,6 +437,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					experiments,
 					customSupportPrompts,
 					figmaEnabled: figmaEnabled ?? false,
+					figmaWriteEnabled: figmaWriteEnabled ?? false,
+					talkToFigmaEnabled: talkToFigmaEnabled ?? true,
 				},
 			})
 
@@ -832,6 +836,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 						{renderTab === "figma" && (
 							<FigmaSettings
 								figmaEnabled={cachedState.figmaEnabled}
+								figmaWriteEnabled={cachedState.figmaWriteEnabled}
+								talkToFigmaEnabled={cachedState.talkToFigmaEnabled}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

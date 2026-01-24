@@ -357,6 +357,8 @@ export type ExtensionState = Pick<
 	| "maxGitStatusFiles"
 	| "requestDelaySeconds"
 	| "figmaEnabled"
+	| "figmaWriteEnabled"
+	| "talkToFigmaEnabled"
 > & {
 	version: string
 	clineMessages: ClineMessage[]

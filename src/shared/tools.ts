@@ -86,6 +86,20 @@ export const toolParamNames = [
 	// Parallel MCP calls parameters
 	"server",
 	"calls",
+	// Adjust layout parameters
+	"layout",
+	"columns",
+	"gap",
+	"gapX",
+	"gapY",
+	"startX",
+	"startY",
+	"within",
+	"nodeIds",
+	"excludeTypes",
+	"sortBy",
+	// Parallel UI tasks additional parameters
+	"containerFrame",
 ] as const
 
 export type ToolParamName = (typeof toolParamNames)[number]
@@ -121,8 +135,21 @@ export type NativeToolArgs = {
 	use_mcp_tool: { server_name: string; tool_name: string; arguments?: Record<string, unknown> }
 	write_to_file: { path: string; content: string }
 	// Sentinel Edition tools
-	parallel_ui_tasks: { tasks: string }
+	parallel_ui_tasks: { tasks: string; containerFrame?: string }
 	parallel_mcp_calls: { server: string; calls: string }
+	adjust_layout: {
+		layout: string
+		columns?: string
+		gap?: string
+		gapX?: string
+		gapY?: string
+		startX?: string
+		startY?: string
+		within?: string
+		nodeIds?: string
+		excludeTypes?: string
+		sortBy?: string
+	}
 }
 
 /**
@@ -250,7 +277,7 @@ export interface GenerateImageToolUse extends ToolUse<"generate_image"> {
 
 export interface ParallelUITasksToolUse extends ToolUse<"parallel_ui_tasks"> {
 	name: "parallel_ui_tasks"
-	params: Partial<Pick<Record<ToolParamName, string>, "tasks">>
+	params: Partial<Pick<Record<ToolParamName, string>, "tasks" | "containerFrame">>
 }
 
 // Define tool group configuration
@@ -289,6 +316,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	handoff_context: "handoff context to next agent",
 	parallel_ui_tasks: "execute parallel UI drawing tasks",
 	parallel_mcp_calls: "execute parallel MCP tool calls",
+	adjust_layout: "arrange Figma nodes in grid/row/column layout",
 } as const
 
 // Define available tool groups.
@@ -307,7 +335,7 @@ export const TOOL_GROUPS: Record<ToolGroup, ToolGroupConfig> = {
 		tools: ["execute_command"],
 	},
 	mcp: {
-		tools: ["use_mcp_tool", "access_mcp_resource", "parallel_ui_tasks", "parallel_mcp_calls"],
+		tools: ["use_mcp_tool", "access_mcp_resource", "parallel_ui_tasks", "parallel_mcp_calls", "adjust_layout"],
 	},
 	modes: {
 		tools: ["switch_mode", "new_task"],
@@ -327,6 +355,7 @@ export const ALWAYS_AVAILABLE_TOOLS: ToolName[] = [
 	"start_background_service", // Sentinel Edition: Always available for starting servers
 	"parallel_ui_tasks", // Sentinel Edition: Always available for parallel UI design
 	"parallel_mcp_calls", // Sentinel Edition: Always available for parallel MCP operations
+	"adjust_layout", // Sentinel Edition: Always available for auto-layout of Figma nodes
 ] as const
 
 /**

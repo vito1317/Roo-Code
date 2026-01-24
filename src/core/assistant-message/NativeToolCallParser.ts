@@ -590,7 +590,11 @@ export class NativeToolCallParser {
 
 			case "handoff_context": {
 				// Handle notes and context_json parameters during streaming
-				let contextJson = partialArgs.context_json || partialArgs.contextJson || partialArgs.context_data || partialArgs.contextData
+				let contextJson =
+					partialArgs.context_json ||
+					partialArgs.contextJson ||
+					partialArgs.context_data ||
+					partialArgs.contextData
 				if (typeof contextJson === "object" && contextJson !== null) {
 					contextJson = JSON.stringify(contextJson)
 				}
@@ -618,7 +622,10 @@ export class NativeToolCallParser {
 						// Keep as string during streaming
 					}
 				}
-				nativeArgs = { tasks: tasksArray }
+				nativeArgs = {
+					tasks: tasksArray,
+					containerFrame: partialArgs.containerFrame,
+				}
 				break
 			}
 
@@ -634,6 +641,23 @@ export class NativeToolCallParser {
 				nativeArgs = {
 					server: partialArgs.server || "figma-write",
 					calls: callsArray,
+				}
+				break
+			}
+
+			case "adjust_layout": {
+				nativeArgs = {
+					layout: partialArgs.layout || "grid",
+					columns: partialArgs.columns,
+					gap: partialArgs.gap,
+					gapX: partialArgs.gapX,
+					gapY: partialArgs.gapY,
+					startX: partialArgs.startX,
+					startY: partialArgs.startY,
+					within: partialArgs.within,
+					nodeIds: partialArgs.nodeIds,
+					excludeTypes: partialArgs.excludeTypes,
+					sortBy: partialArgs.sortBy,
 				}
 				break
 			}
@@ -955,7 +979,10 @@ export class NativeToolCallParser {
 						}
 					}
 					if (tasksArray && Array.isArray(tasksArray)) {
-						nativeArgs = { tasks: tasksArray } as unknown as NativeArgsFor<TName>
+						nativeArgs = {
+							tasks: tasksArray,
+							containerFrame: args.containerFrame,
+						} as unknown as NativeArgsFor<TName>
 					}
 					break
 				}
@@ -988,7 +1015,8 @@ export class NativeToolCallParser {
 				case "handoff_context": {
 					// Handle notes and context_json parameters
 					// context_json can be a string (stringified JSON) or already parsed object
-					let contextJson = args.context_json || args.contextJson || args.context_data || args.contextData || "{}"
+					let contextJson =
+						args.context_json || args.contextJson || args.context_data || args.contextData || "{}"
 					if (typeof contextJson === "object") {
 						contextJson = JSON.stringify(contextJson)
 					}
@@ -1005,6 +1033,24 @@ export class NativeToolCallParser {
 						service_type: args.service_type || args.serviceType || "",
 						port: args.port,
 						wait_ms: args.wait_ms || args.waitMs,
+					} as unknown as NativeArgsFor<TName>
+					break
+				}
+
+				case "adjust_layout": {
+					// Handle adjust_layout parameters - all are strings
+					nativeArgs = {
+						layout: args.layout || "grid",
+						columns: args.columns,
+						gap: args.gap,
+						gapX: args.gapX,
+						gapY: args.gapY,
+						startX: args.startX,
+						startY: args.startY,
+						within: args.within,
+						nodeIds: args.nodeIds,
+						excludeTypes: args.excludeTypes,
+						sortBy: args.sortBy,
 					} as unknown as NativeArgsFor<TName>
 					break
 				}

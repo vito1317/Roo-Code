@@ -176,7 +176,20 @@ export const globalSettingsSchema = z.object({
 	mcpEnabled: z.boolean().optional(),
 	enableMcpServerCreation: z.boolean().optional(),
 
+	// Figma Integration settings
 	figmaEnabled: z.boolean().optional(),
+	/**
+	 * Enable figma-write MCP server (local bridge for Figma plugin)
+	 * Only one of figmaWriteEnabled or talkToFigmaEnabled should be true
+	 * @default false
+	 */
+	figmaWriteEnabled: z.boolean().optional(),
+	/**
+	 * Enable TalkToFigma MCP server (ai-figma-mcp for WebSocket connection)
+	 * Only one of figmaWriteEnabled or talkToFigmaEnabled should be true
+	 * @default true (recommended)
+	 */
+	talkToFigmaEnabled: z.boolean().optional(),
 
 	mode: z.string().optional(),
 	modeApiConfigs: z.record(z.string(), z.string()).optional(),

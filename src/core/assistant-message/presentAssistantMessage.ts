@@ -9,6 +9,7 @@ import { customToolRegistry } from "@roo-code/core"
 import { t } from "../../i18n"
 
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
+import { isSentinelAgent } from "../sentinel/personas"
 import type { ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
 import { experiments, EXPERIMENT_IDS } from "../../shared/experiments"
 
@@ -40,11 +41,83 @@ import { handoffContextTool } from "../tools/HandoffContextTool"
 import { startBackgroundServiceTool } from "../tools/StartBackgroundServiceTool"
 import { parallelUITasksTool } from "../tools/ParallelUITasksTool"
 import { parallelMcpCallsTool } from "../tools/ParallelMcpCallsTool"
+import { adjustLayoutTool } from "../tools/AdjustLayoutTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
+
+/**
+ * Architect system prompt for tool approval decisions
+ */
+const ARCHITECT_APPROVAL_SYSTEM_PROMPT = `你是 Sentinel Edition 的架構師代理 (Architect Agent)。
+
+你的任務是審批其他 AI Agent 請求使用的工具。請根據工具類型和參數決定是否允許執行。
+
+審批原則：
+1. **安全性** - 確保工具操作不會造成不可逆的損害
+2. **必要性** - 確認工具使用是完成任務所必需的
+3. **正確性** - 驗證工具參數是否合理
+
+回答格式：
+- 如果允許，回答: APPROVE
+- 如果拒絕，回答: REJECT: [拒絕原因]
+
+注意：大多數情況下應該允許工具執行，除非有明顯的安全問題或錯誤。`
+
+/**
+ * Ask Architect to approve a tool usage request
+ * Returns true if approved, false if rejected
+ */
+async function askArchitectForApproval(
+	cline: Task,
+	toolDescription: string,
+): Promise<{ approved: boolean; feedback?: string }> {
+	console.log(`[ArchitectApproval] Routing approval request to Architect: "${toolDescription.substring(0, 100)}..."`)
+
+	try {
+		const messages = [
+			{
+				role: "user" as const,
+				content: `請審批以下工具使用請求：
+
+${toolDescription}
+
+請決定是否允許執行此工具。回答 "APPROVE" 或 "REJECT: [原因]"`,
+			},
+		]
+
+		const stream = cline.api.createMessage(ARCHITECT_APPROVAL_SYSTEM_PROMPT, messages, {
+			taskId: `architect-approval-${Date.now()}`,
+		})
+
+		let responseText = ""
+		for await (const chunk of stream) {
+			if (chunk.type === "text") {
+				responseText += chunk.text
+			}
+		}
+
+		console.log(`[ArchitectApproval] Architect response: "${responseText}"`)
+
+		// Parse Architect's decision
+		const normalizedResponse = responseText.trim().toUpperCase()
+		if (normalizedResponse.startsWith("APPROVE")) {
+			await cline.say("text", `🟦 **Architect 審批通過**\n\n工具請求已被 Architect 自動批准。`)
+			return { approved: true }
+		} else {
+			const reason = responseText.replace(/^REJECT:?\s*/i, "").trim() || "Architect 拒絕了此操作"
+			await cline.say("text", `🟦 **Architect 審批拒絕**\n\n${reason}`)
+			return { approved: false, feedback: reason }
+		}
+	} catch (error) {
+		console.error(`[ArchitectApproval] Failed to get Architect decision:`, error)
+		// Default to approve on error to avoid blocking workflow
+		await cline.say("text", `🟦 **Architect 審批** - 無法獲取審批結果，默認允許執行。`)
+		return { approved: true }
+	}
+}
 
 /**
  * Processes and presents assistant message content to the user interface.
@@ -210,6 +283,29 @@ export async function presentAssistantMessage(cline: Task) {
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
 			) => {
+				// Check if we're in Sentinel mode (but not Architect) - route to Architect for approval
+				const currentMode = await cline.getTaskMode()
+				const shouldRouteToArchitect = isSentinelAgent(currentMode) && currentMode !== "sentinel-architect"
+
+				if (shouldRouteToArchitect && type === "tool") {
+					// Route to Architect for approval
+					const { approved, feedback } = await askArchitectForApproval(
+						cline,
+						partialMessage || toolDescription(),
+					)
+					if (!approved) {
+						if (feedback) {
+							pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(feedback)))
+						} else {
+							pushToolResult(formatResponse.toolDenied())
+						}
+						cline.didRejectTool = true
+						return false
+					}
+					return true
+				}
+
+				// Normal flow: ask the user
 				const { response, text, images } = await cline.ask(
 					type,
 					partialMessage,
@@ -545,6 +641,27 @@ export async function presentAssistantMessage(cline: Task) {
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
 			) => {
+				// Check if we're in Sentinel mode (but not Architect) - route to Architect for approval
+				const currentMode = await cline.getTaskMode()
+				const shouldRouteToArchitect = isSentinelAgent(currentMode) && currentMode !== "sentinel-architect"
+
+				if (shouldRouteToArchitect && type === "tool") {
+					// Route to Architect for approval
+					const toolDesc = partialMessage || `[tool: ${block.name}]`
+					const { approved, feedback } = await askArchitectForApproval(cline, toolDesc)
+					if (!approved) {
+						if (feedback) {
+							pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(feedback)))
+						} else {
+							pushToolResult(formatResponse.toolDenied())
+						}
+						cline.didRejectTool = true
+						return false
+					}
+					return true
+				}
+
+				// Normal flow: ask the user
 				const { response, text, images } = await cline.ask(
 					type,
 					partialMessage,
@@ -946,6 +1063,13 @@ export async function presentAssistantMessage(cline: Task) {
 					break
 				case "parallel_mcp_calls":
 					await parallelMcpCallsTool.handle(cline, block as ToolUse<"parallel_mcp_calls">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+					})
+					break
+				case "adjust_layout":
+					await adjustLayoutTool.handle(cline, block as ToolUse<"adjust_layout">, {
 						askApproval,
 						handleError,
 						pushToolResult,

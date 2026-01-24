@@ -55,9 +55,9 @@ export interface ExtensionStateContextType extends ExtensionState {
 	// Sentinel Edition: Current agent state display
 	sentinelAgentState?: {
 		enabled: boolean
-		currentAgent: "IDLE" | "ARCHITECT" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
+		currentAgent: string
 		agentName: string
-		currentActivity?: string  // What agent is currently doing
+		currentActivity?: string // What agent is currently doing
 		lastHandoff?: {
 			from: string
 			to: string

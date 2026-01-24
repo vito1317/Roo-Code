@@ -462,6 +462,32 @@ export class ClineProvider
 				this.log(`[Sentinel] FSM initialized for task ${cline.taskId} in mode ${currentMode}`)
 			}
 		}
+
+		// TalkToFigma: Prompt for channel connection if server is available
+		// NOTE: This MUST happen AFTER FSM initialization to prevent the input box from being dismissed
+		const mcpHub = this.getMcpHub?.()
+		if (mcpHub && mcpHub.isTalkToFigmaConnected()) {
+			// Only prompt for channel connection if NOT already connected
+			// Don't reset connection state for new tasks - only reset on actual connection errors
+			// This prevents re-prompting when the user starts a new task while still connected
+			if (!mcpHub.isFigmaChannelConnected()) {
+				const isTopLevelTask = this.clineStack.length === 1 // Just added, so length is 1
+				if (isTopLevelTask) {
+					this.log(`[TalkToFigma] New task, checking channel connection...`)
+				}
+
+				// Prompt and WAIT for user to enter channel code before continuing
+				// Using await ensures the input box isn't dismissed by other UI changes
+				try {
+					const connected = await mcpHub.promptTalkToFigmaChannelConnection()
+					this.log(`[TalkToFigma] Channel connection result: ${connected}`)
+				} catch (error) {
+					this.log(`[TalkToFigma] Channel connection prompt failed: ${error}`)
+				}
+			} else {
+				this.log(`[TalkToFigma] Already connected to channel, skipping prompt`)
+			}
+		}
 	}
 
 	// Removes and destroys the top Cline instance (the current finished task),
@@ -1374,7 +1400,16 @@ export class ClineProvider
 				"sentinel-architect-final": "ARCHITECT_REVIEW",
 			}
 			const agentName = modeToAgentName[newMode] || "Agent"
-			const currentAgent = (modeToAgentState[newMode] || "IDLE") as "ARCHITECT" | "DESIGNER" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "IDLE" | "COMPLETED" | "BLOCKED"
+			const currentAgent = (modeToAgentState[newMode] || "IDLE") as
+				| "ARCHITECT"
+				| "DESIGNER"
+				| "BUILDER"
+				| "ARCHITECT_REVIEW"
+				| "QA"
+				| "SENTINEL"
+				| "IDLE"
+				| "COMPLETED"
+				| "BLOCKED"
 
 			// Update the webview with current agent state
 			this.postMessageToWebview({
@@ -1386,7 +1421,9 @@ export class ClineProvider
 				},
 			})
 
-			this.log(`[Sentinel] FSM started for mode ${newMode}, state: ${task.sentinelStateMachine.getCurrentState()}`)
+			this.log(
+				`[Sentinel] FSM started for mode ${newMode}, state: ${task.sentinelStateMachine.getCurrentState()}`,
+			)
 		} else if (task?.sentinelStateMachine) {
 			// Clear FSM when switching away from Sentinel modes
 			task.sentinelStateMachine.reset()

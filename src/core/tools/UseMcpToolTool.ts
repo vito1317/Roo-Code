@@ -64,14 +64,14 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				task.recordToolError("use_mcp_tool")
 				pushToolResult(
 					`❌ ERROR: "browser" is NOT an MCP server!\n\n` +
-					`browser_action is a BUILT-IN tool. Use this format instead:\n\n` +
-					`\`\`\`xml\n` +
-					`<browser_action>\n` +
-					`<action>launch</action>\n` +
-					`<url>http://localhost:3000</url>\n` +
-					`</browser_action>\n` +
-					`\`\`\`\n\n` +
-					`Available actions: launch, click, type, scroll_down, scroll_up, dom_extract, close`
+						`browser_action is a BUILT-IN tool. Use this format instead:\n\n` +
+						`\`\`\`xml\n` +
+						`<browser_action>\n` +
+						`<action>launch</action>\n` +
+						`<url>http://localhost:3000</url>\n` +
+						`</browser_action>\n` +
+						`\`\`\`\n\n` +
+						`Available actions: launch, click, type, scroll_down, scroll_up, dom_extract, close`,
 				)
 				return
 			}
@@ -121,7 +121,9 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"use_mcp_tool">): Promise<void> {
-		const nativeArgs = block.nativeArgs as { server_name?: string; tool_name?: string; arguments?: Record<string, unknown> } | undefined
+		const nativeArgs = block.nativeArgs as
+			| { server_name?: string; tool_name?: string; arguments?: Record<string, unknown> }
+			| undefined
 		const serverName = nativeArgs?.server_name
 
 		// Skip if no server name yet (still streaming)
@@ -365,7 +367,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		// Match any figma variation: figma, figma-write, fig, etc.
 		const isFigmaServer = serverName.toLowerCase().startsWith("fig")
 		const isFigmaWrite = serverName.toLowerCase().includes("write") || serverName === "fig"
-		
+
 		if (isFigmaServer && !isFigmaWrite) {
 			// For Figma Read, use "text" say type instead of MCP style
 			await task.say("text", `🎨 Calling Figma API: \`${toolName}\``)
@@ -373,8 +375,31 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		} else if (isFigmaServer) {
 			// For Figma Write, use standard MCP flow but with custom message
 			await task.say("text", `🎨 Creating in Figma: \`${toolName}\``)
-			// Use the standard MCP callTool - figma-write is registered as built-in server in McpHub
-			toolResult = await task.providerRef.deref()?.getMcpHub()?.callTool(serverName, toolName, parsedArguments)
+			// Determine the actual connected Figma server to use
+			// If figma-write is requested but not connected, use TalkToFigma instead (and vice versa)
+			const mcpHub = task.providerRef.deref()?.getMcpHub()
+			let actualServerName = serverName
+			if (mcpHub) {
+				const requestedServer = mcpHub.getServers().find((s) => s.name === serverName)
+				if (!requestedServer || requestedServer.status !== "connected") {
+					// Find alternative connected Figma server
+					const alternativeServer = mcpHub
+						.getServers()
+						.find(
+							(s) =>
+								(s.name === "TalkToFigma" || s.name === "figma-write") &&
+								s.name !== serverName &&
+								s.status === "connected",
+						)
+					if (alternativeServer) {
+						console.log(
+							`[UseMcpToolTool] ${serverName} not connected, using ${alternativeServer.name} instead`,
+						)
+						actualServerName = alternativeServer.name
+					}
+				}
+			}
+			toolResult = await mcpHub?.callTool(actualServerName, toolName, parsedArguments)
 		} else {
 			// Standard MCP tool handling
 			await task.say("mcp_server_request_started")
@@ -434,7 +459,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		} else {
 			await task.say("mcp_server_response", toolResultPretty)
 		}
-		
+
 		// Still push full result to LLM context (just not displayed verbosely in UI)
 		pushToolResult(formatResponse.toolResult(toolResultPretty))
 	}
@@ -505,7 +530,12 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		const figmaService = await getFigmaService()
 		if (!figmaService) {
 			return {
-				content: [{ type: "text", text: "Error: Figma API token not configured. Please set it in Settings → Figma Integration." }],
+				content: [
+					{
+						type: "text",
+						text: "Error: Figma API token not configured. Please set it in Settings → Figma Integration.",
+					},
+				],
 				isError: true,
 			}
 		}
@@ -515,7 +545,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 
 			switch (toolName) {
 				case "get_file": {
-					const fileKeyOrUrl = args?.file_key as string || args?.url as string
+					const fileKeyOrUrl = (args?.file_key as string) || (args?.url as string)
 					if (!fileKeyOrUrl) {
 						return {
 							content: [{ type: "text", text: "Error: file_key or url is required" }],
@@ -530,8 +560,9 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				}
 
 				case "get_nodes": {
-					const fileKeyOrUrl = args?.file_key as string || args?.url as string
-					const nodeIds = args?.node_ids as string[] || (args?.url ? extractNodeIds(args.url as string) : [])
+					const fileKeyOrUrl = (args?.file_key as string) || (args?.url as string)
+					const nodeIds =
+						(args?.node_ids as string[]) || (args?.url ? extractNodeIds(args.url as string) : [])
 					if (!fileKeyOrUrl) {
 						return {
 							content: [{ type: "text", text: "Error: file_key or url is required" }],
@@ -545,8 +576,8 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				}
 
 				case "get_images": {
-					const fileKeyOrUrl = args?.file_key as string || args?.url as string
-					const nodeIds = args?.node_ids as string[] || []
+					const fileKeyOrUrl = (args?.file_key as string) || (args?.url as string)
+					const nodeIds = (args?.node_ids as string[]) || []
 					const format = (args?.format as "png" | "jpg" | "svg") || "png"
 					const scale = (args?.scale as number) || 2
 					if (!fileKeyOrUrl || nodeIds.length === 0) {
@@ -557,12 +588,14 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 					}
 					const fileKey = extractFileKey(fileKeyOrUrl) || fileKeyOrUrl
 					const images = await figmaService.getImages(fileKey, nodeIds, { format, scale })
-					result = `# Figma Image URLs\n\n${Object.entries(images.images).map(([id, url]) => `- ${id}: ${url}`).join("\n")}`
+					result = `# Figma Image URLs\n\n${Object.entries(images.images)
+						.map(([id, url]) => `- ${id}: ${url}`)
+						.join("\n")}`
 					break
 				}
 
 				case "get_simplified_structure": {
-					const fileKeyOrUrl = args?.file_key as string || args?.url as string
+					const fileKeyOrUrl = (args?.file_key as string) || (args?.url as string)
 					if (!fileKeyOrUrl) {
 						return {
 							content: [{ type: "text", text: "Error: file_key or url is required" }],
@@ -586,7 +619,12 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			return { content: [{ type: "text", text: result }], isError: false }
 		} catch (error) {
 			return {
-				content: [{ type: "text", text: `Figma API Error: ${error instanceof Error ? error.message : String(error)}` }],
+				content: [
+					{
+						type: "text",
+						text: `Figma API Error: ${error instanceof Error ? error.message : String(error)}`,
+					},
+				],
 				isError: true,
 			}
 		}
@@ -613,14 +651,17 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		const isAvailable = await figmaWriteService.isAvailable()
 		if (!isAvailable) {
 			return {
-				content: [{
-					type: "text",
-					text: "Error: Figma Write Bridge not available.\n\n" +
-						"Please ensure the Figma plugin is running:\n" +
-						"1. Open Figma\n" +
-						"2. Go to Plugins → Development → MCP Figma Write Bridge\n\n" +
-						"Falling back to ASCII design mode..."
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							"Error: Figma Write Bridge not available.\n\n" +
+							"Please ensure the Figma plugin is running:\n" +
+							"1. Open Figma\n" +
+							"2. Go to Plugins → Development → MCP Figma Write Bridge\n\n" +
+							"Falling back to ASCII design mode...",
+					},
+				],
 				isError: true,
 			}
 		}
