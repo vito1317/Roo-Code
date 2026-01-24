@@ -71,12 +71,18 @@ export class FigmaWriteService {
 
 		try {
 			const bridgePath = path.join(this.extensionPath, "tools", "figma-write-bridge")
-			
-			// Use tsx to run the server
-			this.process = spawn("npx", ["tsx", "server.ts"], {
+			const serverPath = path.join(bridgePath, "server.ts")
+			const nodeModulesPath = path.join(bridgePath, "node_modules")
+			const tsxPath = path.join(nodeModulesPath, "tsx", "dist", "esm", "index.mjs")
+
+			// Use node --import tsx/esm to run the server (same as McpHub)
+			this.process = spawn("node", ["--import", tsxPath, serverPath], {
 				stdio: ["pipe", "pipe", "pipe"],
 				cwd: bridgePath,
-				shell: true,
+				env: {
+					...process.env,
+					NODE_PATH: nodeModulesPath,
+				},
 			})
 
 			if (!this.process.stdout || !this.process.stdin) {
@@ -263,14 +269,13 @@ export function getFigmaWriteService(): FigmaWriteService | null {
 }
 
 export const FIGMA_WRITE_TOOLS = [
-	{ name: "create_frame", description: "Create a frame with width/height" },
-	{ name: "add_text", description: "Add a text node" },
-	{ name: "rectangle", description: "Create a rectangle" },
+	{ name: "create_frame", description: "Create a frame with width/height and optional name/position" },
+	{ name: "add_text", description: "Add a text node (param: text, x, y, fontSize)" },
+	{ name: "create_rectangle", description: "Create a rectangle with optional fill (param: width, height, x, y, cornerRadius, hex)" },
 	{ name: "set_position", description: "Move a node to (x,y)" },
 	{ name: "group_nodes", description: "Group nodes together" },
-	{ name: "set_fill", description: "Apply a solid fill color" },
-	{ name: "find_text_nodes", description: "Return all text nodes" },
-	{ name: "set_text_color", description: "Set text color" },
-	{ name: "add_icon_placeholder", description: "Insert icon placeholder" },
-	{ name: "clear_page", description: "Delete all nodes on page" },
+	{ name: "set_fill", description: "Apply a solid fill color (param: nodeId, hex)" },
+	{ name: "find_nodes", description: "Find nodes by type/name" },
+	{ name: "set_text_color", description: "Set text color (param: nodeId, hex)" },
+	{ name: "delete_node", description: "Delete a node by ID" },
 ]

@@ -20,14 +20,28 @@ export interface ModelPreference {
 }
 
 /**
+ * Context for dynamic prompt generation
+ */
+export interface PromptContext {
+	userRequest?: string
+	projectType?: string
+	uiType?: string  // e.g., "calculator", "form", "dashboard"
+	existingComponents?: string[]
+	figmaUrl?: string
+	previousAgentNotes?: string
+}
+
+/**
  * Extended agent persona with Sentinel-specific properties
  */
-export interface AgentPersona extends ModeConfig {
+export interface AgentPersona extends Omit<ModeConfig, "customInstructions"> {
 	preferredModel: ModelPreference
 	systemPromptFocus: string
 	handoffOutputSchema?: HandoffOutputSchema
 	canReceiveHandoffFrom: string[]
 	canHandoffTo: string[]
+	// Support both static string and dynamic function
+	customInstructions?: string | ((context: PromptContext) => string)
 }
 
 /**
@@ -65,14 +79,16 @@ export const ARCHITECT_AGENT: AgentPersona = {
 
 	systemPromptFocus: "產出 plan.json，定義技術棧，不寫具體代碼。專注於任務拆解和依賴關係分析。",
 
-	groups: ["read", "mcp"] as GroupEntry[],
+	groups: ["read", "edit"] as GroupEntry[],  // Architect reads and creates plan files
 
 	handoffOutputSchema: {
 		type: "json",
-		requiredFields: ["tasks", "techStack", "acceptanceCriteria"],
+		requiredFields: ["tasks", "techStack", "acceptanceCriteria", "needsDesign"],
 		template: `{
   "projectName": "string",
   "summary": "string",
+  "needsDesign": true,
+  "hasUI": true,
   "tasks": [
     {
       "id": "number",
@@ -100,11 +116,71 @@ export const ARCHITECT_AGENT: AgentPersona = {
 	},
 
 	canReceiveHandoffFrom: [],
-	canHandoffTo: ["sentinel-builder"],
+	canHandoffTo: ["sentinel-designer", "sentinel-builder"],
 
-	customInstructions: `## 輸出格式要求
+	customInstructions: `## 🎯 第一階段：規劃 (Planning Phase)
 
-你必須以 JSON 格式輸出開發計畫。使用 handoff_context 工具來提交你的計畫。
+**你的首要任務是創建詳細的實作計畫！**
+
+### 步驟 1：創建 plan.md 檔案
+
+使用 **write_to_file** 工具創建 \`plan.md\`，內容必須包含：
+
+1. **架構概覽** - 使用 Mermaid 圖表顯示組件結構
+2. **使用者流程** - 使用 Mermaid 流程圖顯示互動流程
+3. **驗收標準** - 需求清單
+4. **技術細節** - 要創建的檔案、使用的技術
+
+**Mermaid 圖表範例：**
+\`\`\`mermaid
+graph TD
+    A[使用者輸入] --> B[處理]
+    B --> C[輸出]
+\`\`\`
+
+### 步驟 2：使用 handoff_context 提交計畫
+
+創建 plan.md 後，使用 **handoff_context** 工具提交結構化計畫：
+
+\`\`\`xml
+<handoff_context>
+<context_json>{
+  "projectName": "計算機應用",
+  "summary": "創建一個現代化計算機 UI",
+  "needsDesign": true,
+  "hasUI": true,
+  "tasks": [...],
+  "techStack": {...}
+}</context_json>
+</handoff_context>
+\`\`\`
+
+## ⛔ 重要限制 - 你不能直接操作 Figma！
+
+**禁止行為：**
+- ❌ 不要調用 use_mcp_tool
+- ❌ 不要調用 figma-write 工具
+- ❌ 不要調用 create_frame、add_text、create_rectangle 等 Figma 工具
+- ❌ 不要嘗試直接在 Figma 中創建任何東西
+
+**你的職責只是規劃，UI 設計由 Designer Agent 負責！**
+
+## UI 設計判斷 (非常重要！)
+
+在你的計畫中，你 **必須** 設置以下欄位：
+- **needsDesign**: 如果專案涉及任何使用者介面 (UI)，設置為 true
+- **hasUI**: 如果專案有前端界面，設置為 true
+
+⚠️ 當 needsDesign: true 時，系統會自動切換到 **Designer Agent** 來處理 Figma 設計！
+
+以下類型的專案需要設置 needsDesign: true：
+- 網頁應用程式 (web apps)
+- 行動應用程式 (mobile apps)
+- 計算機、遊戲等有視覺界面的應用
+- 任何有 HTML/CSS/按鈕/表單的專案
+- 桌面應用程式 (desktop apps)
+
+只有純後端 API、CLI 工具、資料處理腳本等無 UI 的專案才設置 needsDesign: false。
 
 ## 任務拆解原則
 
@@ -380,23 +456,246 @@ export const SENTINEL_AGENT: AgentPersona = {
 }
 
 /**
- * Design Review Agent - Figma design completeness verification
+ * Designer Agent - UI/UX Design in Figma
  */
-export const DESIGN_REVIEW_AGENT: AgentPersona = {
-	slug: "sentinel-design-review",
-	name: "🔎 Design Review",
-	roleDefinition:
-		"You are Roo, the Design Review Agent in Sentinel Edition. " +
-		"Your job is to verify that Designer created ALL required UI elements before allowing progression to Builder.",
+export const DESIGNER_AGENT: AgentPersona = {
+	slug: "sentinel-designer",
+	name: "🎨 Designer",
+	roleDefinition: `你是 Sentinel Edition 的設計師代理 (Designer Agent)。
+
+你的核心職責：
+1. **UI 設計** - 根據 Architect 的計畫在 Figma 中創建 UI 設計
+2. **視覺設計** - 創建美觀、一致的視覺風格
+3. **元件建立** - 使用 Figma Write 工具創建 UI 元件
+4. **設計規格** - 輸出設計規格供 Builder 參考
+
+重要原則：
+- 你使用 figma-write MCP 工具來創建設計
+- 你的設計必須符合現代 UI/UX 最佳實踐
+- 完成後必須輸出 design-specs.md 記錄所有創建的元件`,
 
 	preferredModel: {
 		primary: "claude-3.5-sonnet",
 		fallback: "claude-3-haiku",
 	},
 
-	systemPromptFocus: "Verify Figma design completeness. Use find_nodes to count elements. Compare with design-specs.md.",
+	systemPromptFocus: "使用 Figma Write 工具創建 UI 設計。輸出 design-specs.md。專注於視覺設計和元件創建。",
 
-	groups: ["read", "mcp"] as GroupEntry[],
+	groups: ["read", "edit", "mcp"] as GroupEntry[],
+
+	handoffOutputSchema: {
+		type: "json",
+		requiredFields: ["designSpecs", "expectedElements"],
+		template: `{
+  "designSpecs": "design-specs.md",
+  "expectedElements": 45,
+  "createdComponents": ["header", "button", "form"],
+  "colorPalette": ["#primary", "#secondary"],
+  "typography": {
+    "headingFont": "string",
+    "bodyFont": "string"
+  }
+}`,
+	},
+
+	canReceiveHandoffFrom: ["sentinel-architect"],
+	canHandoffTo: ["sentinel-design-review"],
+
+	customInstructions: (context: PromptContext) => {
+		// Base instructions
+		let prompt = `## 🎯 你的主要任務：使用 parallel_ui_tasks 創建 UI
+
+收到 UI 設計請求時，分析需求並使用 parallel_ui_tasks 並行創建所有元素。
+
+### ⛔ 禁止事項
+
+- ❌ 不要先創建 frame（parallel_ui_tasks 自動創建容器！）
+- ❌ 不要用 use_mcp_tool 逐一創建元素（優先使用並行工具）
+
+### ✅ 正確做法
+
+**步驟 1**：分析 UI 需求，規劃所有元素（按鈕、輸入框、標籤等）
+
+**步驟 2**：調用 parallel_ui_tasks 創建所有元素：
+
+\`\`\`xml
+<parallel_ui_tasks>
+<tasks>[
+  {"id": "元素ID", "description": "元素描述", "designSpec": {"text": "顯示文字", "colors": ["背景色", "文字色"], "width": 寬度, "height": 高度}},
+  ...
+]</tasks>
+</parallel_ui_tasks>
+\`\`\`
+
+**步驟 3**（可選）：如需調整位置，優先使用 parallel_mcp_calls：
+
+\`\`\`xml
+<parallel_mcp_calls>
+<server>figma-write</server>
+<calls>[
+  {"tool": "set_position", "args": {"nodeId": "節點ID", "x": X座標, "y": Y座標}},
+  ...
+]</calls>
+</parallel_mcp_calls>
+\`\`\`
+
+**Fallback**：如果 parallel_mcp_calls 失敗，可用 use_mcp_tool 逐一調整。
+
+### 📋 任務格式
+
+每個任務包含：
+- **id**: 唯一識別碼
+- **description**: 元素描述（包含類型關鍵字如「按鈕」、「顯示」、「輸入」等）
+- **designSpec.text**: 顯示的文字內容
+- **designSpec.colors**: [背景色, 文字色]（十六進制，如 "#333333", "#FFFFFF"）
+- **designSpec.width/height**: 元素尺寸（像素）
+- **designSpec.cornerRadius**: 圓角半徑（可選）
+- **designSpec.fontSize**: 字體大小（可選）
+`
+
+		// Add UI-type specific examples
+		if (context.uiType === "calculator" || context.userRequest?.includes("計算機") || context.userRequest?.includes("calculator")) {
+			prompt += `
+### 📱 範例：計算機 UI
+
+\`\`\`xml
+<parallel_ui_tasks>
+<tasks>[
+  {"id": "display", "description": "顯示區域", "designSpec": {"text": "0", "colors": ["#2D2D2D", "#FFFFFF"], "width": 350, "height": 60}},
+  {"id": "btn-clear", "description": "按鈕 CE", "designSpec": {"text": "CE", "colors": ["#505050", "#FFFFFF"], "width": 80, "height": 60}},
+  {"id": "btn-percent", "description": "按鈕 %", "designSpec": {"text": "%", "colors": ["#505050", "#FFFFFF"], "width": 80, "height": 60}},
+  {"id": "btn-divide", "description": "按鈕 ÷", "designSpec": {"text": "÷", "colors": ["#FF9500", "#FFFFFF"], "width": 80, "height": 60}},
+  {"id": "btn-7", "description": "按鈕 7", "designSpec": {"text": "7", "colors": ["#333333", "#FFFFFF"], "width": 80, "height": 60}},
+  {"id": "btn-8", "description": "按鈕 8", "designSpec": {"text": "8", "colors": ["#333333", "#FFFFFF"], "width": 80, "height": 60}},
+  {"id": "btn-9", "description": "按鈕 9", "designSpec": {"text": "9", "colors": ["#333333", "#FFFFFF"], "width": 80, "height": 60}},
+  {"id": "btn-multiply", "description": "按鈕 ×", "designSpec": {"text": "×", "colors": ["#FF9500", "#FFFFFF"], "width": 80, "height": 60}},
+  ...更多按鈕 (4, 5, 6, -, 1, 2, 3, +, 0, ., =)...
+  {"id": "btn-equals", "description": "按鈕 =", "designSpec": {"text": "=", "colors": ["#007AFF", "#FFFFFF"], "width": 80, "height": 60}}
+]</tasks>
+</parallel_ui_tasks>
+\`\`\`
+
+配色說明：
+- 數字按鈕：深灰背景 #333333
+- 運算符：橙色背景 #FF9500
+- 等號：藍色背景 #007AFF
+- 特殊功能：中灰背景 #505050
+`
+		} else if (context.uiType === "form" || context.userRequest?.includes("表單") || context.userRequest?.includes("form")) {
+			prompt += `
+### 📝 範例：表單 UI
+
+\`\`\`xml
+<parallel_ui_tasks>
+<tasks>[
+  {"id": "title", "description": "標題", "designSpec": {"text": "用戶註冊", "colors": ["#FFFFFF", "#333333"], "width": 300, "height": 40, "fontSize": 24}},
+  {"id": "input-name", "description": "輸入框 姓名", "designSpec": {"text": "請輸入姓名", "colors": ["#F5F5F5", "#999999"], "width": 280, "height": 44, "cornerRadius": 8}},
+  {"id": "input-email", "description": "輸入框 Email", "designSpec": {"text": "請輸入 Email", "colors": ["#F5F5F5", "#999999"], "width": 280, "height": 44, "cornerRadius": 8}},
+  {"id": "input-password", "description": "輸入框 密碼", "designSpec": {"text": "請輸入密碼", "colors": ["#F5F5F5", "#999999"], "width": 280, "height": 44, "cornerRadius": 8}},
+  {"id": "btn-submit", "description": "按鈕 提交", "designSpec": {"text": "註冊", "colors": ["#007AFF", "#FFFFFF"], "width": 280, "height": 48, "cornerRadius": 8}}
+]</tasks>
+</parallel_ui_tasks>
+\`\`\`
+
+配色說明：
+- 輸入框：淺灰背景 #F5F5F5，佔位文字 #999999
+- 主按鈕：藍色背景 #007AFF
+- 標題：深色文字 #333333
+`
+		} else if (context.uiType === "dashboard" || context.userRequest?.includes("儀表板") || context.userRequest?.includes("dashboard")) {
+			prompt += `
+### 📊 範例：儀表板 UI
+
+\`\`\`xml
+<parallel_ui_tasks>
+<tasks>[
+  {"id": "header", "description": "標題區域", "designSpec": {"text": "數據儀表板", "colors": ["#1E1E1E", "#FFFFFF"], "width": 800, "height": 60}},
+  {"id": "card-users", "description": "卡片 用戶數", "designSpec": {"text": "1,234", "colors": ["#FFFFFF", "#333333"], "width": 180, "height": 100, "cornerRadius": 12}},
+  {"id": "card-revenue", "description": "卡片 營收", "designSpec": {"text": "$12,345", "colors": ["#FFFFFF", "#333333"], "width": 180, "height": 100, "cornerRadius": 12}},
+  {"id": "card-orders", "description": "卡片 訂單數", "designSpec": {"text": "567", "colors": ["#FFFFFF", "#333333"], "width": 180, "height": 100, "cornerRadius": 12}},
+  {"id": "chart-area", "description": "圖表區域", "designSpec": {"text": "圖表", "colors": ["#F5F5F5", "#666666"], "width": 560, "height": 300, "cornerRadius": 12}}
+]</tasks>
+</parallel_ui_tasks>
+\`\`\`
+
+配色說明：
+- 卡片：白色背景，陰影效果
+- 標題欄：深色背景 #1E1E1E
+- 圖表區：淺灰背景 #F5F5F5
+`
+		} else {
+			// Generic example
+			prompt += `
+### 📱 通用範例
+
+\`\`\`xml
+<parallel_ui_tasks>
+<tasks>[
+  {"id": "header", "description": "標題", "designSpec": {"text": "標題文字", "colors": ["#1E1E1E", "#FFFFFF"], "width": 400, "height": 60}},
+  {"id": "btn-primary", "description": "主要按鈕", "designSpec": {"text": "確認", "colors": ["#007AFF", "#FFFFFF"], "width": 120, "height": 44}},
+  {"id": "btn-secondary", "description": "次要按鈕", "designSpec": {"text": "取消", "colors": ["#E0E0E0", "#333333"], "width": 120, "height": 44}}
+]</tasks>
+</parallel_ui_tasks>
+\`\`\`
+`
+		}
+
+		// Add context info if available
+		if (context.previousAgentNotes) {
+			prompt += `
+### 📋 來自 Architect 的設計需求
+
+${context.previousAgentNotes}
+`
+		}
+
+		// Common design principles
+		prompt += `
+### 🎨 設計原則
+
+1. **配色一致性**：同類元素使用相同配色
+2. **對比度**：確保文字在背景上清晰可讀（深色背景用淺色文字，反之亦然）
+3. **層次結構**：主要操作使用醒目顏色，次要操作使用中性色
+4. **間距統一**：元素之間保持一致的間距
+5. **視覺順序**：按從上到下、從左到右的順序指定任務
+
+### ⚡ 執行流程
+
+1. 分析用戶需求，規劃 UI 結構
+2. 調用 parallel_ui_tasks 創建所有元素
+3. （可選）調整位置或樣式
+4. 創建 design-specs.md 記錄設計規格
+
+## Handoff
+
+使用 handoff_context 工具提交設計資訊給 Design Review Agent。`
+
+		return prompt
+	},
+}
+
+/**
+ * Design Review Agent - Figma design completeness verification
+ * NOTE: Design Review only READS/VERIFIES designs, it does NOT create UI elements.
+ * Only "read" group - no "mcp" access to prevent creating Figma elements.
+ */
+export const DESIGN_REVIEW_AGENT: AgentPersona = {
+	slug: "sentinel-design-review",
+	name: "🔎 Design Review",
+	roleDefinition:
+		"You are Roo, the Design Review Agent in Sentinel Edition. " +
+		"Your job is to verify that Designer created ALL required UI elements before allowing progression to Builder. " +
+		"You do NOT create UI elements - you only review and verify.",
+
+	preferredModel: {
+		primary: "claude-3.5-sonnet",
+		fallback: "claude-3-haiku",
+	},
+
+	systemPromptFocus: "Verify Figma design completeness. Read design-specs.md and compare with actual design. You do NOT create UI elements.",
+
+	// Only "read" - Design Review should NOT have MCP access to avoid creating Figma elements
+	groups: ["read"] as GroupEntry[],
 
 	handoffOutputSchema: {
 		type: "json",
@@ -413,12 +712,16 @@ export const DESIGN_REVIEW_AGENT: AgentPersona = {
 	canHandoffTo: ["sentinel-builder", "sentinel-designer"],
 
 	customInstructions:
+		"**⛔ 重要限制 - 你不能創建 UI 元素！**\n\n" +
+		"你的職責只是**驗證**設計，不是創建設計。\n" +
+		"- ❌ 不要調用 create_frame、add_text、create_rectangle 等創建工具\n" +
+		"- ✅ 只能讀取 design-specs.md 來驗證設計是否完整\n\n" +
 		"**DESIGN VERIFICATION PHASE**\n\n" +
 		"1. Read design-specs.md for expected element counts\n" +
-		"2. Use figma-write find_nodes to count actual elements\n" +
+		"2. Review the design information provided by Designer\n" +
 		"3. Compare expected vs actual\n\n" +
 		"**APPROVE IF:** Element count >= 80% of expected\n" +
-		"**REJECT IF:** Major components missing\n\n" +
+		"**REJECT IF:** Major components missing - return to Designer\n\n" +
 		"Use handoff_context to pass results.",
 }
 
@@ -427,7 +730,7 @@ export const DESIGN_REVIEW_AGENT: AgentPersona = {
  */
 export const SENTINEL_AGENTS: Record<string, AgentPersona> = {
 	"sentinel-architect": ARCHITECT_AGENT,
-	"sentinel-designer": { ...BUILDER_AGENT, slug: "sentinel-designer", name: "🎨 Designer" } as AgentPersona, // Placeholder
+	"sentinel-designer": DESIGNER_AGENT,
 	"sentinel-design-review": DESIGN_REVIEW_AGENT,
 	"sentinel-builder": BUILDER_AGENT,
 	"sentinel-qa": QA_ENGINEER_AGENT,
@@ -465,7 +768,23 @@ export function isSentinelAgent(slug: string): boolean {
 }
 
 /**
+ * Resolve customInstructions with context
+ * If customInstructions is a function, call it with the context.
+ * If it's a string, return it directly.
+ */
+export function resolveCustomInstructions(
+	agent: AgentPersona,
+	context: PromptContext = {}
+): string | undefined {
+	if (typeof agent.customInstructions === "function") {
+		return agent.customInstructions(context)
+	}
+	return agent.customInstructions
+}
+
+/**
  * Convert agent personas to ModeConfig array for registration
+ * Uses default empty context for function-based customInstructions
  */
 export function getSentinelModesConfig(): ModeConfig[] {
 	return Object.values(SENTINEL_AGENTS).map((agent) => ({
@@ -473,6 +792,26 @@ export function getSentinelModesConfig(): ModeConfig[] {
 		name: agent.name,
 		roleDefinition: agent.roleDefinition,
 		groups: agent.groups,
-		customInstructions: agent.customInstructions,
+		customInstructions: resolveCustomInstructions(agent),
 	}))
+}
+
+/**
+ * Get ModeConfig for a specific agent with context
+ * Use this when you need context-aware customInstructions
+ */
+export function getSentinelModeConfigWithContext(
+	slug: string,
+	context: PromptContext
+): ModeConfig | undefined {
+	const agent = SENTINEL_AGENTS[slug]
+	if (!agent) return undefined
+
+	return {
+		slug: agent.slug,
+		name: agent.name,
+		roleDefinition: agent.roleDefinition,
+		groups: agent.groups,
+		customInstructions: resolveCustomInstructions(agent, context),
+	}
 }

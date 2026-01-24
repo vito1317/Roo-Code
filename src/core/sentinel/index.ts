@@ -19,8 +19,10 @@ export {
 	getNextAgent,
 	isSentinelAgent,
 	getSentinelModesConfig,
+	getSentinelModeConfigWithContext,
+	resolveCustomInstructions,
 } from "./personas"
-export type { AgentPersona, ModelPreference, HandoffOutputSchema } from "./personas"
+export type { AgentPersona, ModelPreference, HandoffOutputSchema, PromptContext } from "./personas"
 
 // Handoff Context
 export {

@@ -41,7 +41,8 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 	parseLegacy(params: Partial<Record<string, string>>): HandoffContextParams {
 		return {
 			notes: params.notes || "",
-			context_json: params.context_json || params.contextJson || "{}",
+			// Accept multiple parameter name variants for robustness
+			context_json: params.context_json || params.contextJson || params.context_data || params.contextData || "{}",
 		}
 	}
 

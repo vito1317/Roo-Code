@@ -131,18 +131,32 @@ export class SentinelStateMachine {
 			label: "User initiates development",
 		},
 
-		// Architect completes planning → Designer (if Figma URL present) or Builder
+		// Architect completes planning → Designer (if UI design needed) or Builder
 		{
 			from: AgentState.ARCHITECT,
 			to: AgentState.DESIGNER,
-			condition: (ctx) => !!ctx?.architectPlan && !!ctx?.figmaUrl,
-			label: "Plan completed with Figma design, handoff to Designer",
+			condition: (ctx) => {
+				if (!ctx?.architectPlan) return false
+				// Check for Figma URL
+				if (ctx.figmaUrl) return true
+				// Check for design flags
+				const plan = ctx.architectPlan as unknown as Record<string, unknown>
+				const isTruthy = (val: unknown): boolean => val === true || val === "true" || val === 1 || val === "1"
+				if (isTruthy(plan?.needsDesign) || isTruthy(plan?.needs_design)) return true
+				if (isTruthy(plan?.hasUI) || isTruthy(plan?.has_ui) || isTruthy(plan?.hasUi)) return true
+				if (isTruthy(plan?.useFigma) || isTruthy(plan?.use_figma)) return true
+				// Check notes for keywords
+				const notes = ctx.previousAgentNotes?.toLowerCase() || ""
+				if (notes.includes("figma") || notes.includes("designer") || notes.includes("ui design")) return true
+				return false
+			},
+			label: "Plan completed with UI design, handoff to Designer",
 		},
 		{
 			from: AgentState.ARCHITECT,
 			to: AgentState.BUILDER,
-			condition: (ctx) => !!ctx?.architectPlan && !ctx?.figmaUrl,
-			label: "Plan completed, handoff to Builder",
+			condition: (ctx) => !!ctx?.architectPlan,
+			label: "Plan completed, handoff to Builder (fallback)",
 		},
 
 		// Designer completes → Design Review verifies
@@ -387,17 +401,46 @@ export class SentinelStateMachine {
 		switch (this.currentState) {
 			// Phase 1: Initial planning → Designer (if Figma or UI needed) or Builder
 			case AgentState.ARCHITECT: {
+				console.log("[SentinelFSM] determineNextState from ARCHITECT, handoffData:", JSON.stringify(handoffData, null, 2))
+
 				// Check if there's a Figma URL to route to Designer first
 				if (handoffData.figmaUrl) {
 					console.log("[SentinelFSM] Figma URL detected - routing to Designer:", handoffData.figmaUrl)
 					return AgentState.DESIGNER
 				}
-				// Check if Designer should create UI mockup (when needsDesign or hasUI flag is set)
+
+				// Check if Designer should create UI mockup
 				const plan = handoffData.architectPlan as Record<string, unknown> | undefined
-				if (plan?.needsDesign === true || plan?.hasUI === true) {
-					console.log("[SentinelFSM] UI design requested - routing to Designer for mockup generation")
+				console.log("[SentinelFSM] architectPlan:", plan)
+
+				// Helper to check truthy values (handles "true", true, 1, etc.)
+				const isTruthy = (val: unknown): boolean => {
+					if (val === true || val === "true" || val === 1 || val === "1") return true
+					return false
+				}
+
+				// Check various flags that indicate UI design is needed
+				if (plan) {
+					const needsDesign = isTruthy(plan.needsDesign) || isTruthy(plan.needs_design)
+					const hasUI = isTruthy(plan.hasUI) || isTruthy(plan.has_ui) || isTruthy(plan.hasUi)
+					const useFigma = isTruthy(plan.useFigma) || isTruthy(plan.use_figma)
+
+					console.log("[SentinelFSM] Design flags - needsDesign:", needsDesign, "hasUI:", hasUI, "useFigma:", useFigma)
+
+					if (needsDesign || hasUI || useFigma) {
+						console.log("[SentinelFSM] UI design requested - routing to Designer for mockup generation")
+						return AgentState.DESIGNER
+					}
+				}
+
+				// Also check notes for Figma/UI keywords as fallback
+				const notes = handoffData.previousAgentNotes?.toLowerCase() || ""
+				if (notes.includes("figma") || notes.includes("designer") || notes.includes("ui design") || notes.includes("ui 設計")) {
+					console.log("[SentinelFSM] Figma/UI keywords found in notes - routing to Designer")
 					return AgentState.DESIGNER
 				}
+
+				console.log("[SentinelFSM] No UI design indicators found - routing to Builder")
 				return AgentState.BUILDER
 			}
 

@@ -108,6 +108,8 @@ export interface ExtensionMessage {
 		| "worktreeIncludeStatus"
 		| "branchWorktreeIncludeResult"
 		| "mergeWorktreeResult"
+		| "sentinelAgentState"
+		| "figmaConnectionResult"
 	text?: string
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	checkpointWarning?: {
@@ -193,6 +195,20 @@ export interface ExtensionMessage {
 	settings?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	messageTs?: number
 	message?: string // For figmaConnectionResult and similar status messages
+	sentinelAgentState?: {
+		currentState?: string
+		workflowType?: string
+		enabled?: boolean
+		currentAgent?: string
+		agentName?: string
+		currentActivity?: string
+		lastHandoff?: {
+			from: string
+			to: string
+			summary: string
+			timestamp: number
+		}
+	} // For Sentinel workflow state updates
 	hasCheckpoint?: boolean
 	context?: string
 	commands?: Command[]
@@ -413,6 +429,12 @@ export type ExtensionState = Pick<
 	featureRoomoteControlEnabled: boolean
 	openAiCodexIsAuthenticated?: boolean
 	debug?: boolean
+	// Sentinel Edition: Current agent state for multi-agent workflow
+	sentinelAgentState?: {
+		enabled: boolean
+		currentAgent: string
+		agentName: string
+	}
 }
 
 export interface Command {

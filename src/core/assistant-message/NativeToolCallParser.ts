@@ -379,11 +379,21 @@ export class NativeToolCallParser {
 		let nativeArgs: any = undefined
 
 		switch (name) {
-			case "read_file":
-				if (partialArgs.files && Array.isArray(partialArgs.files)) {
-					nativeArgs = { files: this.convertFileEntries(partialArgs.files) }
+			case "read_file": {
+				// Handle both array and stringified array from less capable models
+				let filesArray = partialArgs.files
+				if (typeof filesArray === "string") {
+					try {
+						filesArray = JSON.parse(filesArray)
+					} catch {
+						// If parsing fails, leave as string (will fail validation)
+					}
+				}
+				if (filesArray && Array.isArray(filesArray)) {
+					nativeArgs = { files: this.convertFileEntries(filesArray) }
 				}
 				break
+			}
 
 			case "attempt_completion":
 				if (partialArgs.result) {
@@ -578,6 +588,56 @@ export class NativeToolCallParser {
 				}
 				break
 
+			case "handoff_context": {
+				// Handle notes and context_json parameters during streaming
+				let contextJson = partialArgs.context_json || partialArgs.contextJson || partialArgs.context_data || partialArgs.contextData
+				if (typeof contextJson === "object" && contextJson !== null) {
+					contextJson = JSON.stringify(contextJson)
+				}
+				nativeArgs = {
+					notes: partialArgs.notes,
+					context_json: contextJson,
+				}
+				break
+			}
+
+			case "start_background_service":
+				nativeArgs = {
+					service_type: partialArgs.service_type || partialArgs.serviceType,
+					port: partialArgs.port,
+					wait_ms: partialArgs.wait_ms || partialArgs.waitMs,
+				}
+				break
+
+			case "parallel_ui_tasks": {
+				let tasksArray = partialArgs.tasks
+				if (typeof tasksArray === "string") {
+					try {
+						tasksArray = JSON.parse(tasksArray)
+					} catch {
+						// Keep as string during streaming
+					}
+				}
+				nativeArgs = { tasks: tasksArray }
+				break
+			}
+
+			case "parallel_mcp_calls": {
+				let callsArray = partialArgs.calls
+				if (typeof callsArray === "string") {
+					try {
+						callsArray = JSON.parse(callsArray)
+					} catch {
+						// Keep as string during streaming
+					}
+				}
+				nativeArgs = {
+					server: partialArgs.server || "figma-write",
+					calls: callsArray,
+				}
+				break
+			}
+
 			default:
 				break
 		}
@@ -666,11 +726,21 @@ export class NativeToolCallParser {
 			let nativeArgs: NativeArgsFor<TName> | undefined = undefined
 
 			switch (resolvedName) {
-				case "read_file":
-					if (args.files && Array.isArray(args.files)) {
-						nativeArgs = { files: this.convertFileEntries(args.files) } as NativeArgsFor<TName>
+				case "read_file": {
+					// Handle both array and stringified array from less capable models
+					let filesArray = args.files
+					if (typeof filesArray === "string") {
+						try {
+							filesArray = JSON.parse(filesArray)
+						} catch {
+							// If parsing fails, leave as string (will fail validation)
+						}
+					}
+					if (filesArray && Array.isArray(filesArray)) {
+						nativeArgs = { files: this.convertFileEntries(filesArray) } as NativeArgsFor<TName>
 					}
 					break
+				}
 
 				case "attempt_completion":
 					if (args.result) {
@@ -873,6 +943,71 @@ export class NativeToolCallParser {
 						} as NativeArgsFor<TName>
 					}
 					break
+
+				case "parallel_ui_tasks": {
+					// Handle both array and stringified array from less capable models
+					let tasksArray = args.tasks
+					if (typeof tasksArray === "string") {
+						try {
+							tasksArray = JSON.parse(tasksArray)
+						} catch {
+							// If parsing fails, leave as string (will fail validation)
+						}
+					}
+					if (tasksArray && Array.isArray(tasksArray)) {
+						nativeArgs = { tasks: tasksArray } as unknown as NativeArgsFor<TName>
+					}
+					break
+				}
+
+				case "parallel_mcp_calls": {
+					// Handle both array and stringified array
+					// The tool handler (ParallelMcpCallsTool) will do final parsing
+					let callsValue = args.calls
+					if (typeof callsValue === "string") {
+						try {
+							// Try to parse as JSON
+							callsValue = JSON.parse(callsValue)
+						} catch {
+							// Try using partial-json parser for malformed JSON
+							try {
+								callsValue = parseJSON(callsValue)
+							} catch {
+								// Keep as string - let the tool handler deal with it
+							}
+						}
+					}
+					// Always set nativeArgs - let the tool handler validate
+					nativeArgs = {
+						server: args.server || "figma-write",
+						calls: typeof callsValue === "string" ? callsValue : JSON.stringify(callsValue),
+					} as unknown as NativeArgsFor<TName>
+					break
+				}
+
+				case "handoff_context": {
+					// Handle notes and context_json parameters
+					// context_json can be a string (stringified JSON) or already parsed object
+					let contextJson = args.context_json || args.contextJson || args.context_data || args.contextData || "{}"
+					if (typeof contextJson === "object") {
+						contextJson = JSON.stringify(contextJson)
+					}
+					nativeArgs = {
+						notes: args.notes || "",
+						context_json: contextJson,
+					} as unknown as NativeArgsFor<TName>
+					break
+				}
+
+				case "start_background_service": {
+					// Handle start_background_service parameters
+					nativeArgs = {
+						service_type: args.service_type || args.serviceType || "",
+						port: args.port,
+						wait_ms: args.wait_ms || args.waitMs,
+					} as unknown as NativeArgsFor<TName>
+					break
+				}
 
 				default:
 					if (customToolRegistry.has(resolvedName)) {

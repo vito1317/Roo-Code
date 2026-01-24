@@ -161,6 +161,11 @@ export class McpHub {
 	private isProgrammaticUpdate: boolean = false
 	private flagResetTimer?: NodeJS.Timeout
 	private sanitizedNameRegistry: Map<string, string> = new Map()
+	// Auto-reconnect tracking
+	private reconnectAttempts: Map<string, number> = new Map()
+	private reconnectTimers: Map<string, NodeJS.Timeout> = new Map()
+	private static readonly MAX_RECONNECT_DELAY = 8000 // 8 seconds max delay
+	private static readonly BASE_RECONNECT_DELAY = 1000 // 1 second base delay
 
 	constructor(provider: ClineProvider) {
 		this.providerRef = new WeakRef(provider)
@@ -637,7 +642,7 @@ export class McpHub {
 				command: "node",
 				args: ["--import", tsxPath, serverPath],
 				type: "stdio" as const,
-				timeout: 30000,
+				timeout: 60, // 60 seconds (unit is seconds, not milliseconds!)
 				alwaysAllow: [] as string[],
 				disabledTools: [] as string[],
 				cwd: `${extensionPath}/tools/figma-write-bridge`,
@@ -787,6 +792,8 @@ export class McpHub {
 						this.appendErrorMessage(connection, error instanceof Error ? error.message : `${error}`)
 					}
 					await this.notifyWebviewOfServerChanges()
+					// Schedule auto-reconnect
+					this.scheduleAutoReconnect(name, source)
 				}
 
 				transport.onclose = async () => {
@@ -795,6 +802,8 @@ export class McpHub {
 						connection.server.status = "disconnected"
 					}
 					await this.notifyWebviewOfServerChanges()
+					// Schedule auto-reconnect
+					this.scheduleAutoReconnect(name, source)
 				}
 
 				// transport.stderr is only available after the process has been started. However we can't start it separately from the .connect() call because it also starts the transport. And we can't place this after the connect call since we need to capture the stderr stream before the connection is established, in order to capture errors during the connection process.
@@ -842,6 +851,8 @@ export class McpHub {
 						this.appendErrorMessage(connection, error instanceof Error ? error.message : `${error}`)
 					}
 					await this.notifyWebviewOfServerChanges()
+					// Schedule auto-reconnect
+					this.scheduleAutoReconnect(name, source)
 				}
 
 				transport.onclose = async () => {
@@ -850,6 +861,8 @@ export class McpHub {
 						connection.server.status = "disconnected"
 					}
 					await this.notifyWebviewOfServerChanges()
+					// Schedule auto-reconnect
+					this.scheduleAutoReconnect(name, source)
 				}
 			} else if (configInjected.type === "sse") {
 				// SSE connection
@@ -885,6 +898,8 @@ export class McpHub {
 						this.appendErrorMessage(connection, error instanceof Error ? error.message : `${error}`)
 					}
 					await this.notifyWebviewOfServerChanges()
+					// Schedule auto-reconnect
+					this.scheduleAutoReconnect(name, source)
 				}
 
 				transport.onclose = async () => {
@@ -893,6 +908,8 @@ export class McpHub {
 						connection.server.status = "disconnected"
 					}
 					await this.notifyWebviewOfServerChanges()
+					// Schedule auto-reconnect
+					this.scheduleAutoReconnect(name, source)
 				}
 			} else {
 				// Should not happen if validateServerConfig is correct
@@ -926,6 +943,9 @@ export class McpHub {
 			connection.server.status = "connected"
 			connection.server.error = ""
 			connection.server.instructions = client.getInstructions()
+
+			// Reset reconnect attempts on successful connection
+			this.resetReconnectAttempts(name, source)
 
 			// Initial fetch of tools and resources
 			connection.server.tools = await this.fetchToolsList(name, source)
@@ -967,6 +987,101 @@ export class McpHub {
 
 		// Update current error display
 		connection.server.error = truncatedError
+	}
+
+	/**
+	 * Schedule an auto-reconnect for a disconnected server
+	 * Uses exponential backoff to prevent overwhelming the server
+	 */
+	private scheduleAutoReconnect(name: string, source: "global" | "project"): void {
+		// Don't reconnect if disposed
+		if (this.isDisposed) {
+			return
+		}
+
+		const key = `${name}-${source}`
+
+		// Clear any existing reconnect timer
+		const existingTimer = this.reconnectTimers.get(key)
+		if (existingTimer) {
+			clearTimeout(existingTimer)
+		}
+
+		// Get current attempt count
+		const attempts = this.reconnectAttempts.get(key) || 0
+
+		// Calculate delay with exponential backoff (2s, 4s, 8s, ... up to 30s)
+		const delay = Math.min(
+			McpHub.BASE_RECONNECT_DELAY * Math.pow(2, attempts),
+			McpHub.MAX_RECONNECT_DELAY
+		)
+
+		console.log(`[McpHub] Scheduling auto-reconnect for "${name}" in ${delay}ms (attempt ${attempts + 1})`)
+
+		const timer = setTimeout(async () => {
+			// Don't reconnect if disposed
+			if (this.isDisposed) {
+				return
+			}
+
+			// Check if server still exists and is disconnected
+			const connection = this.findConnection(name, source)
+			if (!connection) {
+				console.log(`[McpHub] Server "${name}" no longer exists, cancelling reconnect`)
+				this.reconnectAttempts.delete(key)
+				return
+			}
+
+			if (connection.server.status === "connected") {
+				console.log(`[McpHub] Server "${name}" already connected, cancelling reconnect`)
+				this.reconnectAttempts.delete(key)
+				return
+			}
+
+			if (connection.server.disabled) {
+				console.log(`[McpHub] Server "${name}" is disabled, cancelling reconnect`)
+				this.reconnectAttempts.delete(key)
+				return
+			}
+
+			// Increment attempt counter
+			this.reconnectAttempts.set(key, attempts + 1)
+
+			try {
+				console.log(`[McpHub] Auto-reconnecting to "${name}"...`)
+
+				// Read config from the connection
+				const config = JSON.parse(connection.server.config)
+				const validatedConfig = this.validateServerConfig(config, name)
+
+				// Delete old connection and reconnect
+				await this.deleteConnection(name, source)
+				await this.connectToServer(name, validatedConfig, source)
+
+				// Success - reset attempt counter
+				this.reconnectAttempts.delete(key)
+				console.log(`[McpHub] Auto-reconnect to "${name}" successful`)
+			} catch (error) {
+				console.error(`[McpHub] Auto-reconnect to "${name}" failed:`, error)
+				// Schedule another reconnect attempt
+				this.scheduleAutoReconnect(name, source)
+			}
+		}, delay)
+
+		this.reconnectTimers.set(key, timer)
+	}
+
+	/**
+	 * Reset reconnect attempts for a server (called on successful manual reconnect)
+	 */
+	private resetReconnectAttempts(name: string, source: "global" | "project"): void {
+		const key = `${name}-${source}`
+		this.reconnectAttempts.delete(key)
+		const timer = this.reconnectTimers.get(key)
+		if (timer) {
+			clearTimeout(timer)
+			this.reconnectTimers.delete(key)
+		}
 	}
 
 	/**
@@ -1805,12 +1920,19 @@ export class McpHub {
 			timeout = 60 * 1000
 		}
 
+		// Coerce string numbers to actual numbers for Figma tools
+		// LLMs often send "400" instead of 400 for numeric fields
+		let processedArguments = toolArguments
+		if (serverName.toLowerCase().startsWith("fig") && toolArguments) {
+			processedArguments = this.coerceNumericArguments(toolArguments)
+		}
+
 		return await connection.client.request(
 			{
 				method: "tools/call",
 				params: {
 					name: toolName,
-					arguments: toolArguments,
+					arguments: processedArguments,
 				},
 			},
 			CallToolResultSchema,
@@ -1818,6 +1940,26 @@ export class McpHub {
 				timeout,
 			},
 		)
+	}
+
+	/**
+	 * Coerce string numbers to actual numbers in tool arguments
+	 * This handles common LLM mistakes where numbers are sent as strings
+	 */
+	private coerceNumericArguments(args: Record<string, unknown>): Record<string, unknown> {
+		const numericFields = ["width", "height", "x", "y", "fontSize", "opacity", "cornerRadius", "minItems"]
+		const result: Record<string, unknown> = { ...args }
+
+		for (const [key, value] of Object.entries(args)) {
+			if (numericFields.includes(key) && typeof value === "string") {
+				const parsed = parseFloat(value)
+				if (!isNaN(parsed)) {
+					result[key] = parsed
+				}
+			}
+		}
+
+		return result
 	}
 
 	/**
@@ -2018,6 +2160,13 @@ export class McpHub {
 			clearTimeout(this.flagResetTimer)
 			this.flagResetTimer = undefined
 		}
+
+		// Clear all reconnect timers
+		for (const timer of this.reconnectTimers.values()) {
+			clearTimeout(timer)
+		}
+		this.reconnectTimers.clear()
+		this.reconnectAttempts.clear()
 
 		this.isProgrammaticUpdate = false
 		this.removeAllFileWatchers()

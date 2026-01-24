@@ -1113,6 +1113,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async addToClineMessages(message: ClineMessage) {
 		// Inject current agent name for Sentinel workflow speaker attribution
+		if (!message.agentName && this._taskMode?.startsWith("sentinel-")) {
+			const modeToAgentName: Record<string, string> = {
+				"sentinel-architect": "Architect",
+				"sentinel-designer": "Designer",
+				"sentinel-design-review": "Design Review",
+				"sentinel-builder": "Builder",
+				"sentinel-architect-review": "Architect Review",
+				"sentinel-qa": "QA Engineer",
+				"sentinel-architect-review-tests": "Architect Test Review",
+				"sentinel-security": "Sentinel",
+				"sentinel-architect-final": "Architect Final",
+			}
+			message.agentName = modeToAgentName[this._taskMode] || "Agent"
+		}
+
+		// Add the message to the array
+		this.clineMessages.push(message)
+
 		const provider = this.providerRef.deref()
 		// Avoid resending large, mostly-static fields (notably taskHistory) on every chat message update.
 		// taskHistory is maintained in-memory in the webview and updated via taskHistoryItemUpdated.

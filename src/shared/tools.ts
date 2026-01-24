@@ -83,6 +83,9 @@ export const toolParamNames = [
 	"wait_ms",
 	// Parallel UI tasks parameters
 	"tasks",
+	// Parallel MCP calls parameters
+	"server",
+	"calls",
 ] as const
 
 export type ToolParamName = (typeof toolParamNames)[number]
@@ -117,7 +120,9 @@ export type NativeToolArgs = {
 	update_todo_list: { todos: string }
 	use_mcp_tool: { server_name: string; tool_name: string; arguments?: Record<string, unknown> }
 	write_to_file: { path: string; content: string }
-	// Add more tools as they are migrated to native protocol
+	// Sentinel Edition tools
+	parallel_ui_tasks: { tasks: string }
+	parallel_mcp_calls: { server: string; calls: string }
 }
 
 /**
@@ -283,6 +288,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	start_background_service: "start background services",
 	handoff_context: "handoff context to next agent",
 	parallel_ui_tasks: "execute parallel UI drawing tasks",
+	parallel_mcp_calls: "execute parallel MCP tool calls",
 } as const
 
 // Define available tool groups.
@@ -301,7 +307,7 @@ export const TOOL_GROUPS: Record<ToolGroup, ToolGroupConfig> = {
 		tools: ["execute_command"],
 	},
 	mcp: {
-		tools: ["use_mcp_tool", "access_mcp_resource", "parallel_ui_tasks"],
+		tools: ["use_mcp_tool", "access_mcp_resource", "parallel_ui_tasks", "parallel_mcp_calls"],
 	},
 	modes: {
 		tools: ["switch_mode", "new_task"],
@@ -319,6 +325,8 @@ export const ALWAYS_AVAILABLE_TOOLS: ToolName[] = [
 	"run_slash_command",
 	"handoff_context", // Sentinel Edition: Always available for agent handoffs
 	"start_background_service", // Sentinel Edition: Always available for starting servers
+	"parallel_ui_tasks", // Sentinel Edition: Always available for parallel UI design
+	"parallel_mcp_calls", // Sentinel Edition: Always available for parallel MCP operations
 ] as const
 
 /**

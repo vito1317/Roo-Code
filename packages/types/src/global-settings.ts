@@ -263,12 +263,12 @@ export const SECRET_STATE_KEYS = [
 	"ioIntelligenceApiKey",
 	"vercelAiGatewayApiKey",
 	"basetenApiKey",
-	"figmaApiToken",
 ] as const
 
 // Global secrets that are part of GlobalSettings (not ProviderSettings)
 export const GLOBAL_SECRET_KEYS = [
 	"openRouterImageApiKey", // For image generation
+	"figmaApiToken", // Figma API access token
 ] as const
 
 // Type for the actual secret storage keys

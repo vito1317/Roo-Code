@@ -121,30 +121,30 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"use_mcp_tool">): Promise<void> {
-		const params = block.params
-		const serverName = this.removeClosingTag("server_name", params.server_name, block.partial)
-		
+		const nativeArgs = block.nativeArgs as { server_name?: string; tool_name?: string; arguments?: Record<string, unknown> } | undefined
+		const serverName = nativeArgs?.server_name
+
 		// Skip if no server name yet (still streaming)
 		if (!serverName || serverName.trim() === "") {
 			return
 		}
-		
+
 		// Skip partial for "browser" - LLM is making a mistake, will get error in execute
 		if (serverName.toLowerCase() === "browser") {
 			return
 		}
-		
+
 		// Skip MCP-style partial message for internal Figma servers
 		// Match any variation: figma, figma-write, fig, etc.
 		if (serverName.toLowerCase().startsWith("fig")) {
 			return
 		}
-		
+
 		const partialMessage = JSON.stringify({
 			type: "use_mcp_tool",
-			serverName: params.server_name ?? "",
-			toolName: params.tool_name ?? "",
-			arguments: params.arguments,
+			serverName: nativeArgs?.server_name ?? "",
+			toolName: nativeArgs?.tool_name ?? "",
+			arguments: nativeArgs?.arguments ? JSON.stringify(nativeArgs.arguments) : undefined,
 		} satisfies ClineAskUseMcpServer)
 
 		await task.ask("use_mcp_server", partialMessage, true).catch(() => {})

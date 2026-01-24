@@ -7,6 +7,7 @@ import * as yaml from "yaml"
 import stripBom from "strip-bom"
 
 import { type ModeConfig, type PromptComponent, customModesSettingsSchema, modeConfigSchema } from "@roo-code/types"
+import { getSentinelModesConfig } from "../sentinel/personas"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { getWorkspacePath } from "../../utils/path"
@@ -369,6 +370,9 @@ export class CustomModesManager {
 		const roomodesPath = await this.getWorkspaceRoomodes()
 		const roomodesModes = roomodesPath ? await this.loadModesFromFile(roomodesPath) : []
 
+		// Get Sentinel modes (built-in for Sentinel Edition).
+		const sentinelModes = getSentinelModesConfig()
+
 		// Create maps to store modes by source.
 		const projectModes = new Map<string, ModeConfig>()
 		const globalModes = new Map<string, ModeConfig>()
@@ -385,11 +389,15 @@ export class CustomModesManager {
 			}
 		}
 
-		// Combine modes in the correct order: project modes first, then global modes.
+		// Combine modes in the correct order: project modes first, then global modes, then sentinel modes.
+		// Sentinel modes have lowest precedence and can be overridden by project or global modes.
 		const mergedModes = [
 			...roomodesModes.map((mode) => ({ ...mode, source: "project" as const })),
 			...settingsModes
 				.filter((mode) => !projectModes.has(mode.slug))
+				.map((mode) => ({ ...mode, source: "global" as const })),
+			...sentinelModes
+				.filter((mode) => !projectModes.has(mode.slug) && !globalModes.has(mode.slug))
 				.map((mode) => ({ ...mode, source: "global" as const })),
 		]
 

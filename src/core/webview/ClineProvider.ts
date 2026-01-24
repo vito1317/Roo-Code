@@ -2310,6 +2310,45 @@ export class ClineProvider
 				}
 			})(),
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
+			// Sentinel Agent State
+			sentinelAgentState: (() => {
+				const task = this.getCurrentTask()
+				const currentMode = mode ?? defaultModeSlug
+				if (task?.sentinelStateMachine && currentMode.startsWith("sentinel-")) {
+					const modeToAgentState: Record<string, string> = {
+						"sentinel-architect": "ARCHITECT",
+						"sentinel-designer": "DESIGNER",
+						"sentinel-design-review": "ARCHITECT_REVIEW",
+						"sentinel-builder": "BUILDER",
+						"sentinel-architect-review": "ARCHITECT_REVIEW",
+						"sentinel-qa": "QA",
+						"sentinel-architect-review-tests": "ARCHITECT_REVIEW",
+						"sentinel-security": "SENTINEL",
+						"sentinel-architect-final": "ARCHITECT_REVIEW",
+					}
+					const modeToAgentName: Record<string, string> = {
+						"sentinel-architect": "Architect",
+						"sentinel-designer": "Designer",
+						"sentinel-design-review": "Design Review",
+						"sentinel-builder": "Builder",
+						"sentinel-architect-review": "Architect Review",
+						"sentinel-qa": "QA Engineer",
+						"sentinel-architect-review-tests": "Architect Test Review",
+						"sentinel-security": "Sentinel",
+						"sentinel-architect-final": "Architect Final",
+					}
+					return {
+						enabled: true,
+						currentAgent: modeToAgentState[currentMode] || "IDLE",
+						agentName: modeToAgentName[currentMode] || "Agent",
+					}
+				}
+				return {
+					enabled: false,
+					currentAgent: "IDLE",
+					agentName: "Idle",
+				}
+			})(),
 		}
 	}
 

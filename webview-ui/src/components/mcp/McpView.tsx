@@ -339,7 +339,6 @@ const ServerRow = ({ server, alwaysAllowMcp }: { server: McpServer; alwaysAllowM
 						variant="ghost"
 						size="icon"
 						onClick={handleRestart}
-						disabled={server.status === "connecting"}
 						style={{ marginRight: "8px" }}>
 						<span className="codicon codicon-refresh" style={{ fontSize: "14px" }}></span>
 					</Button>
@@ -551,7 +550,6 @@ const ServerRow = ({ server, alwaysAllowMcp }: { server: McpServer; alwaysAllowM
 							<Button
 								variant="secondary"
 								onClick={handleRestart}
-								disabled={server.status === "connecting"}
 								style={{ width: "calc(100% - 20px)", margin: "0 10px 10px 10px" }}>
 								{server.status === "connecting"
 									? t("mcp:serverStatus.retrying")

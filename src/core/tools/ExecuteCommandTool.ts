@@ -173,6 +173,41 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 		const command = block.params.command
 		await task.ask("command", command ?? "", block.partial).catch(() => {})
 	}
+
+	/**
+	 * Detect if a command is likely a server/dev command that should run in background
+	 */
+	private isServerCommand(command: string): boolean {
+		const serverPatterns = [
+			/npm\s+(run\s+)?(dev|start|serve)/i,
+			/yarn\s+(run\s+)?(dev|start|serve)/i,
+			/pnpm\s+(run\s+)?(dev|start|serve)/i,
+			/bun\s+(run\s+)?(dev|start|serve)/i,
+			/vite(\s|$)/i,
+			/next(\s+dev|\s+start)/i,
+			/node\s+.*server/i,
+			/python\s+-m\s+http\.server/i,
+			/flask\s+run/i,
+			/uvicorn/i,
+			/nodemon/i,
+		]
+		return serverPatterns.some((pattern) => pattern.test(command))
+	}
+
+	/**
+	 * Extract port number from a command
+	 */
+	private extractPortFromCommand(command: string): number | null {
+		// Match common port patterns: -p 3000, --port 3000, PORT=3000, :3000
+		const portMatch = command.match(/(?:-p|--port|PORT=)\s*(\d+)/) || command.match(/:(\d{4,5})(?:\s|$)/)
+		if (portMatch) {
+			return parseInt(portMatch[1], 10)
+		}
+		// Default ports for common tools
+		if (/vite/i.test(command)) return 5173
+		if (/next/i.test(command)) return 3000
+		return null
+	}
 }
 
 export type ExecuteCommandOptions = {

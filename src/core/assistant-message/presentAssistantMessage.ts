@@ -39,6 +39,7 @@ import { generateImageTool } from "../tools/GenerateImageTool"
 import { handoffContextTool } from "../tools/HandoffContextTool"
 import { startBackgroundServiceTool } from "../tools/StartBackgroundServiceTool"
 import { parallelUITasksTool } from "../tools/ParallelUITasksTool"
+import { parallelMcpCallsTool } from "../tools/ParallelMcpCallsTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
@@ -938,6 +939,13 @@ export async function presentAssistantMessage(cline: Task) {
 					break
 				case "parallel_ui_tasks":
 					await parallelUITasksTool.handle(cline, block as ToolUse<"parallel_ui_tasks">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+					})
+					break
+				case "parallel_mcp_calls":
+					await parallelMcpCallsTool.handle(cline, block as ToolUse<"parallel_mcp_calls">, {
 						askApproval,
 						handleError,
 						pushToolResult,
