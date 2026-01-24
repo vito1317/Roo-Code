@@ -138,6 +138,7 @@ const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+const MAX_STREAMING_FAILURE_RETRIES = 5 // Maximum retries for streaming failures before giving up
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -3217,16 +3218,31 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							this.abortReason = cancelReason
 							await this.abortTask()
 						} else {
+							const currentRetryAttempt = currentItem.retryAttempt ?? 0
+
+							// Check if we've exceeded the maximum retry limit
+							if (currentRetryAttempt >= MAX_STREAMING_FAILURE_RETRIES) {
+								console.error(
+									`[Task#${this.taskId}.${this.instanceId}] Stream failed after ${currentRetryAttempt} retries, giving up: ${streamingFailedMessage}`,
+								)
+								// Show error to user and stop retrying
+								await this.say(
+									"error",
+									`Streaming failed after ${currentRetryAttempt} retries. Please check your connection or try a different model.\n\nError: ${streamingFailedMessage}`,
+								)
+								break
+							}
+
 							// Stream failed - log the error and retry with the same content
 							// The existing rate limiting will prevent rapid retries
 							console.error(
-								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry: ${streamingFailedMessage}`,
+								`[Task#${this.taskId}.${this.instanceId}] Stream failed (attempt ${currentRetryAttempt + 1}/${MAX_STREAMING_FAILURE_RETRIES}), will retry: ${streamingFailedMessage}`,
 							)
 
 							// Apply exponential backoff similar to first-chunk errors when auto-resubmit is enabled
 							const stateForBackoff = await this.providerRef.deref()?.getState()
 							if (stateForBackoff?.autoApprovalEnabled) {
-								await this.backoffAndAnnounce(currentItem.retryAttempt ?? 0, error)
+								await this.backoffAndAnnounce(currentRetryAttempt, error)
 
 								// Check if task was aborted during the backoff
 								if (this.abort) {
@@ -3244,7 +3260,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								retryAttempt: currentRetryAttempt + 1,
 							})
 
 							// Continue to retry the request
