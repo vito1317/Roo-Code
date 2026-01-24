@@ -10,6 +10,9 @@ import { formatResponse } from "../prompts/responses"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 
+// Maximum number of MCP calls per batch to prevent model timeouts
+const MAX_BATCH_SIZE = 15
+
 interface McpCall {
 	tool: string
 	args: Record<string, unknown>
@@ -102,6 +105,14 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 				return
 			}
 
+			// Enforce maximum batch size to prevent model timeouts
+			if (parsedCalls.length > MAX_BATCH_SIZE) {
+				await task.say(
+					"text",
+					`⚠️ 收到 ${parsedCalls.length} 個調用，將自動分批處理（每批最多 ${MAX_BATCH_SIZE} 個）`
+				)
+			}
+
 			// Normalize calls: handle missing 'args' wrapper
 			// Some models generate { "tool": "set_position", "nodeId": "123", "x": 100 }
 			// instead of { "tool": "set_position", "args": { "nodeId": "123", "x": 100 } }
@@ -166,32 +177,54 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 				return
 			}
 
-			// Execute all calls in parallel
+			// Execute calls in batches to prevent overload
 			const startTime = Date.now()
-			const results = await Promise.all(
-				parsedCalls.map(async (call, index) => {
-					try {
-						const result = await mcpHub.callTool(params.server, call.tool, call.args)
-						return {
-							index,
-							tool: call.tool,
-							success: true,
-							result,
+			const allResults: Array<{
+				index: number
+				tool: string
+				success: boolean
+				result?: unknown
+				error?: string
+			}> = []
+
+			// Process in batches
+			for (let batchStart = 0; batchStart < parsedCalls.length; batchStart += MAX_BATCH_SIZE) {
+				const batch = parsedCalls.slice(batchStart, batchStart + MAX_BATCH_SIZE)
+				const batchNum = Math.floor(batchStart / MAX_BATCH_SIZE) + 1
+				const totalBatches = Math.ceil(parsedCalls.length / MAX_BATCH_SIZE)
+
+				if (totalBatches > 1) {
+					await task.say("text", `🔄 處理批次 ${batchNum}/${totalBatches}...`)
+				}
+
+				const batchResults = await Promise.all(
+					batch.map(async (call, localIndex) => {
+						const globalIndex = batchStart + localIndex
+						try {
+							const result = await mcpHub.callTool(params.server, call.tool, call.args)
+							return {
+								index: globalIndex,
+								tool: call.tool,
+								success: true,
+								result,
+							}
+						} catch (error) {
+							return {
+								index: globalIndex,
+								tool: call.tool,
+								success: false,
+								error: error instanceof Error ? error.message : String(error),
+							}
 						}
-					} catch (error) {
-						return {
-							index,
-							tool: call.tool,
-							success: false,
-							error: error instanceof Error ? error.message : String(error),
-						}
-					}
-				})
-			)
+					})
+				)
+
+				allResults.push(...batchResults)
+			}
 
 			const duration = Date.now() - startTime
-			const successCount = results.filter((r) => r.success).length
-			const failedCount = results.filter((r) => !r.success).length
+			const successCount = allResults.filter((r) => r.success).length
+			const failedCount = allResults.filter((r) => !r.success).length
 
 			// Report results
 			if (failedCount === 0) {
@@ -200,7 +233,7 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 					`✅ All ${parsedCalls.length} MCP calls completed successfully in ${duration}ms!`
 				)
 			} else {
-				const failedResults = results.filter((r) => !r.success)
+				const failedResults = allResults.filter((r) => !r.success)
 				await task.say(
 					"text",
 					`⚠️ ${successCount}/${parsedCalls.length} calls succeeded, ${failedCount} failed.\n\n` +

@@ -539,6 +539,11 @@ export const DESIGNER_AGENT: AgentPersona = {
 </parallel_mcp_calls>
 \`\`\`
 
+⚠️ **重要：批次大小限制**
+- parallel_mcp_calls 每次最多處理 **10 個調用**
+- 如果有更多元素需要調整，請分多次調用
+- 例如：20 個元素 = 2 次 parallel_mcp_calls（每次 10 個）
+
 **Fallback**：如果 parallel_mcp_calls 失敗，可用 use_mcp_tool 逐一調整。
 
 ### 📋 任務格式
