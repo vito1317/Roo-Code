@@ -2168,6 +2168,10 @@ export class ClineProvider
 			featureRoomoteControlEnabled,
 			isBrowserSessionActive,
 			figmaEnabled,
+			figmaWriteEnabled,
+			talkToFigmaEnabled,
+			figmaFileUrl,
+			figmaWebPreviewEnabled,
 		} = await this.getState()
 
 		let cloudOrganizations: CloudOrganizationMembership[] = []
@@ -2218,6 +2222,10 @@ export class ClineProvider
 			alwaysAllowSubtasks: alwaysAllowSubtasks ?? false,
 			isBrowserSessionActive,
 			figmaEnabled: figmaEnabled ?? false,
+			figmaWriteEnabled: figmaWriteEnabled ?? false,
+			talkToFigmaEnabled: talkToFigmaEnabled ?? true,
+			figmaFileUrl: figmaFileUrl,
+			figmaWebPreviewEnabled: figmaWebPreviewEnabled ?? false,
 			allowedMaxRequests,
 			allowedMaxCost,
 			autoCondenseContext: autoCondenseContext ?? true,
@@ -2640,6 +2648,10 @@ export class ClineProvider
 				}
 			})(),
 			figmaEnabled: stateValues.figmaEnabled ?? false,
+			figmaWriteEnabled: stateValues.figmaWriteEnabled ?? false,
+			talkToFigmaEnabled: stateValues.talkToFigmaEnabled ?? true,
+			figmaFileUrl: stateValues.figmaFileUrl,
+			figmaWebPreviewEnabled: stateValues.figmaWebPreviewEnabled ?? false,
 		}
 	}
 

@@ -125,7 +125,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { t } = useAppTranslation()
 
 	const extensionState = useExtensionState()
-	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt } = extensionState
+	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, didHydrateState } = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	const [isChangeDetected, setChangeDetected] = useState(false)
@@ -241,6 +241,36 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			setChangeDetected(false)
 		}
 	}, [settingsImportedAt, extensionState])
+
+	// Sync figma settings from extensionState when they're loaded.
+	// This handles the case where the SettingsView mounts before the figma settings
+	// are fully loaded into extensionState. We only sync when didHydrateState is true
+	// to ensure we have the actual saved values from the extension.
+	useEffect(() => {
+		if (!didHydrateState) {
+			return
+		}
+		// Only sync if the user hasn't made changes (not isChangeDetected)
+		// This prevents overwriting user edits
+		if (!isChangeDetected) {
+			setCachedState((prevCachedState) => ({
+				...prevCachedState,
+				figmaEnabled: extensionState.figmaEnabled,
+				figmaWriteEnabled: extensionState.figmaWriteEnabled,
+				talkToFigmaEnabled: extensionState.talkToFigmaEnabled,
+				figmaFileUrl: extensionState.figmaFileUrl,
+				figmaWebPreviewEnabled: extensionState.figmaWebPreviewEnabled,
+			}))
+		}
+	}, [
+		didHydrateState,
+		isChangeDetected,
+		extensionState.figmaEnabled,
+		extensionState.figmaWriteEnabled,
+		extensionState.talkToFigmaEnabled,
+		extensionState.figmaFileUrl,
+		extensionState.figmaWebPreviewEnabled,
+	])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {
@@ -362,6 +392,14 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const handleSubmit = () => {
 		if (isSettingValid) {
+			// Debug: Log figma settings values being sent
+			console.log("[SettingsView handleSubmit] Figma settings in cachedState:", {
+				figmaEnabled: cachedState.figmaEnabled,
+				figmaWriteEnabled: cachedState.figmaWriteEnabled,
+				talkToFigmaEnabled: cachedState.talkToFigmaEnabled,
+				figmaFileUrl: cachedState.figmaFileUrl,
+				figmaWebPreviewEnabled: cachedState.figmaWebPreviewEnabled,
+			})
 			vscode.postMessage({
 				type: "updateSettings",
 				updatedSettings: {
@@ -436,9 +474,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					openRouterImageGenerationSelectedModel,
 					experiments,
 					customSupportPrompts,
-					figmaEnabled: figmaEnabled ?? false,
-					figmaWriteEnabled: figmaWriteEnabled ?? false,
-					talkToFigmaEnabled: talkToFigmaEnabled ?? true,
+					figmaEnabled: cachedState.figmaEnabled ?? false,
+					figmaWriteEnabled: cachedState.figmaWriteEnabled ?? false,
+					talkToFigmaEnabled: cachedState.talkToFigmaEnabled ?? true,
+					// Note: Use null instead of undefined since JSON.stringify omits undefined
+					figmaFileUrl: cachedState.figmaFileUrl ?? null,
+					figmaWebPreviewEnabled: cachedState.figmaWebPreviewEnabled ?? false,
 				},
 			})
 
@@ -838,6 +879,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								figmaEnabled={cachedState.figmaEnabled}
 								figmaWriteEnabled={cachedState.figmaWriteEnabled}
 								talkToFigmaEnabled={cachedState.talkToFigmaEnabled}
+								figmaFileUrl={cachedState.figmaFileUrl}
+								figmaWebPreviewEnabled={cachedState.figmaWebPreviewEnabled}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

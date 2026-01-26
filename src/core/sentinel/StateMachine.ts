@@ -15,6 +15,7 @@ import {
 	type FailureRecord,
 } from "./HandoffContext"
 import { SENTINEL_AGENTS, getAgentPersona, getNextAgent, isSentinelAgent } from "./personas"
+import { FigmaPreviewPanel } from "../../services/figma/FigmaPreviewPanel"
 
 /**
  * Agent states in the FSM
@@ -649,12 +650,52 @@ export class SentinelStateMachine {
 		}
 
 		console.log(`[SentinelFSM] switchToAgentMode: Switching to mode "${targetModeSlug}" for state ${agentState}`)
-		
+
 		try {
 			await provider.handleModeSwitch(targetModeSlug)
 			console.log(`[SentinelFSM] switchToAgentMode: Successfully switched to "${targetModeSlug}"`)
+
+			// Auto-open Figma preview when entering Designer mode
+			if (agentState === AgentState.DESIGNER) {
+				await this.openFigmaPreviewForDesigner(provider)
+			}
 		} catch (error) {
 			console.error(`[SentinelFSM] switchToAgentMode: Failed to switch to "${targetModeSlug}":`, error)
+		}
+	}
+
+	/**
+	 * Open Figma preview panel when Designer starts working
+	 */
+	private async openFigmaPreviewForDesigner(provider: ClineProvider): Promise<void> {
+		try {
+			// Get Figma settings from provider state
+			const state = await provider.getState()
+			const figmaEnabled = state.figmaEnabled
+			const webPreviewEnabled = state.figmaWebPreviewEnabled
+			const figmaFileUrl = state.figmaFileUrl
+
+			if (!figmaEnabled) {
+				console.log("[SentinelFSM] Figma is disabled, skipping preview panel")
+				return
+			}
+
+			if (!webPreviewEnabled) {
+				console.log("[SentinelFSM] Figma web preview is disabled, skipping preview panel")
+				return
+			}
+
+			if (!figmaFileUrl) {
+				console.log("[SentinelFSM] No Figma file URL configured, skipping preview panel")
+				return
+			}
+
+			// Initialize and show Figma preview panel
+			const figmaPreview = FigmaPreviewPanel.initialize(provider.context.extensionUri)
+			await figmaPreview.show(figmaFileUrl)
+			console.log("[SentinelFSM] Figma preview panel opened for Designer")
+		} catch (error) {
+			console.error("[SentinelFSM] Failed to open Figma preview:", error)
 		}
 	}
 

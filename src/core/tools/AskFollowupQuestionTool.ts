@@ -35,6 +35,7 @@ export class AskFollowupQuestionTool extends BaseTool<"ask_followup_question"> {
 
 	/**
 	 * Ask the Architect agent to answer a question from another Sentinel agent
+	 * Uses SSE streaming to show the response in real-time
 	 */
 	private async askArchitect(question: string, task: Task): Promise<string> {
 		console.log(`[AskFollowupQuestion] Routing question to Architect: "${question.substring(0, 100)}..."`)
@@ -57,20 +58,41 @@ ${question}
 				taskId: `architect-answer-${Date.now()}`,
 			})
 
-			// Collect the response
+			// Header for the streaming message
+			const header = `🟦 **Architect 回答了 Agent 的問題：**\n\n> ${question}\n\n**回答：**\n`
+
+			// Stream the response in real-time
 			let responseText = ""
+			let isFirstChunk = true
+
 			for await (const chunk of stream) {
 				if (chunk.type === "text") {
 					responseText += chunk.text
+
+					// Show streaming update with partial=true
+					// This creates real-time SSE-like streaming effect
+					await task.say(
+						"text",
+						header + responseText,
+						undefined,
+						true, // partial=true means this is an incomplete/streaming message
+					)
+
+					if (isFirstChunk) {
+						console.log(`[AskFollowupQuestion] Architect started streaming response...`)
+						isFirstChunk = false
+					}
 				}
 			}
 
-			console.log(`[AskFollowupQuestion] Architect response: "${responseText.substring(0, 100)}..."`)
+			console.log(`[AskFollowupQuestion] Architect response complete: "${responseText.substring(0, 100)}..."`)
 
-			// Notify user that Architect answered
+			// Final message with partial=false to mark completion
 			await task.say(
 				"text",
-				`🟦 **Architect 回答了 Agent 的問題：**\n\n${question}\n\n**回答：**\n${responseText}`,
+				header + responseText,
+				undefined,
+				false, // partial=false marks the message as complete
 			)
 
 			return responseText

@@ -44,6 +44,14 @@ interface NodeInfo {
 	characters?: string // Actual text content for TEXT nodes
 }
 
+interface ColorInfo {
+	nodeId: string
+	nodeName: string
+	nodeType: string
+	backgroundColor?: string // Hex color for rectangles
+	textColor?: string // Hex color for text nodes
+}
+
 interface LayoutContext {
 	containerWidth: number
 	containerHeight: number
@@ -160,19 +168,20 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 			let nodes: NodeInfo[] = []
 			let containerInfo: { width: number; height: number } = { width: 400, height: 600 }
 
+			// Parse nodeIds if provided
+			let nodeIds: string[] = []
 			if (params.nodeIds) {
-				// Parse provided node IDs
-				let nodeIds: string[]
 				try {
 					nodeIds = JSON.parse(params.nodeIds)
+					// Filter out empty strings and invalid IDs
+					nodeIds = nodeIds.filter((id) => id && typeof id === "string" && id.trim().length > 0)
 				} catch {
-					task.consecutiveMistakeCount++
-					task.recordToolError("adjust_layout")
-					task.didToolFailInCurrentTurn = true
-					pushToolResult(formatResponse.toolError("Invalid nodeIds format. Expected JSON array."))
-					return
+					console.warn("[AdjustLayout] Invalid nodeIds format, will try 'within' parameter")
 				}
+			}
 
+			// Use nodeIds if we have valid IDs, otherwise fallback to 'within'
+			if (nodeIds.length > 0) {
 				await task.say("text", `🔍 正在獲取 ${nodeIds.length} 個節點的資訊...`)
 
 				if (serverName === "TalkToFigma") {
@@ -225,7 +234,22 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 			}
 
 			if (nodes.length === 0) {
-				pushToolResult(formatResponse.toolResult("No nodes found to arrange."))
+				// Provide more helpful error message
+				let helpMsg =
+					"No nodes found to arrange.\n\n" +
+					"Tips:\n" +
+					"1. Make sure you provide a valid 'within' parameter (container frame ID)\n" +
+					"2. Or provide 'nodeIds' with valid node IDs from previous create operations\n" +
+					"3. Use TalkToFigma's get_selection or get_document_info to find frame IDs"
+
+				if (params.within) {
+					helpMsg += `\n\nYou provided within="${params.within}" but no children were found. The frame might be empty or the ID might be incorrect.`
+				}
+				if (params.nodeIds) {
+					helpMsg += `\n\nYou provided nodeIds but the array was empty or contained invalid IDs.`
+				}
+
+				pushToolResult(formatResponse.toolResult(helpMsg))
 				return
 			}
 
@@ -411,9 +435,75 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 		const aiPrompt = this.buildLayoutAIPrompt(allElements, context)
 
 		try {
-			const aiPositions = await this.getAIPositionDecisions(task, aiPrompt, allElements, context)
+			let aiPositions = await this.getAIPositionDecisions(task, aiPrompt, allElements, context)
 
-			await task.say("text", `🎯 AI 已決定 ${aiPositions.length} 個元素的位置，開始執行...`)
+			// Apply boundary checking to ensure elements stay within container
+			aiPositions = this.clampPositionsToContainer(
+				aiPositions,
+				allElements.map((e) => ({ id: e.id, width: e.width, height: e.height })),
+				context.containerWidth,
+				context.containerHeight,
+				context.startX, // Use startX as margin
+			)
+
+			await task.say("text", `🎯 AI 已決定 ${aiPositions.length} 個元素的位置...`)
+
+			// If adjustColors is enabled, extract and show color info for approval
+			let colorInfoList: ColorInfo[] = []
+			if (adjustColors) {
+				await task.say("text", `🎨 正在提取顏色資訊以供審批...`)
+
+				// Collect all nodes for color extraction
+				const allNodes: NodeInfo[] = [
+					...display.map((d) => d.rect),
+					...display.filter((d) => d.text).map((d) => d.text!),
+					...paired.map((p) => p.rect),
+					...paired.map((p) => p.text),
+					...standalone,
+				]
+
+				colorInfoList = await this.extractColorInfo(mcpHub, serverName, allNodes)
+
+				if (colorInfoList.length > 0) {
+					const colorSummary = this.buildColorSummary(colorInfoList)
+
+					// Show color info and ask for approval
+					const colorApprovalMessage = JSON.stringify({
+						tool: "colorApproval",
+						action: "審批顏色 (Color Approval)",
+						colors: colorInfoList.map((c) => ({
+							name: c.nodeName,
+							type: c.nodeType,
+							bg: c.backgroundColor,
+							text: c.textColor,
+						})),
+					})
+
+					await task.say(
+						"text",
+						`🎨 **顏色審批 (Color Approval)**\n\n` +
+							colorSummary +
+							`\n請確認以上顏色是否正確。如需調整顏色，請取消並指定新的顏色。`,
+					)
+
+					// Ask for color approval
+					const colorApproved = await task.ask("tool", colorApprovalMessage)
+
+					if (colorApproved.response !== "yesButtonClicked") {
+						await task.say("text", `❌ 顏色審批被取消，請重新指定顏色後再試。`)
+						pushToolResult(
+							formatResponse.toolResult(
+								`Color approval was cancelled. Please specify the desired colors and try again.`,
+							) as string,
+						)
+						return
+					}
+
+					await task.say("text", `✅ 顏色已審批通過，繼續執行佈局調整...`)
+				}
+			}
+
+			await task.say("text", `🚀 開始執行佈局調整...`)
 
 			// Execute all position changes
 			const calls: Array<{ server: string; tool: string; args: Record<string, unknown> }> = []
@@ -543,7 +633,7 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 						`- Elements: ${allElements.length}\n` +
 						`- Success: ${successCount}\n` +
 						`- Failed: ${failedCount}`,
-				),
+				) as string,
 			)
 		} catch (error) {
 			console.error(`[AdjustLayout AI] Error:`, error)
@@ -711,6 +801,111 @@ ${JSON.stringify(elementDetails, null, 2)}
 	}
 
 	/**
+	 * Extract color information from Figma nodes for color approval
+	 * Queries the Figma API to get fill colors from rectangles and text colors from text nodes
+	 */
+	private async extractColorInfo(
+		mcpHub: any,
+		serverName: string,
+		nodes: NodeInfo[],
+	): Promise<ColorInfo[]> {
+		const colors: ColorInfo[] = []
+
+		for (const node of nodes) {
+			try {
+				// Get detailed node info including fills
+				const result = await mcpHub.callTool(serverName, "get_node_info", { nodeId: node.id })
+				let nodeData: any = null
+
+				if (typeof result === "string") {
+					nodeData = JSON.parse(result)
+				} else if (result?.content) {
+					const textContent = result.content.find((c: any) => c.type === "text")
+					if (textContent?.text) {
+						nodeData = JSON.parse(textContent.text)
+					}
+				}
+
+				if (nodeData) {
+					const colorInfo: ColorInfo = {
+						nodeId: node.id,
+						nodeName: node.name,
+						nodeType: node.type,
+					}
+
+					// Extract fill color for rectangles
+					if (node.type === "RECTANGLE" && nodeData.fills && Array.isArray(nodeData.fills)) {
+						const solidFill = nodeData.fills.find((f: any) => f.type === "SOLID" && f.visible !== false)
+						if (solidFill?.color) {
+							const { r, g, b } = solidFill.color
+							colorInfo.backgroundColor = this.rgbToHex(r, g, b)
+						}
+					}
+
+					// Extract text color
+					if (node.type === "TEXT" && nodeData.fills && Array.isArray(nodeData.fills)) {
+						const solidFill = nodeData.fills.find((f: any) => f.type === "SOLID" && f.visible !== false)
+						if (solidFill?.color) {
+							const { r, g, b } = solidFill.color
+							colorInfo.textColor = this.rgbToHex(r, g, b)
+						}
+					}
+
+					if (colorInfo.backgroundColor || colorInfo.textColor) {
+						colors.push(colorInfo)
+					}
+				}
+			} catch (error) {
+				console.warn(`[AdjustLayout] Failed to extract color for node ${node.id}:`, error)
+			}
+		}
+
+		return colors
+	}
+
+	/**
+	 * Convert RGB values (0-1) to hex color string
+	 */
+	private rgbToHex(r: number, g: number, b: number): string {
+		const toHex = (v: number) => {
+			const hex = Math.round(v * 255).toString(16)
+			return hex.length === 1 ? "0" + hex : hex
+		}
+		return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase()
+	}
+
+	/**
+	 * Build color summary for approval message
+	 */
+	private buildColorSummary(colors: ColorInfo[]): string {
+		const bgColors = colors.filter(c => c.backgroundColor)
+		const textColors = colors.filter(c => c.textColor)
+
+		let summary = "## 當前顏色資訊 (Current Colors)\n\n"
+
+		if (bgColors.length > 0) {
+			summary += "**背景顏色 (Background Colors):**\n"
+			const uniqueBg = [...new Set(bgColors.map(c => c.backgroundColor))]
+			uniqueBg.forEach(color => {
+				const count = bgColors.filter(c => c.backgroundColor === color).length
+				summary += `- ${color} (${count} 個元素)\n`
+			})
+			summary += "\n"
+		}
+
+		if (textColors.length > 0) {
+			summary += "**文字顏色 (Text Colors):**\n"
+			const uniqueText = [...new Set(textColors.map(c => c.textColor))]
+			uniqueText.forEach(color => {
+				const count = textColors.filter(c => c.textColor === color).length
+				summary += `- ${color} (${count} 個文字)\n`
+			})
+		}
+
+		return summary
+	}
+
+	/**
 	 * Calculate fallback positions using standard calculator layout
 	 * Handles various button text representations (×/*, ÷//, etc.)
 	 */
@@ -873,14 +1068,38 @@ ${JSON.stringify(elementDetails, null, 2)}
 		const sortedStandalone = this.sortNodes(standalone, "position")
 
 		// Calculate new positions
-		const positions = this.calculatePairedPositions(sortedPaired, sortedStandalone, display, {
+		let positions = this.calculatePairedPositions(sortedPaired, sortedStandalone, display, {
 			layout: context.layout,
 			columns: context.columns,
 			gapX: context.gapX,
 			gapY: context.gapY,
 			startX: context.startX,
 			startY: context.startY,
+			containerWidth: context.containerWidth,
+			containerHeight: context.containerHeight,
 		})
+
+		// Build element size map for boundary checking
+		const allElements: Array<{ nodeId: string; width: number; height: number }> = [
+			...display.map((d) => ({ nodeId: d.rect.id, width: d.rect.width, height: d.rect.height })),
+			...display.filter((d) => d.text).map((d) => ({ nodeId: d.text!.id, width: d.text!.width, height: d.text!.height })),
+			...sortedPaired.map((p) => ({ nodeId: p.rect.id, width: p.rect.width, height: p.rect.height })),
+			...sortedPaired.map((p) => ({ nodeId: p.text.id, width: p.text.width, height: p.text.height })),
+			...sortedStandalone.map((n) => ({ nodeId: n.id, width: n.width, height: n.height })),
+		]
+
+		// Apply boundary checking to ensure elements stay within container
+		positions = this.clampPositionsToContainer(
+			positions,
+			allElements,
+			context.containerWidth,
+			context.containerHeight,
+			context.startX, // Use startX as margin
+		)
+
+		// Note: We no longer resize buttons here as it causes "squeeze" issues.
+		// Instead, positions are calculated to fit within container bounds (see calculatePairedPositions).
+		// If buttons still exceed bounds, the clampPositionsToContainer will keep them inside.
 
 		// Execute position changes in batches
 		let successCount = 0
@@ -951,7 +1170,7 @@ ${JSON.stringify(elementDetails, null, 2)}
 					`- Layout: ${context.layout}\n` +
 					`- Nodes arranged: ${successCount}\n` +
 					`- Failed: ${failedCount}`,
-			),
+			) as string,
 		)
 	}
 
@@ -1061,10 +1280,32 @@ ${JSON.stringify(elementDetails, null, 2)}
 				}
 			}
 
-			if (!content) return { nodes: [], duplicateIds: [] }
+			if (!content) {
+				console.warn("[AdjustLayout] No content in get_node_info result")
+				return { nodes: [], duplicateIds: [] }
+			}
+
+			console.log("[AdjustLayout] Parsing node info content:", content.substring(0, 500))
 
 			const parsed = JSON.parse(content)
-			const children = parsed.children || parsed.result?.children || []
+
+			// Try multiple paths to find children (TalkToFigma might use different response formats)
+			let children = parsed.children || parsed.result?.children || parsed.node?.children || []
+
+			// If still no children, check if this is a different response format
+			if (!Array.isArray(children) || children.length === 0) {
+				// Some MCP servers return the node directly without wrapping
+				if (parsed.type && parsed.id) {
+					// This is the node itself, not wrapped - children should be at top level
+					children = parsed.children || []
+				}
+				console.log(
+					"[AdjustLayout] Children search - found:",
+					Array.isArray(children) ? children.length : "not array",
+					"keys in parsed:",
+					Object.keys(parsed).join(", "),
+				)
+			}
 
 			if (!Array.isArray(children)) return { nodes: [], duplicateIds: [] }
 
@@ -1120,6 +1361,46 @@ ${JSON.stringify(elementDetails, null, 2)}
 			console.error("[AdjustLayout] Failed to parse children from node info:", e)
 			return { nodes: [], duplicateIds: [] }
 		}
+	}
+
+	/**
+	 * Clamp positions to stay within container bounds
+	 * Only clamps X (horizontal) positions to prevent buttons from exceeding container width.
+	 * Y positions are NOT clamped to avoid "squeezing" buttons vertically when container isn't tall enough.
+	 * Works with both { id, x, y } and { nodeId, x, y } formats
+	 */
+	private clampPositionsToContainer<T extends { x: number; y: number } & ({ id: string } | { nodeId: string })>(
+		positions: T[],
+		elements: Array<{ id?: string; nodeId?: string; width: number; height: number }>,
+		containerWidth: number,
+		_containerHeight: number, // Not used - we don't clamp Y to avoid squeeze
+		margin: number = 10,
+	): T[] {
+		// Build element map that works with both id and nodeId
+		const elementMap = new Map<string, { width: number; height: number }>()
+		for (const e of elements) {
+			if (e.id) elementMap.set(e.id, { width: e.width, height: e.height })
+			if (e.nodeId) elementMap.set(e.nodeId, { width: e.width, height: e.height })
+		}
+
+		return positions.map((pos) => {
+			const posId = "id" in pos ? pos.id : "nodeId" in pos ? (pos as { nodeId: string }).nodeId : ""
+			const element = elementMap.get(posId)
+			if (!element) return pos
+
+			// Only clamp X: ensure element stays within container width (with margin)
+			// We do NOT clamp Y because it causes elements to overlap ("squeeze") when container isn't tall enough
+			const maxX = containerWidth - element.width - margin
+			const clampedX = Math.max(margin, Math.min(pos.x, maxX))
+
+			if (clampedX !== pos.x) {
+				console.log(
+					`[AdjustLayout] Clamped X for ${posId}: ${pos.x} -> ${clampedX}`,
+				)
+			}
+
+			return { ...pos, x: clampedX, y: pos.y }
+		})
 	}
 
 	/**
@@ -1304,7 +1585,30 @@ ${JSON.stringify(elementDetails, null, 2)}
 	}
 
 	/**
-	 * Calculate new positions for elements
+	 * Normalize button text to handle variations (×/*, ÷//, etc.)
+	 */
+	private normalizeButtonText(text: string): string {
+		const normalized = text.trim()
+		const mappings: Record<string, string> = {
+			"*": "×",
+			x: "×",
+			X: "×",
+			"/": "÷",
+			AC: "C",
+			CE: "C",
+			CLR: "C",
+			"⌫": "⌫",
+			DEL: "⌫",
+			"←": "⌫",
+			"+/-": "±",
+			"+-": "±",
+		}
+		return mappings[normalized] || normalized
+	}
+
+	/**
+	 * Calculate new positions for elements using calculator-aware layout
+	 * Arranges buttons according to standard calculator layout based on their text content
 	 */
 	private calculatePairedPositions(
 		paired: Array<{ rect: NodeInfo; text: NodeInfo }>,
@@ -1317,9 +1621,11 @@ ${JSON.stringify(elementDetails, null, 2)}
 			gapY: number
 			startX: number
 			startY: number
+			containerWidth?: number
+			containerHeight?: number
 		},
 	): Array<{ nodeId: string; x: number; y: number }> {
-		const { layout, columns, gapX, gapY, startX, startY } = options
+		const { layout, columns, gapX, gapY, startX, startY, containerWidth, containerHeight } = options
 		const positions: Array<{ nodeId: string; x: number; y: number }> = []
 
 		let currentY = startY
@@ -1337,95 +1643,232 @@ ${JSON.stringify(elementDetails, null, 2)}
 			currentY += disp.rect.height + gapY
 		}
 
-		// 2. Position buttons below display(s)
+		// 2. Position buttons below display(s) using calculator-aware layout
 		const buttonStartY = currentY
 
-		const layoutItems: Array<{ nodes: NodeInfo[]; width: number; height: number }> = [
-			...paired.map((p) => ({
-				nodes: [p.rect, p.text],
-				width: p.rect.width,
-				height: p.rect.height,
-			})),
-			...standalone.map((n) => ({
-				nodes: [n],
-				width: n.width,
-				height: n.height,
-			})),
+		// Get typical button size - but if we have container width, calculate to fit
+		let btnWidth = paired[0]?.rect.width || 60
+		const btnHeight = paired[0]?.rect.height || 60
+
+		// Calculate maximum button width to ensure all buttons fit within container
+		if (containerWidth) {
+			const availableWidth = containerWidth - (2 * startX) // Account for left and right margins
+			const maxBtnWidthForColumns = Math.floor((availableWidth - (columns - 1) * gapX) / columns)
+			// Use the smaller of actual button width or max calculated width
+			if (btnWidth > maxBtnWidthForColumns) {
+				console.log(
+					`[AdjustLayout] Button width ${btnWidth}px exceeds available space. ` +
+						`Container: ${containerWidth}px, columns: ${columns}, gap: ${gapX}px. ` +
+						`Adjusting to ${maxBtnWidthForColumns}px per button.`,
+				)
+				btnWidth = maxBtnWidthForColumns
+			}
+		}
+
+		// Build a map of buttons by their normalized text content
+		const buttonMap = new Map<string, { rect: NodeInfo; text: NodeInfo }>()
+		for (const pair of paired) {
+			const buttonText = this.extractButtonText(pair.text)
+			const normalizedText = this.normalizeButtonText(buttonText)
+			buttonMap.set(normalizedText, pair)
+			// Also store original text for better matching
+			if (normalizedText !== buttonText) {
+				buttonMap.set(buttonText, pair)
+			}
+		}
+
+		console.log(`[AdjustLayout] Button map keys for positioning: ${Array.from(buttonMap.keys()).join(", ")}`)
+
+		// Standard calculator layout rows
+		const calcLayout = [
+			["C", "⌫", "%", "÷"], // Function row
+			["7", "8", "9", "×"], // Numbers row 1
+			["4", "5", "6", "-"], // Numbers row 2
+			["1", "2", "3", "+"], // Numbers row 3
+			["0", ".", "="], // Bottom row (0 is usually wider)
 		]
 
-		if (layout === "grid") {
-			let currentX = startX
-			currentY = buttonStartY
-			let maxHeightInRow = 0
-			let col = 0
+		// Alternative layouts to try for different calculator styles
+		const altLayouts = [
+			[["C", "±", "%", "÷"], ["7", "8", "9", "×"], ["4", "5", "6", "-"], ["1", "2", "3", "+"], ["0", ".", "="]],
+			[["AC", "⌫", "%", "÷"], ["7", "8", "9", "×"], ["4", "5", "6", "-"], ["1", "2", "3", "+"], ["0", ".", "="]],
+		]
 
-			for (const item of layoutItems) {
-				for (const node of item.nodes) {
-					if (node.type === "TEXT" && item.nodes.length > 1) {
-						const rect = item.nodes.find((n) => n.type === "RECTANGLE")
-						if (rect) {
-							const textX = currentX + Math.floor((rect.width - node.width) / 2)
-							const textY = currentY + Math.floor((rect.height - node.height) / 2)
-							positions.push({ nodeId: node.id, x: textX, y: textY })
+		const placedIds = new Set<string>()
+
+		// Helper to place a button pair at position
+		const placeButtonPair = (
+			pair: { rect: NodeInfo; text: NodeInfo },
+			x: number,
+			y: number,
+			effectiveWidth?: number,
+		) => {
+			if (placedIds.has(pair.rect.id)) return
+
+			positions.push({ nodeId: pair.rect.id, x, y })
+			placedIds.add(pair.rect.id)
+
+			// Center text within the button
+			const textX = x + Math.floor(((effectiveWidth || pair.rect.width) - pair.text.width) / 2)
+			const textY = y + Math.floor((pair.rect.height - pair.text.height) / 2)
+			positions.push({ nodeId: pair.text.id, x: textX, y: textY })
+			placedIds.add(pair.text.id)
+		}
+
+		// Use calculator layout if we have enough buttons that match
+		if (layout === "grid" && paired.length >= 10) {
+			// Try to place buttons according to standard calculator layout
+			currentY = buttonStartY
+
+			for (const row of calcLayout) {
+				let colX = startX
+				let foundInRow = false
+
+				for (let i = 0; i < row.length; i++) {
+					const key = row[i]
+					const pair = buttonMap.get(key)
+
+					if (pair && !placedIds.has(pair.rect.id)) {
+						// Special case: 0 button spans 2 columns
+						const isWideZero = key === "0" && row.length === 3 && i === 0
+						const effectiveWidth = isWideZero ? btnWidth * 2 + gapX : btnWidth
+
+						placeButtonPair(pair, colX, currentY, effectiveWidth)
+						foundInRow = true
+						colX += effectiveWidth + gapX
+					} else {
+						// Skip space for missing button (keep grid alignment)
+						colX += btnWidth + gapX
+					}
+				}
+
+				if (foundInRow) {
+					currentY += btnHeight + gapY
+				}
+			}
+
+			// Place any remaining buttons that weren't in standard layout
+			const remainingPairs = paired.filter((p) => !placedIds.has(p.rect.id))
+			if (remainingPairs.length > 0) {
+				console.log(
+					`[AdjustLayout] Remaining buttons not in standard layout: ${remainingPairs.map((p) => this.extractButtonText(p.text)).join(", ")}`,
+				)
+
+				let col = 0
+				for (const pair of remainingPairs) {
+					const x = startX + col * (btnWidth + gapX)
+					placeButtonPair(pair, x, currentY)
+					col++
+					if (col >= columns) {
+						col = 0
+						currentY += btnHeight + gapY
+					}
+				}
+			}
+		} else {
+			// Fallback to simple grid/row/column layout for non-calculator UIs
+			const layoutItems: Array<{ nodes: NodeInfo[]; width: number; height: number }> = [
+				...paired.map((p) => ({
+					nodes: [p.rect, p.text],
+					width: p.rect.width,
+					height: p.rect.height,
+				})),
+				...standalone.map((n) => ({
+					nodes: [n],
+					width: n.width,
+					height: n.height,
+				})),
+			]
+
+			if (layout === "grid") {
+				let currentX = startX
+				currentY = buttonStartY
+				let maxHeightInRow = 0
+				let col = 0
+
+				for (const item of layoutItems) {
+					for (const node of item.nodes) {
+						if (node.type === "TEXT" && item.nodes.length > 1) {
+							const rect = item.nodes.find((n) => n.type === "RECTANGLE")
+							if (rect) {
+								const textX = currentX + Math.floor((rect.width - node.width) / 2)
+								const textY = currentY + Math.floor((rect.height - node.height) / 2)
+								positions.push({ nodeId: node.id, x: textX, y: textY })
+							} else {
+								positions.push({ nodeId: node.id, x: currentX, y: currentY })
+							}
 						} else {
 							positions.push({ nodeId: node.id, x: currentX, y: currentY })
 						}
+					}
+
+					maxHeightInRow = Math.max(maxHeightInRow, item.height)
+					col++
+
+					if (col >= columns) {
+						col = 0
+						currentX = startX
+						currentY += maxHeightInRow + gapY
+						maxHeightInRow = 0
 					} else {
-						positions.push({ nodeId: node.id, x: currentX, y: currentY })
+						currentX += item.width + gapX
 					}
 				}
+			} else if (layout === "row") {
+				let currentX = startX
 
-				maxHeightInRow = Math.max(maxHeightInRow, item.height)
-				col++
-
-				if (col >= columns) {
-					col = 0
-					currentX = startX
-					currentY += maxHeightInRow + gapY
-					maxHeightInRow = 0
-				} else {
-					currentX += item.width + gapX
-				}
-			}
-		} else if (layout === "row") {
-			let currentX = startX
-
-			for (const item of layoutItems) {
-				for (const node of item.nodes) {
-					if (node.type === "TEXT" && item.nodes.length > 1) {
-						const rect = item.nodes.find((n) => n.type === "RECTANGLE")
-						if (rect) {
-							const textX = currentX + Math.floor((rect.width - node.width) / 2)
-							const textY = buttonStartY + Math.floor((rect.height - node.height) / 2)
-							positions.push({ nodeId: node.id, x: textX, y: textY })
+				for (const item of layoutItems) {
+					for (const node of item.nodes) {
+						if (node.type === "TEXT" && item.nodes.length > 1) {
+							const rect = item.nodes.find((n) => n.type === "RECTANGLE")
+							if (rect) {
+								const textX = currentX + Math.floor((rect.width - node.width) / 2)
+								const textY = buttonStartY + Math.floor((rect.height - node.height) / 2)
+								positions.push({ nodeId: node.id, x: textX, y: textY })
+							} else {
+								positions.push({ nodeId: node.id, x: currentX, y: buttonStartY })
+							}
 						} else {
 							positions.push({ nodeId: node.id, x: currentX, y: buttonStartY })
 						}
-					} else {
-						positions.push({ nodeId: node.id, x: currentX, y: buttonStartY })
 					}
+					currentX += item.width + gapX
 				}
-				currentX += item.width + gapX
-			}
-		} else if (layout === "column") {
-			currentY = buttonStartY
+			} else if (layout === "column") {
+				currentY = buttonStartY
 
-			for (const item of layoutItems) {
-				for (const node of item.nodes) {
-					if (node.type === "TEXT" && item.nodes.length > 1) {
-						const rect = item.nodes.find((n) => n.type === "RECTANGLE")
-						if (rect) {
-							const textX = startX + Math.floor((rect.width - node.width) / 2)
-							const textY = currentY + Math.floor((rect.height - node.height) / 2)
-							positions.push({ nodeId: node.id, x: textX, y: textY })
+				for (const item of layoutItems) {
+					for (const node of item.nodes) {
+						if (node.type === "TEXT" && item.nodes.length > 1) {
+							const rect = item.nodes.find((n) => n.type === "RECTANGLE")
+							if (rect) {
+								const textX = startX + Math.floor((rect.width - node.width) / 2)
+								const textY = currentY + Math.floor((rect.height - node.height) / 2)
+								positions.push({ nodeId: node.id, x: textX, y: textY })
+							} else {
+								positions.push({ nodeId: node.id, x: startX, y: currentY })
+							}
 						} else {
 							positions.push({ nodeId: node.id, x: startX, y: currentY })
 						}
-					} else {
-						positions.push({ nodeId: node.id, x: startX, y: currentY })
 					}
+					currentY += item.height + gapY
 				}
-				currentY += item.height + gapY
+			}
+		}
+
+		// Position standalone elements at the end
+		const remainingStandalone = standalone.filter((n) => !placedIds.has(n.id))
+		if (remainingStandalone.length > 0) {
+			let col = 0
+			for (const node of remainingStandalone) {
+				const x = startX + col * (node.width + gapX)
+				positions.push({ nodeId: node.id, x, y: currentY })
+				col++
+				if (col >= columns) {
+					col = 0
+					currentY += node.height + gapY
+				}
 			}
 		}
 

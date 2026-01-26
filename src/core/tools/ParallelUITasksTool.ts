@@ -20,6 +20,7 @@ import {
 interface ParallelUITasksParams {
 	tasks: string // JSON array of UITaskDefinition objects
 	containerFrame?: string // Optional: parent frame ID to create elements inside
+	frameWidth?: string // Optional: frame width hint for layout calculations
 }
 
 interface ParsedTask {
@@ -432,23 +433,44 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 			)
 			const GRID_COLUMNS = optimalColumns
 
+			// IMPORTANT: Adjust button sizes if they don't fit within the container
+			// This prevents buttons from exceeding frame boundaries
+			const totalWidthNeeded = GRID_COLUMNS * avgTaskWidth + (GRID_COLUMNS - 1) * GAP
+			let adjustedTaskWidth = avgTaskWidth
+			if (totalWidthNeeded > availableWidth && GRID_COLUMNS > 0) {
+				// Calculate the maximum width per button that fits
+				adjustedTaskWidth = Math.floor((availableWidth - (GRID_COLUMNS - 1) * GAP) / GRID_COLUMNS)
+				console.log(
+					`[ParallelUI] Button width adjusted: ${avgTaskWidth}px -> ${adjustedTaskWidth}px to fit ${GRID_COLUMNS} columns in ${availableWidth}px`,
+				)
+				// Update all task specs with adjusted width
+				for (const t of parsedTasks) {
+					if (t.designSpec) {
+						t.designSpec.width = adjustedTaskWidth
+					}
+				}
+			}
+
 			// Start position: relative to frame (0,0) with padding, or absolute for no frame
 			const START_X = hasContainerFrame ? FRAME_PADDING : 20
 			const START_Y = hasContainerFrame ? FRAME_PADDING : 20
 
+			// Recalculate cell width with adjusted task width
+			const ADJUSTED_CELL_WIDTH = adjustedTaskWidth + GAP
+
 			// Calculate total grid size for logging
-			const gridWidth = GRID_COLUMNS * CELL_WIDTH + FRAME_PADDING
+			const gridWidth = GRID_COLUMNS * ADJUSTED_CELL_WIDTH + FRAME_PADDING
 			const gridHeight = Math.ceil(taskCount / GRID_COLUMNS) * CELL_HEIGHT + FRAME_PADDING
 
 			console.log(
-				`[ParallelUI] Dynamic layout: ${GRID_COLUMNS} columns (max by width: ${maxColumnsByWidth}), cell=${CELL_WIDTH}x${CELL_HEIGHT}px, element=${avgTaskWidth}x${avgTaskHeight}px, grid=${gridWidth}x${gridHeight}px, frameWidth=${estimatedFrameWidth}, tasks=${taskCount}`,
+				`[ParallelUI] Dynamic layout: ${GRID_COLUMNS} columns (max by width: ${maxColumnsByWidth}), cell=${ADJUSTED_CELL_WIDTH}x${CELL_HEIGHT}px, element=${adjustedTaskWidth}x${avgTaskHeight}px, grid=${gridWidth}x${gridHeight}px, frameWidth=${estimatedFrameWidth}, tasks=${taskCount}`,
 			)
 
 			// Show approval message with position and color info
 			const taskSummary = parsedTasks
 				.map((t, i) => {
 					const pos = t.position || {
-						x: START_X + (i % GRID_COLUMNS) * CELL_WIDTH,
+						x: START_X + (i % GRID_COLUMNS) * ADJUSTED_CELL_WIDTH,
 						y: START_Y + Math.floor(i / GRID_COLUMNS) * CELL_HEIGHT,
 					}
 					const colorInfo = t.designSpec?.colors?.[0] ? ` 🎨 ${t.designSpec.colors[0]}` : ""
@@ -465,7 +487,7 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 
 			await task.say(
 				"text",
-				`🎨 Starting ${parsedTasks.length} parallel UI drawing tasks:\n${taskSummary}\n\n📍 Grid layout: ${GRID_COLUMNS} columns, ${CELL_WIDTH}x${CELL_HEIGHT}px cells`,
+				`🎨 Starting ${parsedTasks.length} parallel UI drawing tasks:\n${taskSummary}\n\n📍 Grid layout: ${GRID_COLUMNS} columns, ${ADJUSTED_CELL_WIDTH}x${CELL_HEIGHT}px cells`,
 			)
 
 			const didApprove = await askApproval("tool", toolMessage)

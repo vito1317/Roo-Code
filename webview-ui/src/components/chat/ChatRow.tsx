@@ -286,6 +286,24 @@ export const ChatRowContent = ({
 				if (mcpServerUse === undefined) {
 					return [null, null]
 				}
+				// Check if this is a Figma server - use custom display
+				const isFigmaMcpServer =
+					mcpServerUse.serverName === "TalkToFigma" ||
+					mcpServerUse.serverName === "figma-write" ||
+					mcpServerUse.serverName?.toLowerCase().includes("figma")
+
+				if (isFigmaMcpServer) {
+					return [
+						isMcpServerResponding ? (
+							<ProgressIndicator />
+						) : (
+							<span style={{ fontSize: "16px", marginBottom: "-1.5px" }}>🎨</span>
+						),
+						<span style={{ color: normalColor, fontWeight: "bold" }}>
+							Designer 正在操作 Figma
+						</span>,
+					]
+				}
 				return [
 					isMcpServerResponding ? (
 						<ProgressIndicator />
@@ -1585,6 +1603,35 @@ export const ChatRowContent = ({
 					}
 
 					const server = mcpServers.find((server) => server.name === useMcpServer.serverName)
+
+					// Check if this is a Figma MCP server - use simplified display
+					const isFigmaServer =
+						useMcpServer.serverName === "TalkToFigma" ||
+						useMcpServer.serverName === "figma-write" ||
+						useMcpServer.serverName?.toLowerCase().includes("figma")
+
+					// Simplified display for Figma tools
+					if (isFigmaServer && useMcpServer.type === "use_mcp_tool") {
+						return (
+							<>
+								<div style={headerStyle}>
+									{icon}
+									{title}
+								</div>
+								<div className="w-full bg-vscode-editor-background border border-vscode-border rounded-xs p-2 mt-2">
+									<div className="flex items-center gap-2 text-vscode-foreground">
+										<span className="text-lg">🎨</span>
+										<span className="font-medium">
+											Figma: {useMcpServer.toolName?.replace(/_/g, " ")}
+										</span>
+									</div>
+									<div className="text-xs text-vscode-descriptionForeground mt-1 ml-7">
+										正在執行 Figma 操作...
+									</div>
+								</div>
+							</>
+						)
+					}
 
 					return (
 						<>

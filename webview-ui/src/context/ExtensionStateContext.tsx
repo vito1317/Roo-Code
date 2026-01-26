@@ -292,6 +292,12 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		openRouterImageGenerationSelectedModel: "",
 		includeCurrentTime: true,
 		includeCurrentCost: true,
+		// Figma Integration settings
+		figmaEnabled: false,
+		figmaWriteEnabled: false,
+		talkToFigmaEnabled: true,
+		figmaFileUrl: undefined,
+		figmaWebPreviewEnabled: false,
 	})
 
 	const [didHydrateState, setDidHydrateState] = useState(false)

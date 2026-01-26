@@ -515,10 +515,20 @@ export class NativeToolCallParser {
 
 			case "use_mcp_tool":
 				if (partialArgs.server_name !== undefined || partialArgs.tool_name !== undefined) {
+					// Parse arguments if they're a string (model sometimes sends stringified JSON)
+					let parsedPartialMcpArgs = partialArgs.arguments
+					if (typeof partialArgs.arguments === "string") {
+						try {
+							parsedPartialMcpArgs = JSON.parse(partialArgs.arguments)
+						} catch {
+							// Keep as string if parsing fails (might be incomplete during streaming)
+							parsedPartialMcpArgs = partialArgs.arguments
+						}
+					}
 					nativeArgs = {
 						server_name: partialArgs.server_name,
 						tool_name: partialArgs.tool_name,
-						arguments: partialArgs.arguments,
+						arguments: parsedPartialMcpArgs,
 					}
 				}
 				break
@@ -895,10 +905,20 @@ export class NativeToolCallParser {
 
 				case "use_mcp_tool":
 					if (args.server_name !== undefined && args.tool_name !== undefined) {
+						// Parse arguments if they're a string (model sometimes sends stringified JSON)
+						let parsedMcpArgs = args.arguments
+						if (typeof args.arguments === "string") {
+							try {
+								parsedMcpArgs = JSON.parse(args.arguments)
+							} catch {
+								// Keep as string if parsing fails, UseMcpToolTool will handle the error
+								parsedMcpArgs = args.arguments
+							}
+						}
 						nativeArgs = {
 							server_name: args.server_name,
 							tool_name: args.tool_name,
-							arguments: args.arguments,
+							arguments: parsedMcpArgs,
 						} as NativeArgsFor<TName>
 					}
 					break
@@ -1004,10 +1024,21 @@ export class NativeToolCallParser {
 							}
 						}
 					}
+					// Convert to string for the tool handler
+					// Handle undefined case: if calls is not provided, pass empty string
+					// so the tool handler can report the missing parameter correctly
+					let callsString: string
+					if (callsValue === undefined || callsValue === null) {
+						callsString = "" // Will trigger "missing parameter" error in tool handler
+					} else if (typeof callsValue === "string") {
+						callsString = callsValue
+					} else {
+						callsString = JSON.stringify(callsValue)
+					}
 					// Always set nativeArgs - let the tool handler validate
 					nativeArgs = {
 						server: args.server || "figma-write",
-						calls: typeof callsValue === "string" ? callsValue : JSON.stringify(callsValue),
+						calls: callsString,
 					} as unknown as NativeArgsFor<TName>
 					break
 				}

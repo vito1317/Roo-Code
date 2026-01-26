@@ -13,13 +13,17 @@ type FigmaSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	figmaEnabled?: boolean
 	figmaWriteEnabled?: boolean
 	talkToFigmaEnabled?: boolean
-	setCachedStateField: SetCachedStateField<"figmaEnabled" | "figmaWriteEnabled" | "talkToFigmaEnabled">
+	figmaFileUrl?: string | null
+	figmaWebPreviewEnabled?: boolean
+	setCachedStateField: SetCachedStateField<"figmaEnabled" | "figmaWriteEnabled" | "talkToFigmaEnabled" | "figmaFileUrl" | "figmaWebPreviewEnabled">
 }
 
 export const FigmaSettings = ({
 	figmaEnabled,
 	figmaWriteEnabled,
 	talkToFigmaEnabled,
+	figmaFileUrl,
+	figmaWebPreviewEnabled,
 	setCachedStateField,
 	...props
 }: FigmaSettingsProps) => {
@@ -27,6 +31,9 @@ export const FigmaSettings = ({
 	const [isEnabled, setIsEnabled] = useState(figmaEnabled ?? false)
 	const [isFigmaWriteEnabled, setIsFigmaWriteEnabled] = useState(figmaWriteEnabled ?? false)
 	const [isTalkToFigmaEnabled, setIsTalkToFigmaEnabled] = useState(talkToFigmaEnabled ?? true)
+	const [isWebPreviewEnabled, setIsWebPreviewEnabled] = useState(figmaWebPreviewEnabled ?? false)
+	const [fileUrl, setFileUrl] = useState(figmaFileUrl ?? "")
+	const [urlSaved, setUrlSaved] = useState(false)
 	const [apiToken, setApiToken] = useState("")
 	const [tokenSaved, setTokenSaved] = useState(false)
 	const [testingConnection, setTestingConnection] = useState(false)
@@ -44,6 +51,14 @@ export const FigmaSettings = ({
 	useEffect(() => {
 		setIsTalkToFigmaEnabled(talkToFigmaEnabled ?? true)
 	}, [talkToFigmaEnabled])
+
+	useEffect(() => {
+		setIsWebPreviewEnabled(figmaWebPreviewEnabled ?? false)
+	}, [figmaWebPreviewEnabled])
+
+	useEffect(() => {
+		setFileUrl(figmaFileUrl ?? "")
+	}, [figmaFileUrl])
 
 	// Listen for connection test results
 	useEffect(() => {
@@ -84,6 +99,39 @@ export const FigmaSettings = ({
 		setTestingConnection(true)
 		setTestResult(null)
 		vscode.postMessage({ type: "testFigmaConnection" })
+	}
+
+	const handleSaveFileUrl = () => {
+		if (fileUrl.trim()) {
+			setCachedStateField("figmaFileUrl", fileUrl.trim())
+			setUrlSaved(true)
+			setTimeout(() => setUrlSaved(false), 3000)
+		}
+	}
+
+	// Auto-update cachedState when URL changes (for better UX)
+	const handleFileUrlChange = (value: string) => {
+		setFileUrl(value)
+		setUrlSaved(false)
+		// Also update cachedState so the main Save button will persist it
+		setCachedStateField("figmaFileUrl", value.trim() || undefined)
+	}
+
+	// Auto-update when field loses focus
+	const handleFileUrlBlur = () => {
+		if (fileUrl.trim()) {
+			setCachedStateField("figmaFileUrl", fileUrl.trim())
+		}
+	}
+
+	const handleWebPreviewToggle = (checked: boolean) => {
+		console.log("[FigmaSettings] handleWebPreviewToggle called with:", checked)
+		setIsWebPreviewEnabled(checked)
+		setCachedStateField("figmaWebPreviewEnabled", checked)
+	}
+
+	const handleOpenFigmaPreview = () => {
+		vscode.postMessage({ type: "openFigmaPreview", url: fileUrl.trim() })
 	}
 
 	return (
@@ -258,6 +306,62 @@ export const FigmaSettings = ({
 										<span>• find_nodes</span>
 									</div>
 								</div>
+							</div>
+						</SearchableSetting>
+
+						{/* Figma Web Preview */}
+						<SearchableSetting settingId="figma-web-preview" section="figma" label="Figma Web Preview">
+							<div className="mt-2 space-y-3">
+								<div className="p-3 bg-vscode-input-background rounded-md border border-vscode-input-border">
+									<div className="flex items-center justify-between">
+										<div>
+											<span className="font-medium">🌐 Web Preview (即時預覽)</span>
+											<div className="text-vscode-descriptionForeground text-sm mt-1">
+												在 VS Code 中顯示 Figma 設計的即時預覽。
+											</div>
+										</div>
+										<span className={`text-sm ${isWebPreviewEnabled ? "text-green-400" : "text-gray-500"}`}>
+											{isWebPreviewEnabled ? "● Enabled" : "○ Disabled"}
+										</span>
+									</div>
+								</div>
+
+								<VSCodeCheckbox
+									checked={isWebPreviewEnabled}
+									onChange={(e: any) => handleWebPreviewToggle(e.target.checked)}>
+									<span className="font-medium">Enable Web Preview</span>
+								</VSCodeCheckbox>
+								<div className="text-vscode-descriptionForeground text-xs ml-6 -mt-2">
+									Opens a side panel showing your Figma design in real-time.
+								</div>
+
+								{isWebPreviewEnabled && (
+									<div className="space-y-3 mt-3">
+										<label className="block font-medium">Figma File URL</label>
+										<div className="flex items-center gap-2">
+											<VSCodeTextField
+												value={fileUrl}
+												onChange={(e: any) => handleFileUrlChange(e.target.value)}
+												onBlur={handleFileUrlBlur}
+												placeholder="https://www.figma.com/file/xxx or /design/xxx"
+												style={{ flexGrow: 1 }}
+											/>
+											<Button onClick={handleSaveFileUrl} disabled={!fileUrl.trim()}>
+												Save
+											</Button>
+										</div>
+										{urlSaved && <div className="text-green-400 text-sm mt-1">✓ URL saved</div>}
+										<div className="text-vscode-descriptionForeground text-xs">
+											Paste your Figma file URL here. Supports /file/, /design/, and /proto/ URLs.
+										</div>
+
+										{fileUrl.trim() && (
+											<Button onClick={handleOpenFigmaPreview} className="mt-2">
+												🎨 Open Figma Preview
+											</Button>
+										)}
+									</div>
+								)}
 							</div>
 						</SearchableSetting>
 					</div>

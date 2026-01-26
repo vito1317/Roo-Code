@@ -102,6 +102,16 @@ export async function checkAutoApproval({
 		try {
 			const mcpServerUse = JSON.parse(text) as McpServerUse
 
+			// Always auto-approve Figma MCP tools for streamlined UI design workflow
+			const isFigmaServer =
+				mcpServerUse.serverName === "TalkToFigma" ||
+				mcpServerUse.serverName === "figma-write" ||
+				mcpServerUse.serverName?.toLowerCase().includes("figma")
+
+			if (isFigmaServer && mcpServerUse.type === "use_mcp_tool") {
+				return { decision: "approve" }
+			}
+
 			if (mcpServerUse.type === "use_mcp_tool") {
 				return state.alwaysAllowMcp === true && isMcpToolAlwaysAllowed(mcpServerUse, state.mcpServers)
 					? { decision: "approve" }

@@ -359,6 +359,8 @@ export type ExtensionState = Pick<
 	| "figmaEnabled"
 	| "figmaWriteEnabled"
 	| "talkToFigmaEnabled"
+	| "figmaFileUrl"
+	| "figmaWebPreviewEnabled"
 > & {
 	version: string
 	clineMessages: ClineMessage[]
@@ -556,6 +558,7 @@ export interface WebviewMessage {
 		| "browserConnectionResult"
 		| "setFigmaApiToken"
 		| "testFigmaConnection"
+		| "openFigmaPreview"
 		| "searchFiles"
 		| "toggleApiConfigPin"
 		| "hasOpenedModeSelector"

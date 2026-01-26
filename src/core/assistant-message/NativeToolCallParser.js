@@ -1,0 +1,990 @@
+import { parseJSON } from "partial-json";
+import { toolNames } from "@roo-code/types";
+import { customToolRegistry } from "@roo-code/core";
+import { toolParamNames, } from "../../shared/tools";
+import { resolveToolAlias } from "../prompts/tools/filter-tools-for-mode";
+import { MCP_TOOL_PREFIX, MCP_TOOL_SEPARATOR, parseMcpToolName, normalizeMcpToolName } from "../../utils/mcp-name";
+/**
+ * Parser for native tool calls (OpenAI-style function calling).
+ * Converts native tool call format to ToolUse format for compatibility
+ * with existing tool execution infrastructure.
+ *
+ * For tools with refactored parsers (e.g., read_file), this parser provides
+ * typed arguments via nativeArgs. Tool-specific handlers should consume
+ * nativeArgs directly rather than relying on synthesized legacy params.
+ *
+ * This class also handles raw tool call chunk processing, converting
+ * provider-level raw chunks into start/delta/end events.
+ */
+export class NativeToolCallParser {
+    // Streaming state management for argument accumulation (keyed by tool call id)
+    // Note: name is string to accommodate dynamic MCP tools (mcp--serverName--toolName)
+    static streamingToolCalls = new Map();
+    // Raw chunk tracking state (keyed by index from API stream)
+    static rawChunkTracker = new Map();
+    static coerceOptionalBoolean(value) {
+        if (typeof value === "boolean") {
+            return value;
+        }
+        if (typeof value === "string") {
+            const lower = value.trim().toLowerCase();
+            if (lower === "true") {
+                return true;
+            }
+            if (lower === "false") {
+                return false;
+            }
+        }
+        return undefined;
+    }
+    /**
+     * Process a raw tool call chunk from the API stream.
+     * Handles tracking, buffering, and emits start/delta/end events.
+     *
+     * This is the entry point for providers that emit tool_call_partial chunks.
+     * Returns an array of events to be processed by the consumer.
+     */
+    static processRawChunk(chunk) {
+        const events = [];
+        const { index, id, name, arguments: args } = chunk;
+        let tracked = this.rawChunkTracker.get(index);
+        // Initialize new tool call tracking when we receive an id
+        if (id && !tracked) {
+            tracked = {
+                id,
+                name: name || "",
+                hasStarted: false,
+                deltaBuffer: [],
+            };
+            this.rawChunkTracker.set(index, tracked);
+        }
+        if (!tracked) {
+            return events;
+        }
+        // Update name if present in chunk and not yet set
+        if (name) {
+            tracked.name = name;
+        }
+        // Emit start event when we have the name
+        if (!tracked.hasStarted && tracked.name) {
+            events.push({
+                type: "tool_call_start",
+                id: tracked.id,
+                name: tracked.name,
+            });
+            tracked.hasStarted = true;
+            // Flush buffered deltas
+            for (const bufferedDelta of tracked.deltaBuffer) {
+                events.push({
+                    type: "tool_call_delta",
+                    id: tracked.id,
+                    delta: bufferedDelta,
+                });
+            }
+            tracked.deltaBuffer = [];
+        }
+        // Emit delta event for argument chunks
+        if (args) {
+            if (tracked.hasStarted) {
+                events.push({
+                    type: "tool_call_delta",
+                    id: tracked.id,
+                    delta: args,
+                });
+            }
+            else {
+                tracked.deltaBuffer.push(args);
+            }
+        }
+        return events;
+    }
+    /**
+     * Process stream finish reason.
+     * Emits end events when finish_reason is 'tool_calls'.
+     */
+    static processFinishReason(finishReason) {
+        const events = [];
+        if (finishReason === "tool_calls" && this.rawChunkTracker.size > 0) {
+            for (const [, tracked] of this.rawChunkTracker.entries()) {
+                events.push({
+                    type: "tool_call_end",
+                    id: tracked.id,
+                });
+            }
+        }
+        return events;
+    }
+    /**
+     * Finalize any remaining tool calls that weren't explicitly ended.
+     * Should be called at the end of stream processing.
+     */
+    static finalizeRawChunks() {
+        const events = [];
+        if (this.rawChunkTracker.size > 0) {
+            for (const [, tracked] of this.rawChunkTracker.entries()) {
+                if (tracked.hasStarted) {
+                    events.push({
+                        type: "tool_call_end",
+                        id: tracked.id,
+                    });
+                }
+            }
+            this.rawChunkTracker.clear();
+        }
+        return events;
+    }
+    /**
+     * Clear all raw chunk tracking state.
+     * Should be called when a new API request starts.
+     */
+    static clearRawChunkState() {
+        this.rawChunkTracker.clear();
+    }
+    /**
+     * Start streaming a new tool call.
+     * Initializes tracking for incremental argument parsing.
+     * Accepts string to support both ToolName and dynamic MCP tools (mcp--serverName--toolName).
+     */
+    static startStreamingToolCall(id, name) {
+        this.streamingToolCalls.set(id, {
+            id,
+            name,
+            argumentsAccumulator: "",
+        });
+    }
+    /**
+     * Clear all streaming tool call state.
+     * Should be called when a new API request starts to prevent memory leaks
+     * from interrupted streams.
+     */
+    static clearAllStreamingToolCalls() {
+        this.streamingToolCalls.clear();
+    }
+    /**
+     * Check if there are any active streaming tool calls.
+     * Useful for debugging and testing.
+     */
+    static hasActiveStreamingToolCalls() {
+        return this.streamingToolCalls.size > 0;
+    }
+    /**
+     * Process a chunk of JSON arguments for a streaming tool call.
+     * Uses partial-json-parser to extract values from incomplete JSON immediately.
+     * Returns a partial ToolUse with currently parsed parameters.
+     */
+    static processStreamingChunk(id, chunk) {
+        const toolCall = this.streamingToolCalls.get(id);
+        if (!toolCall) {
+            console.warn(`[NativeToolCallParser] Received chunk for unknown tool call: ${id}`);
+            return null;
+        }
+        // Accumulate the JSON string
+        toolCall.argumentsAccumulator += chunk;
+        // For dynamic MCP tools, we don't return partial updates - wait for final
+        const mcpPrefix = MCP_TOOL_PREFIX + MCP_TOOL_SEPARATOR;
+        if (toolCall.name.startsWith(mcpPrefix)) {
+            return null;
+        }
+        // Parse whatever we can from the incomplete JSON!
+        // partial-json-parser extracts partial values (strings, arrays, objects) immediately
+        try {
+            const partialArgs = parseJSON(toolCall.argumentsAccumulator);
+            // Resolve tool alias to canonical name
+            const resolvedName = resolveToolAlias(toolCall.name);
+            // Preserve original name if it differs from resolved (i.e., it was an alias)
+            const originalName = toolCall.name !== resolvedName ? toolCall.name : undefined;
+            // Create partial ToolUse with extracted values
+            return this.createPartialToolUse(toolCall.id, resolvedName, partialArgs || {}, true, // partial
+            originalName);
+        }
+        catch {
+            // Even partial-json-parser can fail on severely malformed JSON
+            // Return null and wait for next chunk
+            return null;
+        }
+    }
+    /**
+     * Finalize a streaming tool call.
+     * Parses the complete JSON and returns the final ToolUse or McpToolUse.
+     */
+    static finalizeStreamingToolCall(id) {
+        const toolCall = this.streamingToolCalls.get(id);
+        if (!toolCall) {
+            console.warn(`[NativeToolCallParser] Attempting to finalize unknown tool call: ${id}`);
+            return null;
+        }
+        // Parse the complete accumulated JSON
+        // Cast to any for the name since parseToolCall handles both ToolName and dynamic MCP tools
+        const finalToolUse = this.parseToolCall({
+            id: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.argumentsAccumulator,
+        });
+        // Clean up streaming state
+        this.streamingToolCalls.delete(id);
+        return finalToolUse;
+    }
+    /**
+     * Convert raw file entries from API (with line_ranges) to FileEntry objects
+     * (with lineRanges). Handles multiple formats for compatibility:
+     *
+     * New tuple format: { path: string, line_ranges: [[1, 50], [100, 150]] }
+     * Object format: { path: string, line_ranges: [{ start: 1, end: 50 }] }
+     * Legacy string format: { path: string, line_ranges: ["1-50"] }
+     *
+     * Returns: { path: string, lineRanges: [{ start: 1, end: 50 }] }
+     */
+    static convertFileEntries(files) {
+        return files.map((file) => {
+            const entry = { path: file.path };
+            if (file.line_ranges && Array.isArray(file.line_ranges)) {
+                entry.lineRanges = file.line_ranges
+                    .map((range) => {
+                    // Handle tuple format: [start, end]
+                    if (Array.isArray(range) && range.length >= 2) {
+                        return { start: Number(range[0]), end: Number(range[1]) };
+                    }
+                    // Handle object format: { start: number, end: number }
+                    if (typeof range === "object" && range !== null && "start" in range && "end" in range) {
+                        return { start: Number(range.start), end: Number(range.end) };
+                    }
+                    // Handle legacy string format: "1-50"
+                    if (typeof range === "string") {
+                        const match = range.match(/^(\d+)-(\d+)$/);
+                        if (match) {
+                            return { start: parseInt(match[1], 10), end: parseInt(match[2], 10) };
+                        }
+                    }
+                    return null;
+                })
+                    .filter(Boolean);
+            }
+            return entry;
+        });
+    }
+    /**
+     * Create a partial ToolUse from currently parsed arguments.
+     * Used during streaming to show progress.
+     * @param originalName - The original tool name as called by the model (if different from canonical name)
+     */
+    static createPartialToolUse(id, name, partialArgs, partial, originalName) {
+        // Build stringified params for display/partial-progress UI.
+        // NOTE: For streaming partial updates, we MUST populate params even for complex types
+        // because tool.handlePartial() methods rely on params to show UI updates.
+        const params = {};
+        for (const [key, value] of Object.entries(partialArgs)) {
+            if (toolParamNames.includes(key)) {
+                params[key] = typeof value === "string" ? value : JSON.stringify(value);
+            }
+        }
+        // Build partial nativeArgs based on what we have so far
+        let nativeArgs = undefined;
+        switch (name) {
+            case "read_file": {
+                // Handle both array and stringified array from less capable models
+                let filesArray = partialArgs.files;
+                if (typeof filesArray === "string") {
+                    try {
+                        filesArray = JSON.parse(filesArray);
+                    }
+                    catch {
+                        // If parsing fails, leave as string (will fail validation)
+                    }
+                }
+                if (filesArray && Array.isArray(filesArray)) {
+                    nativeArgs = { files: this.convertFileEntries(filesArray) };
+                }
+                break;
+            }
+            case "attempt_completion":
+                if (partialArgs.result) {
+                    nativeArgs = { result: partialArgs.result };
+                }
+                break;
+            case "execute_command":
+                if (partialArgs.command) {
+                    nativeArgs = {
+                        command: partialArgs.command,
+                        cwd: partialArgs.cwd,
+                    };
+                }
+                break;
+            case "write_to_file":
+                if (partialArgs.path || partialArgs.content) {
+                    nativeArgs = {
+                        path: partialArgs.path,
+                        content: partialArgs.content,
+                    };
+                }
+                break;
+            case "ask_followup_question":
+                if (partialArgs.question !== undefined || partialArgs.follow_up !== undefined) {
+                    nativeArgs = {
+                        question: partialArgs.question,
+                        follow_up: Array.isArray(partialArgs.follow_up) ? partialArgs.follow_up : undefined,
+                    };
+                }
+                break;
+            case "apply_diff":
+                if (partialArgs.path !== undefined || partialArgs.diff !== undefined) {
+                    nativeArgs = {
+                        path: partialArgs.path,
+                        diff: partialArgs.diff,
+                    };
+                }
+                break;
+            case "browser_action":
+                if (partialArgs.action !== undefined) {
+                    nativeArgs = {
+                        action: partialArgs.action,
+                        url: partialArgs.url,
+                        coordinate: partialArgs.coordinate,
+                        size: partialArgs.size,
+                        text: partialArgs.text,
+                        path: partialArgs.path,
+                    };
+                }
+                break;
+            case "codebase_search":
+                if (partialArgs.query !== undefined) {
+                    nativeArgs = {
+                        query: partialArgs.query,
+                        path: partialArgs.path,
+                    };
+                }
+                break;
+            case "fetch_instructions":
+                if (partialArgs.task !== undefined) {
+                    nativeArgs = {
+                        task: partialArgs.task,
+                    };
+                }
+                break;
+            case "generate_image":
+                if (partialArgs.prompt !== undefined || partialArgs.path !== undefined) {
+                    nativeArgs = {
+                        prompt: partialArgs.prompt,
+                        path: partialArgs.path,
+                        image: partialArgs.image,
+                    };
+                }
+                break;
+            case "run_slash_command":
+                if (partialArgs.command !== undefined) {
+                    nativeArgs = {
+                        command: partialArgs.command,
+                        args: partialArgs.args,
+                    };
+                }
+                break;
+            case "search_files":
+                if (partialArgs.path !== undefined || partialArgs.regex !== undefined) {
+                    nativeArgs = {
+                        path: partialArgs.path,
+                        regex: partialArgs.regex,
+                        file_pattern: partialArgs.file_pattern,
+                    };
+                }
+                break;
+            case "switch_mode":
+                if (partialArgs.mode_slug !== undefined || partialArgs.reason !== undefined) {
+                    nativeArgs = {
+                        mode_slug: partialArgs.mode_slug,
+                        reason: partialArgs.reason,
+                    };
+                }
+                break;
+            case "update_todo_list":
+                if (partialArgs.todos !== undefined) {
+                    nativeArgs = {
+                        todos: partialArgs.todos,
+                    };
+                }
+                break;
+            case "use_mcp_tool":
+                if (partialArgs.server_name !== undefined || partialArgs.tool_name !== undefined) {
+                    // Parse arguments if they're a string (model sometimes sends stringified JSON)
+                    let parsedPartialMcpArgs = partialArgs.arguments;
+                    if (typeof partialArgs.arguments === "string") {
+                        try {
+                            parsedPartialMcpArgs = JSON.parse(partialArgs.arguments);
+                        }
+                        catch {
+                            // Keep as string if parsing fails (might be incomplete during streaming)
+                            parsedPartialMcpArgs = partialArgs.arguments;
+                        }
+                    }
+                    nativeArgs = {
+                        server_name: partialArgs.server_name,
+                        tool_name: partialArgs.tool_name,
+                        arguments: parsedPartialMcpArgs,
+                    };
+                }
+                break;
+            case "apply_patch":
+                if (partialArgs.patch !== undefined) {
+                    nativeArgs = {
+                        patch: partialArgs.patch,
+                    };
+                }
+                break;
+            case "search_replace":
+                if (partialArgs.file_path !== undefined ||
+                    partialArgs.old_string !== undefined ||
+                    partialArgs.new_string !== undefined) {
+                    nativeArgs = {
+                        file_path: partialArgs.file_path,
+                        old_string: partialArgs.old_string,
+                        new_string: partialArgs.new_string,
+                    };
+                }
+                break;
+            case "search_and_replace":
+                if (partialArgs.path !== undefined || partialArgs.operations !== undefined) {
+                    nativeArgs = {
+                        path: partialArgs.path,
+                        operations: partialArgs.operations,
+                    };
+                }
+                break;
+            case "edit_file":
+                if (partialArgs.file_path !== undefined ||
+                    partialArgs.old_string !== undefined ||
+                    partialArgs.new_string !== undefined) {
+                    nativeArgs = {
+                        file_path: partialArgs.file_path,
+                        old_string: partialArgs.old_string,
+                        new_string: partialArgs.new_string,
+                        expected_replacements: partialArgs.expected_replacements,
+                    };
+                }
+                break;
+            case "list_files":
+                if (partialArgs.path !== undefined) {
+                    nativeArgs = {
+                        path: partialArgs.path,
+                        recursive: this.coerceOptionalBoolean(partialArgs.recursive),
+                    };
+                }
+                break;
+            case "new_task":
+                if (partialArgs.mode !== undefined || partialArgs.message !== undefined) {
+                    nativeArgs = {
+                        mode: partialArgs.mode,
+                        message: partialArgs.message,
+                        todos: partialArgs.todos,
+                    };
+                }
+                break;
+            case "handoff_context": {
+                // Handle notes and context_json parameters during streaming
+                let contextJson = partialArgs.context_json ||
+                    partialArgs.contextJson ||
+                    partialArgs.context_data ||
+                    partialArgs.contextData;
+                if (typeof contextJson === "object" && contextJson !== null) {
+                    contextJson = JSON.stringify(contextJson);
+                }
+                nativeArgs = {
+                    notes: partialArgs.notes,
+                    context_json: contextJson,
+                };
+                break;
+            }
+            case "start_background_service":
+                nativeArgs = {
+                    service_type: partialArgs.service_type || partialArgs.serviceType,
+                    port: partialArgs.port,
+                    wait_ms: partialArgs.wait_ms || partialArgs.waitMs,
+                };
+                break;
+            case "parallel_ui_tasks": {
+                let tasksArray = partialArgs.tasks;
+                if (typeof tasksArray === "string") {
+                    try {
+                        tasksArray = JSON.parse(tasksArray);
+                    }
+                    catch {
+                        // Keep as string during streaming
+                    }
+                }
+                nativeArgs = {
+                    tasks: tasksArray,
+                    containerFrame: partialArgs.containerFrame,
+                };
+                break;
+            }
+            case "parallel_mcp_calls": {
+                let callsArray = partialArgs.calls;
+                if (typeof callsArray === "string") {
+                    try {
+                        callsArray = JSON.parse(callsArray);
+                    }
+                    catch {
+                        // Keep as string during streaming
+                    }
+                }
+                nativeArgs = {
+                    server: partialArgs.server || "figma-write",
+                    calls: callsArray,
+                };
+                break;
+            }
+            case "adjust_layout": {
+                nativeArgs = {
+                    layout: partialArgs.layout || "grid",
+                    columns: partialArgs.columns,
+                    gap: partialArgs.gap,
+                    gapX: partialArgs.gapX,
+                    gapY: partialArgs.gapY,
+                    startX: partialArgs.startX,
+                    startY: partialArgs.startY,
+                    within: partialArgs.within,
+                    nodeIds: partialArgs.nodeIds,
+                    excludeTypes: partialArgs.excludeTypes,
+                    sortBy: partialArgs.sortBy,
+                };
+                break;
+            }
+            default:
+                break;
+        }
+        const result = {
+            type: "tool_use",
+            name,
+            params,
+            partial,
+            nativeArgs,
+        };
+        // Preserve original name for API history when an alias was used
+        if (originalName) {
+            result.originalName = originalName;
+        }
+        return result;
+    }
+    /**
+     * Convert a native tool call chunk to a ToolUse object.
+     *
+     * @param toolCall - The native tool call from the API stream
+     * @returns A properly typed ToolUse object
+     */
+    static parseToolCall(toolCall) {
+        // Check if this is a dynamic MCP tool (mcp--serverName--toolName)
+        // Also handle models that output underscores instead of hyphens (mcp__serverName__toolName)
+        const mcpPrefix = MCP_TOOL_PREFIX + MCP_TOOL_SEPARATOR;
+        if (typeof toolCall.name === "string") {
+            // Normalize the tool name to handle models that output underscores instead of hyphens
+            const normalizedName = normalizeMcpToolName(toolCall.name);
+            if (normalizedName.startsWith(mcpPrefix)) {
+                // Pass the original tool call but with normalized name for parsing
+                return this.parseDynamicMcpTool({ ...toolCall, name: normalizedName });
+            }
+        }
+        // Resolve tool alias to canonical name
+        const resolvedName = resolveToolAlias(toolCall.name);
+        // Validate tool name (after alias resolution).
+        if (!toolNames.includes(resolvedName) && !customToolRegistry.has(resolvedName)) {
+            console.error(`Invalid tool name: ${toolCall.name} (resolved: ${resolvedName})`);
+            console.error(`Valid tool names:`, toolNames);
+            return null;
+        }
+        try {
+            // Parse the arguments JSON string
+            const args = toolCall.arguments === "" ? {} : JSON.parse(toolCall.arguments);
+            // Build stringified params for display/logging.
+            // Tool execution MUST use nativeArgs (typed) and does not support legacy fallbacks.
+            const params = {};
+            for (const [key, value] of Object.entries(args)) {
+                // Skip complex parameters that have been migrated to nativeArgs.
+                // For read_file, the 'files' parameter is a FileEntry[] array that can't be
+                // meaningfully stringified. The properly typed data is in nativeArgs instead.
+                if (resolvedName === "read_file" && key === "files") {
+                    continue;
+                }
+                // Validate parameter name
+                if (!toolParamNames.includes(key) && !customToolRegistry.has(resolvedName)) {
+                    console.warn(`Unknown parameter '${key}' for tool '${resolvedName}'`);
+                    console.warn(`Valid param names:`, toolParamNames);
+                    continue;
+                }
+                // Convert to string for legacy params format
+                const stringValue = typeof value === "string" ? value : JSON.stringify(value);
+                params[key] = stringValue;
+            }
+            // Build typed nativeArgs for tool execution.
+            // Each case validates the minimum required parameters and constructs a properly typed
+            // nativeArgs object. If validation fails, we treat the tool call as invalid and fail fast.
+            let nativeArgs = undefined;
+            switch (resolvedName) {
+                case "read_file": {
+                    // Handle both array and stringified array from less capable models
+                    let filesArray = args.files;
+                    if (typeof filesArray === "string") {
+                        try {
+                            filesArray = JSON.parse(filesArray);
+                        }
+                        catch {
+                            // If parsing fails, leave as string (will fail validation)
+                        }
+                    }
+                    if (filesArray && Array.isArray(filesArray)) {
+                        nativeArgs = { files: this.convertFileEntries(filesArray) };
+                    }
+                    break;
+                }
+                case "attempt_completion":
+                    if (args.result) {
+                        nativeArgs = { result: args.result };
+                    }
+                    break;
+                case "execute_command":
+                    if (args.command) {
+                        nativeArgs = {
+                            command: args.command,
+                            cwd: args.cwd,
+                        };
+                    }
+                    break;
+                case "apply_diff":
+                    if (args.path !== undefined && args.diff !== undefined) {
+                        nativeArgs = {
+                            path: args.path,
+                            diff: args.diff,
+                        };
+                    }
+                    break;
+                case "search_and_replace":
+                    if (args.path !== undefined && args.operations !== undefined && Array.isArray(args.operations)) {
+                        nativeArgs = {
+                            path: args.path,
+                            operations: args.operations,
+                        };
+                    }
+                    break;
+                case "ask_followup_question":
+                    if (args.question !== undefined && args.follow_up !== undefined) {
+                        nativeArgs = {
+                            question: args.question,
+                            follow_up: args.follow_up,
+                        };
+                    }
+                    break;
+                case "browser_action":
+                    if (args.action !== undefined) {
+                        nativeArgs = {
+                            action: args.action,
+                            url: args.url,
+                            coordinate: args.coordinate,
+                            size: args.size,
+                            text: args.text,
+                            path: args.path,
+                        };
+                    }
+                    break;
+                case "codebase_search":
+                    if (args.query !== undefined) {
+                        nativeArgs = {
+                            query: args.query,
+                            path: args.path,
+                        };
+                    }
+                    break;
+                case "fetch_instructions":
+                    if (args.task !== undefined) {
+                        nativeArgs = {
+                            task: args.task,
+                        };
+                    }
+                    break;
+                case "generate_image":
+                    if (args.prompt !== undefined && args.path !== undefined) {
+                        nativeArgs = {
+                            prompt: args.prompt,
+                            path: args.path,
+                            image: args.image,
+                        };
+                    }
+                    break;
+                case "run_slash_command":
+                    if (args.command !== undefined) {
+                        nativeArgs = {
+                            command: args.command,
+                            args: args.args,
+                        };
+                    }
+                    break;
+                case "search_files":
+                    if (args.path !== undefined && args.regex !== undefined) {
+                        nativeArgs = {
+                            path: args.path,
+                            regex: args.regex,
+                            file_pattern: args.file_pattern,
+                        };
+                    }
+                    break;
+                case "switch_mode":
+                    if (args.mode_slug !== undefined && args.reason !== undefined) {
+                        nativeArgs = {
+                            mode_slug: args.mode_slug,
+                            reason: args.reason,
+                        };
+                    }
+                    break;
+                case "update_todo_list":
+                    if (args.todos !== undefined) {
+                        nativeArgs = {
+                            todos: args.todos,
+                        };
+                    }
+                    break;
+                case "write_to_file":
+                    if (args.path !== undefined && args.content !== undefined) {
+                        nativeArgs = {
+                            path: args.path,
+                            content: args.content,
+                        };
+                    }
+                    break;
+                case "use_mcp_tool":
+                    if (args.server_name !== undefined && args.tool_name !== undefined) {
+                        // Parse arguments if they're a string (model sometimes sends stringified JSON)
+                        let parsedMcpArgs = args.arguments;
+                        if (typeof args.arguments === "string") {
+                            try {
+                                parsedMcpArgs = JSON.parse(args.arguments);
+                            }
+                            catch {
+                                // Keep as string if parsing fails, UseMcpToolTool will handle the error
+                                parsedMcpArgs = args.arguments;
+                            }
+                        }
+                        nativeArgs = {
+                            server_name: args.server_name,
+                            tool_name: args.tool_name,
+                            arguments: parsedMcpArgs,
+                        };
+                    }
+                    break;
+                case "access_mcp_resource":
+                    if (args.server_name !== undefined && args.uri !== undefined) {
+                        nativeArgs = {
+                            server_name: args.server_name,
+                            uri: args.uri,
+                        };
+                    }
+                    break;
+                case "apply_patch":
+                    if (args.patch !== undefined) {
+                        nativeArgs = {
+                            patch: args.patch,
+                        };
+                    }
+                    break;
+                case "search_replace":
+                    if (args.file_path !== undefined &&
+                        args.old_string !== undefined &&
+                        args.new_string !== undefined) {
+                        nativeArgs = {
+                            file_path: args.file_path,
+                            old_string: args.old_string,
+                            new_string: args.new_string,
+                        };
+                    }
+                    break;
+                case "edit_file":
+                    if (args.file_path !== undefined &&
+                        args.old_string !== undefined &&
+                        args.new_string !== undefined) {
+                        nativeArgs = {
+                            file_path: args.file_path,
+                            old_string: args.old_string,
+                            new_string: args.new_string,
+                            expected_replacements: args.expected_replacements,
+                        };
+                    }
+                    break;
+                case "list_files":
+                    if (args.path !== undefined) {
+                        nativeArgs = {
+                            path: args.path,
+                            recursive: this.coerceOptionalBoolean(args.recursive),
+                        };
+                    }
+                    break;
+                case "new_task":
+                    if (args.mode !== undefined && args.message !== undefined) {
+                        nativeArgs = {
+                            mode: args.mode,
+                            message: args.message,
+                            todos: args.todos,
+                        };
+                    }
+                    break;
+                case "parallel_ui_tasks": {
+                    // Handle both array and stringified array from less capable models
+                    let tasksArray = args.tasks;
+                    if (typeof tasksArray === "string") {
+                        try {
+                            tasksArray = JSON.parse(tasksArray);
+                        }
+                        catch {
+                            // If parsing fails, leave as string (will fail validation)
+                        }
+                    }
+                    if (tasksArray && Array.isArray(tasksArray)) {
+                        nativeArgs = {
+                            tasks: tasksArray,
+                            containerFrame: args.containerFrame,
+                        };
+                    }
+                    break;
+                }
+                case "parallel_mcp_calls": {
+                    // Handle both array and stringified array
+                    // The tool handler (ParallelMcpCallsTool) will do final parsing
+                    let callsValue = args.calls;
+                    if (typeof callsValue === "string") {
+                        try {
+                            // Try to parse as JSON
+                            callsValue = JSON.parse(callsValue);
+                        }
+                        catch {
+                            // Try using partial-json parser for malformed JSON
+                            try {
+                                callsValue = parseJSON(callsValue);
+                            }
+                            catch {
+                                // Keep as string - let the tool handler deal with it
+                            }
+                        }
+                    }
+                    // Convert to string for the tool handler
+                    // Handle undefined case: if calls is not provided, pass empty string
+                    // so the tool handler can report the missing parameter correctly
+                    let callsString;
+                    if (callsValue === undefined || callsValue === null) {
+                        callsString = ""; // Will trigger "missing parameter" error in tool handler
+                    }
+                    else if (typeof callsValue === "string") {
+                        callsString = callsValue;
+                    }
+                    else {
+                        callsString = JSON.stringify(callsValue);
+                    }
+                    // Always set nativeArgs - let the tool handler validate
+                    nativeArgs = {
+                        server: args.server || "figma-write",
+                        calls: callsString,
+                    };
+                    break;
+                }
+                case "handoff_context": {
+                    // Handle notes and context_json parameters
+                    // context_json can be a string (stringified JSON) or already parsed object
+                    let contextJson = args.context_json || args.contextJson || args.context_data || args.contextData || "{}";
+                    if (typeof contextJson === "object") {
+                        contextJson = JSON.stringify(contextJson);
+                    }
+                    nativeArgs = {
+                        notes: args.notes || "",
+                        context_json: contextJson,
+                    };
+                    break;
+                }
+                case "start_background_service": {
+                    // Handle start_background_service parameters
+                    nativeArgs = {
+                        service_type: args.service_type || args.serviceType || "",
+                        port: args.port,
+                        wait_ms: args.wait_ms || args.waitMs,
+                    };
+                    break;
+                }
+                case "adjust_layout": {
+                    // Handle adjust_layout parameters - all are strings
+                    nativeArgs = {
+                        layout: args.layout || "grid",
+                        columns: args.columns,
+                        gap: args.gap,
+                        gapX: args.gapX,
+                        gapY: args.gapY,
+                        startX: args.startX,
+                        startY: args.startY,
+                        within: args.within,
+                        nodeIds: args.nodeIds,
+                        excludeTypes: args.excludeTypes,
+                        sortBy: args.sortBy,
+                    };
+                    break;
+                }
+                default:
+                    if (customToolRegistry.has(resolvedName)) {
+                        nativeArgs = args;
+                    }
+                    break;
+            }
+            // Native-only: core tools must always have typed nativeArgs.
+            // If we couldn't construct it, the model produced an invalid tool call payload.
+            if (!nativeArgs && !customToolRegistry.has(resolvedName)) {
+                throw new Error(`[NativeToolCallParser] Invalid arguments for tool '${resolvedName}'. ` +
+                    `Native tool calls require a valid JSON payload matching the tool schema. ` +
+                    `Received: ${JSON.stringify(args)}`);
+            }
+            const result = {
+                type: "tool_use",
+                name: resolvedName,
+                params,
+                partial: false, // Native tool calls are always complete when yielded
+                nativeArgs,
+            };
+            // Preserve original name for API history when an alias was used
+            if (toolCall.name !== resolvedName) {
+                result.originalName = toolCall.name;
+            }
+            return result;
+        }
+        catch (error) {
+            console.error(`Failed to parse tool call arguments: ${error instanceof Error ? error.message : String(error)}`);
+            console.error(`Tool call: ${JSON.stringify(toolCall, null, 2)}`);
+            return null;
+        }
+    }
+    /**
+     * Parse dynamic MCP tools (named mcp--serverName--toolName).
+     * These are generated dynamically by getMcpServerTools() and are returned
+     * as McpToolUse objects that preserve the original tool name.
+     */
+    static parseDynamicMcpTool(toolCall) {
+        try {
+            // Parse the arguments - these are the actual tool arguments passed directly
+            const args = JSON.parse(toolCall.arguments || "{}");
+            // Normalize the tool name to handle models that output underscores instead of hyphens
+            // e.g., mcp__serverName__toolName -> mcp--serverName--toolName
+            const normalizedName = normalizeMcpToolName(toolCall.name);
+            // Extract server_name and tool_name from the tool name itself
+            // Format: mcp--serverName--toolName (using -- separator)
+            const parsed = parseMcpToolName(normalizedName);
+            if (!parsed) {
+                console.error(`Invalid dynamic MCP tool name format: ${toolCall.name} (normalized: ${normalizedName})`);
+                return null;
+            }
+            const { serverName, toolName } = parsed;
+            const result = {
+                type: "mcp_tool_use",
+                id: toolCall.id,
+                // Keep the original tool name (e.g., "mcp--serverName--toolName") for API history
+                name: toolCall.name,
+                serverName,
+                toolName,
+                arguments: args,
+                partial: false,
+            };
+            return result;
+        }
+        catch (error) {
+            console.error(`Failed to parse dynamic MCP tool:`, error);
+            return null;
+        }
+    }
+}
+//# sourceMappingURL=NativeToolCallParser.js.map

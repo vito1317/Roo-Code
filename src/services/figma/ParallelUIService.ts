@@ -294,6 +294,9 @@ export class ParallelUIService {
 			}
 
 			const text = textContent.text
+			if (!text) {
+				return null
+			}
 
 			// Try to extract node ID from different response formats
 			// Format 1: "Created rectangle/text/frame with ID: 53:738" or "with ID: 53:738"
@@ -358,6 +361,78 @@ export class ParallelUIService {
 			console.warn(`[ParallelUI] Failed to parse MCP result:`, error)
 			return null
 		}
+	}
+
+	/**
+	 * Scan existing elements in a container to detect duplicates
+	 * Returns a list of text contents that already exist
+	 */
+	private async scanExistingElements(containerFrame?: string): Promise<string[]> {
+		if (!this.mcpHub || !this.activeFigmaServer) {
+			return []
+		}
+
+		try {
+			// Try to scan text nodes in the container
+			const scanArgs: Record<string, unknown> = containerFrame ? { nodeId: containerFrame } : {}
+
+			const result = await this.mcpHub.callTool(this.activeFigmaServer, "scan_text_nodes", scanArgs)
+
+			if (result.content) {
+				const textContent = result.content.find((c: { type: string }) => c.type === "text")
+				if (textContent && "text" in textContent) {
+					const text = textContent.text as string
+					// Extract text contents from the scan result
+					// The result might be JSON or a formatted string
+					try {
+						const data = JSON.parse(text)
+						if (Array.isArray(data)) {
+							return data
+								.map((item: { text?: string; characters?: string }) => item.text || item.characters || "")
+								.filter((t: string) => t.length > 0)
+						}
+						if (data.textNodes && Array.isArray(data.textNodes)) {
+							return data.textNodes
+								.map((item: { text?: string; characters?: string }) => item.text || item.characters || "")
+								.filter((t: string) => t.length > 0)
+						}
+					} catch {
+						// Not JSON, try to extract text content from the string
+						const textMatches = text.match(/["']([^"']+)["']/g)
+						if (textMatches) {
+							return textMatches.map((m: string) => m.replace(/["']/g, "")).filter((t: string) => t.length > 0)
+						}
+					}
+				}
+			}
+		} catch (error) {
+			console.warn(`[ParallelUI] Failed to scan existing elements:`, error)
+		}
+
+		return []
+	}
+
+	/**
+	 * Filter out tasks that would create duplicate elements
+	 */
+	private filterDuplicateTasks(
+		tasks: UITaskDefinition[],
+		existingElements: string[],
+	): { filteredTasks: UITaskDefinition[]; skippedTasks: UITaskDefinition[] } {
+		const existingSet = new Set(existingElements.map((e) => e.toLowerCase().trim()))
+		const filteredTasks: UITaskDefinition[] = []
+		const skippedTasks: UITaskDefinition[] = []
+
+		for (const task of tasks) {
+			const taskText = (task.designSpec?.text || "").toLowerCase().trim()
+			if (taskText && existingSet.has(taskText)) {
+				skippedTasks.push(task)
+			} else {
+				filteredTasks.push(task)
+			}
+		}
+
+		return { filteredTasks, skippedTasks }
 	}
 
 	/**
@@ -596,8 +671,40 @@ export class ParallelUIService {
 			`[ParallelUI] Starting ${tasks.length} parallel UI tasks using McpHub${containerFrame ? ` (inside frame ${containerFrame})` : ""}`,
 		)
 
+		// Scan existing elements to inform sub-AI about what already exists
+		const existingElements = await this.scanExistingElements(containerFrame)
+		if (existingElements.length > 0) {
+			console.log(`[ParallelUI] Found ${existingElements.length} existing elements in container:`, existingElements)
+		}
+
+		// Build color context from all tasks to inform each sub-AI about the overall color scheme
+		// This helps sub-AIs understand the design consistency requirements
+		const colorContext: { bgColors: string[]; textColors: string[] } = {
+			bgColors: [],
+			textColors: [],
+		}
+		for (const task of tasks) {
+			if (task.designSpec?.colors) {
+				if (task.designSpec.colors[0]) {
+					colorContext.bgColors.push(task.designSpec.colors[0])
+				}
+				if (task.designSpec.colors[1]) {
+					colorContext.textColors.push(task.designSpec.colors[1])
+				}
+			}
+		}
+		if (colorContext.bgColors.length > 0 || colorContext.textColors.length > 0) {
+			console.log(
+				`[ParallelUI] Color context: ${[...new Set(colorContext.bgColors)].length} unique bg colors, ` +
+					`${[...new Set(colorContext.textColors)].length} unique text colors`,
+			)
+		}
+
 		// Execute all tasks in parallel using sub-AI agents
-		const taskPromises = tasks.map((task) => this.executeSingleTask(task, onProgress, containerFrame))
+		// Pass existing elements info and color context so AI knows what already exists and color scheme
+		const taskPromises = tasks.map((task) =>
+			this.executeSingleTask(task, onProgress, containerFrame, existingElements, colorContext),
+		)
 
 		const results = await Promise.all(taskPromises)
 
@@ -917,11 +1024,14 @@ export class ParallelUIService {
 
 	/**
 	 * Execute a single UI task using an AI agent
+	 * @param colorContext Color scheme context containing all colors being used in this session
 	 */
 	private async executeSingleTask(
 		task: UITaskDefinition,
 		onProgress?: (taskId: string, status: string) => void,
 		containerFrame?: string,
+		existingElements?: string[],
+		colorContext?: { bgColors: string[]; textColors: string[] },
 	): Promise<UITaskResult> {
 		const startTime = Date.now()
 		const nodeIds: string[] = []
@@ -929,8 +1039,8 @@ export class ParallelUIService {
 		try {
 			onProgress?.(task.id, "starting")
 
-			// Build the prompt for this specific task
-			const taskPrompt = this.buildTaskPrompt(task, containerFrame)
+			// Build the prompt for this specific task with color context
+			const taskPrompt = this.buildTaskPrompt(task, containerFrame, existingElements, colorContext)
 
 			// Create API handler for this task
 			const api = buildApiHandler(this.apiConfiguration!)
@@ -977,8 +1087,14 @@ export class ParallelUIService {
 	 * Build the prompt for a specific UI task
 	 * NOTE: Positions are now ABSOLUTE - we tell the sub-AI exactly where to place elements
 	 * If containerFrame is provided, elements will be created inside that frame
+	 * @param colorContext Optional color scheme context to inform the sub-AI about overall colors
 	 */
-	private buildTaskPrompt(task: UITaskDefinition, containerFrame?: string): string {
+	private buildTaskPrompt(
+		task: UITaskDefinition,
+		containerFrame?: string,
+		existingElements?: string[],
+		colorContext?: { bgColors: string[]; textColors: string[] },
+	): string {
 		const width = task.designSpec?.width || 90
 		const height = task.designSpec?.height || 60
 
@@ -1001,14 +1117,51 @@ export class ParallelUIService {
 
 		const parentParam = containerFrame ? `, parent="${containerFrame}"` : ""
 
+		// Check if this element already exists
+		const elementExists =
+			existingElements &&
+			existingElements.some((e) => e.toLowerCase().trim() === textContent.toLowerCase().trim())
+
 		console.log(
-			`[ParallelUI] Task ${task.id}: text="${textContent}", pos=(${posX}, ${posY}), size=${width}x${height}, textPos=(${textX}, ${textY})${containerFrame ? `, parent=${containerFrame}` : ""}`,
+			`[ParallelUI] Task ${task.id}: text="${textContent}", pos=(${posX}, ${posY}), size=${width}x${height}, textPos=(${textX}, ${textY})${containerFrame ? `, parent=${containerFrame}` : ""}${elementExists ? " [EXISTS]" : ""}, colors: bg=${bgColor}, text=${textColor}`,
 		)
 
 		// Simple, direct prompt with EXACT coordinates - sub-AI must use these exact values
 		// IMPORTANT: Use "radius" (not "cornerRadius") for TalkToFigma compatibility
 		let prompt = `Create a UI element "${textContent}" at EXACT position (${posX}, ${posY})\n\n`
-		prompt += `⚠️ CRITICAL: You MUST use the EXACT coordinates and parameters provided. Do NOT change ANY values!\n\n`
+
+		// Add color context to inform sub-AI about the overall color scheme
+		if (colorContext && (colorContext.bgColors.length > 0 || colorContext.textColors.length > 0)) {
+			prompt += `🎨 **Color Scheme Context (顏色配置資訊):**\n`
+			if (colorContext.bgColors.length > 0) {
+				prompt += `- Background colors in use: ${[...new Set(colorContext.bgColors)].join(", ")}\n`
+			}
+			if (colorContext.textColors.length > 0) {
+				prompt += `- Text colors in use: ${[...new Set(colorContext.textColors)].join(", ")}\n`
+			}
+			prompt += `- YOUR element's colors: Background=${bgColor}, Text=${textColor}\n\n`
+		}
+
+		// Handle existing elements - tell AI to delete first or move instead of create duplicate
+		if (existingElements && existingElements.length > 0) {
+			prompt += `📋 **Existing Elements:** [${existingElements.join(", ")}]\n\n`
+
+			if (elementExists) {
+				// Element already exists - instruct AI to DELETE first then create new, or MOVE existing
+				prompt += `⚠️ **IMPORTANT: Element "${textContent}" ALREADY EXISTS!**\n`
+				prompt += `DO NOT create a duplicate. Choose ONE of these approaches:\n\n`
+				prompt += `**Option A (Recommended): Delete existing, then create new**\n`
+				prompt += `1. find_nodes to locate the existing "${textContent}" element\n`
+				prompt += `2. delete_node with the found nodeId to remove it\n`
+				prompt += `3. Then create fresh elements at the new position (continue with normal creation steps below)\n\n`
+				prompt += `**Option B: Move existing element**\n`
+				prompt += `1. find_nodes to locate existing "${textContent}"\n`
+				prompt += `2. move_node to reposition to (${posX}, ${posY})\n\n`
+				prompt += `Proceed with Option A (delete then create):\n\n`
+			}
+		}
+
+		prompt += `⚠️ CRITICAL: You MUST use the EXACT coordinates, colors and parameters provided. Do NOT change ANY values!\n\n`
 		prompt += `EXECUTE THESE 3 TOOL CALLS IN ORDER:\n\n`
 		prompt += `1. create_rectangle with EXACTLY these parameters:\n`
 		prompt += `   - width: ${width}\n`
@@ -1016,16 +1169,16 @@ export class ParallelUIService {
 		prompt += `   - x: ${posX}\n`
 		prompt += `   - y: ${posY}\n`
 		prompt += `   - radius: ${cornerRadius}  ← REQUIRED for rounded corners!\n`
-		prompt += `   - hex: "${bgColor}"\n`
+		prompt += `   - hex: "${bgColor}"  ← EXACT color, do not change!\n`
 		if (containerFrame) {
 			prompt += `   - parentId: "${containerFrame}"\n`
 		}
 		prompt += `\n`
 		prompt += `2. add_text with: text="${textContent}", x=${textX}, y=${textY}, fontSize=${fontSize}${containerFrame ? `, parentId="${containerFrame}"` : ""}\n\n`
-		prompt += `3. set_text_color with: nodeId=<the ID returned from step 2>, hex="${textColor}"\n\n`
+		prompt += `3. set_text_color with: nodeId=<the ID returned from step 2>, hex="${textColor}"  ← EXACT color!\n\n`
 		prompt += `⚠️ MANDATORY PARAMETERS - DO NOT SKIP:\n`
 		prompt += `- radius=${cornerRadius} is REQUIRED in create_rectangle (creates ${cornerRadius >= Math.min(width, height) / 2 ? "circular" : "rounded"} button)\n`
-		prompt += `- All positions and sizes must be EXACT as specified\n`
+		prompt += `- All positions, sizes, and COLORS must be EXACT as specified\n`
 		prompt += `\nSTART NOW with create_rectangle including radius=${cornerRadius}.`
 
 		return prompt

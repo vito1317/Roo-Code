@@ -69,6 +69,7 @@ const ARCHITECT_APPROVAL_SYSTEM_PROMPT = `你是 Sentinel Edition 的架構師�
 /**
  * Ask Architect to approve a tool usage request
  * Returns true if approved, false if rejected
+ * Uses SSE streaming to show the Architect's response in real-time
  */
 async function askArchitectForApproval(
 	cline: Task,
@@ -92,10 +93,29 @@ ${toolDescription}
 			taskId: `architect-approval-${Date.now()}`,
 		})
 
+		// Header for streaming message
+		const header = `🟦 **Architect 審批中...**\n\n`
+
+		// Stream the response in real-time
 		let responseText = ""
+		let isFirstChunk = true
+
 		for await (const chunk of stream) {
 			if (chunk.type === "text") {
 				responseText += chunk.text
+
+				// Show streaming update with partial=true
+				await cline.say(
+					"text",
+					header + responseText,
+					undefined,
+					true, // partial=true for streaming effect
+				)
+
+				if (isFirstChunk) {
+					console.log(`[ArchitectApproval] Architect started streaming response...`)
+					isFirstChunk = false
+				}
 			}
 		}
 
@@ -104,11 +124,13 @@ ${toolDescription}
 		// Parse Architect's decision
 		const normalizedResponse = responseText.trim().toUpperCase()
 		if (normalizedResponse.startsWith("APPROVE")) {
-			await cline.say("text", `🟦 **Architect 審批通過**\n\n工具請求已被 Architect 自動批准。`)
+			// Final message with partial=false
+			await cline.say("text", `🟦 **Architect 審批通過**\n\n工具請求已被 Architect 自動批准。`, undefined, false)
 			return { approved: true }
 		} else {
 			const reason = responseText.replace(/^REJECT:?\s*/i, "").trim() || "Architect 拒絕了此操作"
-			await cline.say("text", `🟦 **Architect 審批拒絕**\n\n${reason}`)
+			// Final message with partial=false
+			await cline.say("text", `🟦 **Architect 審批拒絕**\n\n${reason}`, undefined, false)
 			return { approved: false, feedback: reason }
 		}
 	} catch (error) {

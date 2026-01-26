@@ -190,6 +190,18 @@ export const globalSettingsSchema = z.object({
 	 * @default true (recommended)
 	 */
 	talkToFigmaEnabled: z.boolean().optional(),
+	/**
+	 * Figma file URL for web preview
+	 * Format: https://www.figma.com/file/xxx or https://www.figma.com/design/xxx
+	 * Note: nullable to ensure it's serialized (undefined gets omitted by JSON.stringify)
+	 */
+	figmaFileUrl: z.string().nullish(),
+	/**
+	 * Enable Figma web preview panel
+	 * Shows real-time Figma preview in a webview panel
+	 * @default false
+	 */
+	figmaWebPreviewEnabled: z.boolean().optional(),
 
 	mode: z.string().optional(),
 	modeApiConfigs: z.record(z.string(), z.string()).optional(),

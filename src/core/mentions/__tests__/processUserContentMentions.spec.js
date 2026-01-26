@@ -1,0 +1,262 @@
+// npx vitest core/mentions/__tests__/processUserContentMentions.spec.ts
+import { processUserContentMentions } from "../processUserContentMentions";
+import { parseMentions } from "../index";
+// Mock the parseMentions function
+vi.mock("../index", () => ({
+    parseMentions: vi.fn(),
+}));
+describe("processUserContentMentions", () => {
+    let mockUrlContentFetcher;
+    let mockFileContextTracker;
+    let mockRooIgnoreController;
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockUrlContentFetcher = {};
+        mockFileContextTracker = {};
+        mockRooIgnoreController = {};
+        // Default mock implementation - returns ParseMentionsResult object
+        vi.mocked(parseMentions).mockImplementation(async (text) => ({
+            text: `parsed: ${text}`,
+            mode: undefined,
+        }));
+    });
+    describe("maxReadFileLine parameter", () => {
+        it("should pass maxReadFileLine to parseMentions when provided", async () => {
+            const userContent = [
+                {
+                    type: "text",
+                    text: "<user_message>Read file with limit</user_message>",
+                },
+            ];
+            await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+                rooIgnoreController: mockRooIgnoreController,
+                maxReadFileLine: 100,
+            });
+            expect(parseMentions).toHaveBeenCalledWith("<user_message>Read file with limit</user_message>", "/test", mockUrlContentFetcher, mockFileContextTracker, mockRooIgnoreController, false, true, // includeDiagnosticMessages
+            50, // maxDiagnosticMessages
+            100);
+        });
+        it("should pass undefined maxReadFileLine when not provided", async () => {
+            const userContent = [
+                {
+                    type: "text",
+                    text: "<user_message>Read file without limit</user_message>",
+                },
+            ];
+            await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+                rooIgnoreController: mockRooIgnoreController,
+            });
+            expect(parseMentions).toHaveBeenCalledWith("<user_message>Read file without limit</user_message>", "/test", mockUrlContentFetcher, mockFileContextTracker, mockRooIgnoreController, false, true, // includeDiagnosticMessages
+            50, // maxDiagnosticMessages
+            undefined);
+        });
+        it("should handle UNLIMITED_LINES constant correctly", async () => {
+            const userContent = [
+                {
+                    type: "text",
+                    text: "<user_message>Read unlimited lines</user_message>",
+                },
+            ];
+            await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+                rooIgnoreController: mockRooIgnoreController,
+                maxReadFileLine: -1,
+            });
+            expect(parseMentions).toHaveBeenCalledWith("<user_message>Read unlimited lines</user_message>", "/test", mockUrlContentFetcher, mockFileContextTracker, mockRooIgnoreController, false, true, // includeDiagnosticMessages
+            50, // maxDiagnosticMessages
+            -1);
+        });
+    });
+    describe("content processing", () => {
+        it("should process text blocks with <user_message> tags", async () => {
+            const userContent = [
+                {
+                    type: "text",
+                    text: "<user_message>Do something</user_message>",
+                },
+            ];
+            const result = await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+            });
+            expect(parseMentions).toHaveBeenCalled();
+            expect(result.content[0]).toEqual({
+                type: "text",
+                text: "parsed: <user_message>Do something</user_message>",
+            });
+            expect(result.mode).toBeUndefined();
+        });
+        it("should not process text blocks without user_message tags", async () => {
+            const userContent = [
+                {
+                    type: "text",
+                    text: "Regular text without special tags",
+                },
+            ];
+            const result = await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+            });
+            expect(parseMentions).not.toHaveBeenCalled();
+            expect(result.content[0]).toEqual(userContent[0]);
+            expect(result.mode).toBeUndefined();
+        });
+        it("should process tool_result blocks with string content", async () => {
+            const userContent = [
+                {
+                    type: "tool_result",
+                    tool_use_id: "123",
+                    content: "<user_message>Tool feedback</user_message>",
+                },
+            ];
+            const result = await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+            });
+            expect(parseMentions).toHaveBeenCalled();
+            expect(result.content[0]).toEqual({
+                type: "tool_result",
+                tool_use_id: "123",
+                content: "parsed: <user_message>Tool feedback</user_message>",
+            });
+            expect(result.mode).toBeUndefined();
+        });
+        it("should process tool_result blocks with array content", async () => {
+            const userContent = [
+                {
+                    type: "tool_result",
+                    tool_use_id: "123",
+                    content: [
+                        {
+                            type: "text",
+                            text: "<user_message>Array task</user_message>",
+                        },
+                        {
+                            type: "text",
+                            text: "Regular text",
+                        },
+                    ],
+                },
+            ];
+            const result = await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+            });
+            expect(parseMentions).toHaveBeenCalledTimes(1);
+            expect(result.content[0]).toEqual({
+                type: "tool_result",
+                tool_use_id: "123",
+                content: [
+                    {
+                        type: "text",
+                        text: "parsed: <user_message>Array task</user_message>",
+                    },
+                    {
+                        type: "text",
+                        text: "Regular text",
+                    },
+                ],
+            });
+            expect(result.mode).toBeUndefined();
+        });
+        it("should handle mixed content types", async () => {
+            const userContent = [
+                {
+                    type: "text",
+                    text: "<user_message>First task</user_message>",
+                },
+                {
+                    type: "image",
+                    source: {
+                        type: "base64",
+                        media_type: "image/png",
+                        data: "base64data",
+                    },
+                },
+                {
+                    type: "tool_result",
+                    tool_use_id: "456",
+                    content: "<user_message>Feedback</user_message>",
+                },
+            ];
+            const result = await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+                maxReadFileLine: 50,
+            });
+            expect(parseMentions).toHaveBeenCalledTimes(2);
+            expect(result.content).toHaveLength(3);
+            expect(result.content[0]).toEqual({
+                type: "text",
+                text: "parsed: <user_message>First task</user_message>",
+            });
+            expect(result.content[1]).toEqual(userContent[1]); // Image block unchanged
+            expect(result.content[2]).toEqual({
+                type: "tool_result",
+                tool_use_id: "456",
+                content: "parsed: <user_message>Feedback</user_message>",
+            });
+            expect(result.mode).toBeUndefined();
+        });
+    });
+    describe("showRooIgnoredFiles parameter", () => {
+        it("should default showRooIgnoredFiles to false", async () => {
+            const userContent = [
+                {
+                    type: "text",
+                    text: "<user_message>Test default</user_message>",
+                },
+            ];
+            await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+            });
+            expect(parseMentions).toHaveBeenCalledWith("<user_message>Test default</user_message>", "/test", mockUrlContentFetcher, mockFileContextTracker, undefined, false, // showRooIgnoredFiles should default to false
+            true, // includeDiagnosticMessages
+            50, // maxDiagnosticMessages
+            undefined);
+        });
+        it("should respect showRooIgnoredFiles when explicitly set to false", async () => {
+            const userContent = [
+                {
+                    type: "text",
+                    text: "<user_message>Test explicit false</user_message>",
+                },
+            ];
+            await processUserContentMentions({
+                userContent,
+                cwd: "/test",
+                urlContentFetcher: mockUrlContentFetcher,
+                fileContextTracker: mockFileContextTracker,
+                showRooIgnoredFiles: false,
+            });
+            expect(parseMentions).toHaveBeenCalledWith("<user_message>Test explicit false</user_message>", "/test", mockUrlContentFetcher, mockFileContextTracker, undefined, false, true, // includeDiagnosticMessages
+            50, // maxDiagnosticMessages
+            undefined);
+        });
+    });
+});
+//# sourceMappingURL=processUserContentMentions.spec.js.map

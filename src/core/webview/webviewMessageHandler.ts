@@ -567,7 +567,16 @@ export const webviewMessageHandler = async (
 			break
 
 		case "updateSettings":
+			console.log("[updateSettings] Received settings update:", Object.keys(message.updatedSettings || {}))
 			if (message.updatedSettings) {
+				// Explicitly log figma web preview settings to debug
+				console.log("[updateSettings] figmaFileUrl in message:", "figmaFileUrl" in message.updatedSettings, message.updatedSettings.figmaFileUrl)
+				console.log("[updateSettings] figmaWebPreviewEnabled in message:", "figmaWebPreviewEnabled" in message.updatedSettings, message.updatedSettings.figmaWebPreviewEnabled)
+				// Log all figma-related settings being received
+				const figmaKeys = Object.entries(message.updatedSettings).filter(([k]) => k.startsWith("figma") || k === "talkToFigmaEnabled")
+				if (figmaKeys.length > 0) {
+					console.log("[updateSettings] Figma settings in message:", figmaKeys)
+				}
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
 					let newValue = value
 
@@ -656,9 +665,19 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key.startsWith("figma")) {
+						// Explicit handling for Figma settings to ensure they're saved correctly
+						console.log(`[Figma Settings] Saving ${key}:`, value)
+						newValue = value
 					}
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+
+					// Verify Figma settings were saved
+					if (key.startsWith("figma")) {
+						const savedValue = provider.contextProxy.getValue(key as keyof RooCodeSettings)
+						console.log(`[Figma Settings] Verified ${key}:`, savedValue)
+					}
 				}
 
 				await provider.postStateToWebview()
@@ -730,6 +749,18 @@ export const webviewMessageHandler = async (
 		// Figma Write MCP setting - handled via updateSettings with figmaWriteEnabled
 		// The figma-write MCP server is controlled by the existing mcpEnabled pattern
 		// Users can enable/disable it through the MCP settings panel
+
+		case "openFigmaPreview":
+			try {
+				const { FigmaPreviewPanel } = await import("../../services/figma/FigmaPreviewPanel")
+				const figmaPreview = FigmaPreviewPanel.initialize(provider.context.extensionUri)
+				await figmaPreview.show(message.url)
+				console.log("[Figma] Preview panel opened")
+			} catch (error) {
+				console.error("[Figma] Failed to open preview:", error)
+				vscode.window.showErrorMessage(`Failed to open Figma preview: ${error instanceof Error ? error.message : String(error)}`)
+			}
+			break
 
 		case "clearTask":
 			// Clear task resets the current session. Delegation flows are

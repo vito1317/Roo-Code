@@ -1,0 +1,309 @@
+// npx vitest run src/api/transform/__tests__/bedrock-converse-format.spec.ts
+import { convertToBedrockConverseMessages } from "../bedrock-converse-format";
+describe("convertToBedrockConverseMessages", () => {
+    it("converts simple text messages correctly", () => {
+        const messages = [
+            { role: "user", content: "Hello" },
+            { role: "assistant", content: "Hi there" },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        expect(result).toEqual([
+            {
+                role: "user",
+                content: [{ text: "Hello" }],
+            },
+            {
+                role: "assistant",
+                content: [{ text: "Hi there" }],
+            },
+        ]);
+    });
+    it("converts messages with images correctly", () => {
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "text",
+                        text: "Look at this image:",
+                    },
+                    {
+                        type: "image",
+                        source: {
+                            type: "base64",
+                            data: "SGVsbG8=", // "Hello" in base64
+                            media_type: "image/jpeg",
+                        },
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        if (!result[0] || !result[0].content) {
+            expect.fail("Expected result to have content");
+            return;
+        }
+        expect(result[0].role).toBe("user");
+        expect(result[0].content).toHaveLength(2);
+        expect(result[0].content[0]).toEqual({ text: "Look at this image:" });
+        const imageBlock = result[0].content[1];
+        if ("image" in imageBlock && imageBlock.image && imageBlock.image.source) {
+            expect(imageBlock.image.format).toBe("jpeg");
+            expect(imageBlock.image.source).toBeDefined();
+            expect(imageBlock.image.source.bytes).toBeDefined();
+        }
+        else {
+            expect.fail("Expected image block not found");
+        }
+    });
+    it("converts tool use messages correctly (native tools format; default)", () => {
+        const messages = [
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "tool_use",
+                        id: "test-id",
+                        name: "read_file",
+                        input: {
+                            path: "test.txt",
+                        },
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        if (!result[0] || !result[0].content) {
+            expect.fail("Expected result to have content");
+            return;
+        }
+        expect(result[0].role).toBe("assistant");
+        const toolBlock = result[0].content[0];
+        if ("toolUse" in toolBlock && toolBlock.toolUse) {
+            expect(toolBlock.toolUse).toEqual({
+                toolUseId: "test-id",
+                name: "read_file",
+                input: { path: "test.txt" },
+            });
+        }
+        else {
+            expect.fail("Expected tool use block not found");
+        }
+    });
+    it("converts tool use messages correctly (native tools format)", () => {
+        const messages = [
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "tool_use",
+                        id: "test-id",
+                        name: "read_file",
+                        input: {
+                            path: "test.txt",
+                        },
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        if (!result[0] || !result[0].content) {
+            expect.fail("Expected result to have content");
+            return;
+        }
+        expect(result[0].role).toBe("assistant");
+        const toolBlock = result[0].content[0];
+        if ("toolUse" in toolBlock && toolBlock.toolUse) {
+            expect(toolBlock.toolUse).toEqual({
+                toolUseId: "test-id",
+                name: "read_file",
+                input: { path: "test.txt" },
+            });
+        }
+        else {
+            expect.fail("Expected tool use block not found");
+        }
+    });
+    it("converts tool result messages to native format (default)", () => {
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "tool_result",
+                        tool_use_id: "test-id",
+                        content: [{ type: "text", text: "File contents here" }],
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        if (!result[0] || !result[0].content) {
+            expect.fail("Expected result to have content");
+            return;
+        }
+        expect(result[0].role).toBe("user");
+        const resultBlock = result[0].content[0];
+        if ("toolResult" in resultBlock && resultBlock.toolResult) {
+            const expectedContent = [{ text: "File contents here" }];
+            expect(resultBlock.toolResult).toEqual({
+                toolUseId: "test-id",
+                content: expectedContent,
+                status: "success",
+            });
+        }
+        else {
+            expect.fail("Expected tool result block not found");
+        }
+    });
+    it("converts tool result messages to native format", () => {
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "tool_result",
+                        tool_use_id: "test-id",
+                        content: [{ type: "text", text: "File contents here" }],
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        if (!result[0] || !result[0].content) {
+            expect.fail("Expected result to have content");
+            return;
+        }
+        expect(result[0].role).toBe("user");
+        const resultBlock = result[0].content[0];
+        if ("toolResult" in resultBlock && resultBlock.toolResult) {
+            const expectedContent = [{ text: "File contents here" }];
+            expect(resultBlock.toolResult).toEqual({
+                toolUseId: "test-id",
+                content: expectedContent,
+                status: "success",
+            });
+        }
+        else {
+            expect.fail("Expected tool result block not found");
+        }
+    });
+    it("converts tool result messages with string content to native format (default)", () => {
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "tool_result",
+                        tool_use_id: "test-id",
+                        content: "File: test.txt\nLines 1-5:\nHello World",
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        if (!result[0] || !result[0].content) {
+            expect.fail("Expected result to have content");
+            return;
+        }
+        expect(result[0].role).toBe("user");
+        const resultBlock = result[0].content[0];
+        if ("toolResult" in resultBlock && resultBlock.toolResult) {
+            expect(resultBlock.toolResult).toEqual({
+                toolUseId: "test-id",
+                content: [{ text: "File: test.txt\nLines 1-5:\nHello World" }],
+                status: "success",
+            });
+        }
+        else {
+            expect.fail("Expected tool result block not found");
+        }
+    });
+    it("converts tool result messages with string content to native format", () => {
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "tool_result",
+                        tool_use_id: "test-id",
+                        content: "File: test.txt\nLines 1-5:\nHello World",
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        if (!result[0] || !result[0].content) {
+            expect.fail("Expected result to have content");
+            return;
+        }
+        expect(result[0].role).toBe("user");
+        const resultBlock = result[0].content[0];
+        if ("toolResult" in resultBlock && resultBlock.toolResult) {
+            expect(resultBlock.toolResult).toEqual({
+                toolUseId: "test-id",
+                content: [{ text: "File: test.txt\nLines 1-5:\nHello World" }],
+                status: "success",
+            });
+        }
+        else {
+            expect.fail("Expected tool result block not found");
+        }
+    });
+    it("keeps both tool_use and tool_result in native format by default", () => {
+        const messages = [
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "tool_use",
+                        id: "call-123",
+                        name: "read_file",
+                        input: { path: "test.txt" },
+                    },
+                ],
+            },
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "tool_result",
+                        tool_use_id: "call-123",
+                        content: "File contents here",
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        // Both should be native toolUse/toolResult blocks
+        const assistantContent = result[0]?.content?.[0];
+        const userContent = result[1]?.content?.[0];
+        expect("toolUse" in assistantContent).toBe(true);
+        expect("toolResult" in userContent).toBe(true);
+        expect("text" in assistantContent).toBe(false);
+        expect("text" in userContent).toBe(false);
+    });
+    it("handles text content correctly", () => {
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "text",
+                        text: "Hello world",
+                    },
+                ],
+            },
+        ];
+        const result = convertToBedrockConverseMessages(messages);
+        if (!result[0] || !result[0].content) {
+            expect.fail("Expected result to have content");
+            return;
+        }
+        expect(result[0].role).toBe("user");
+        expect(result[0].content).toHaveLength(1);
+        const textBlock = result[0].content[0];
+        expect(textBlock).toEqual({ text: "Hello world" });
+    });
+});
+//# sourceMappingURL=bedrock-converse-format.spec.js.map

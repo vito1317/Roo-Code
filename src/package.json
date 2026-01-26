@@ -53,8 +53,7 @@
 		"onStartupFinished"
 	],
 	"extensionDependencies": [
-		"pomdtr.markdown-kroki",
-		"figma.figma-vscode-extension"
+		"pomdtr.markdown-kroki"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {

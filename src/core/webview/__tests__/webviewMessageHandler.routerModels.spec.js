@@ -1,0 +1,169 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { webviewMessageHandler } from "../webviewMessageHandler";
+// Mock vscode (minimal)
+vi.mock("vscode", () => ({
+    window: {
+        showErrorMessage: vi.fn(),
+        showWarningMessage: vi.fn(),
+        showInformationMessage: vi.fn(),
+    },
+    workspace: {
+        workspaceFolders: undefined,
+        getConfiguration: vi.fn(() => ({
+            get: vi.fn(),
+            update: vi.fn(),
+        })),
+    },
+    env: {
+        clipboard: { writeText: vi.fn() },
+        openExternal: vi.fn(),
+    },
+    commands: {
+        executeCommand: vi.fn(),
+    },
+    Uri: {
+        parse: vi.fn((s) => ({ toString: () => s })),
+        file: vi.fn((p) => ({ fsPath: p })),
+    },
+    ConfigurationTarget: {
+        Global: 1,
+        Workspace: 2,
+        WorkspaceFolder: 3,
+    },
+}));
+// Mock modelCache getModels/flushModels used by the handler
+const getModelsMock = vi.fn();
+const flushModelsMock = vi.fn();
+vi.mock("../../../api/providers/fetchers/modelCache", () => ({
+    getModels: (...args) => getModelsMock(...args),
+    flushModels: (...args) => flushModelsMock(...args),
+}));
+describe("webviewMessageHandler - requestRouterModels provider filter", () => {
+    let mockProvider;
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockProvider = {
+            // Only methods used by this code path
+            postMessageToWebview: vi.fn(),
+            getState: vi.fn().mockResolvedValue({ apiConfiguration: {} }),
+            contextProxy: {
+                getValue: vi.fn(),
+                setValue: vi.fn(),
+                globalStorageUri: { fsPath: "/mock/storage" },
+            },
+            log: vi.fn(),
+        };
+        // Default mock: return distinct model maps per provider so we can verify keys
+        getModelsMock.mockImplementation(async (options) => {
+            switch (options?.provider) {
+                case "roo":
+                    return { "roo/sonnet": { contextWindow: 8192, supportsPromptCache: false } };
+                case "openrouter":
+                    return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } };
+                case "requesty":
+                    return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } };
+                case "deepinfra":
+                    return { "deepinfra/model": { contextWindow: 8192, supportsPromptCache: false } };
+                case "unbound":
+                    return { "unbound/model": { contextWindow: 8192, supportsPromptCache: false } };
+                case "vercel-ai-gateway":
+                    return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } };
+                case "io-intelligence":
+                    return { "io/model": { contextWindow: 8192, supportsPromptCache: false } };
+                case "litellm":
+                    return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } };
+                default:
+                    return {};
+            }
+        });
+    });
+    it("fetches only requested provider when values.provider is present ('roo')", async () => {
+        await webviewMessageHandler(mockProvider, {
+            type: "requestRouterModels",
+            values: { provider: "roo" },
+        });
+        // Should post a single routerModels message
+        expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(expect.objectContaining({ type: "routerModels", routerModels: expect.any(Object) }));
+        const call = mockProvider.postMessageToWebview.mock.calls.find((c) => c[0]?.type === "routerModels");
+        expect(call).toBeTruthy();
+        const payload = call[0];
+        const routerModels = payload.routerModels;
+        // Only "roo" key should be present
+        const keys = Object.keys(routerModels);
+        expect(keys).toEqual(["roo"]);
+        expect(Object.keys(routerModels.roo || {})).toContain("roo/sonnet");
+        // getModels should have been called exactly once for roo
+        const providersCalled = getModelsMock.mock.calls.map((c) => c[0]?.provider);
+        expect(providersCalled).toEqual(["roo"]);
+    });
+    it("defaults to aggregate fetching when no provider filter is sent", async () => {
+        await webviewMessageHandler(mockProvider, {
+            type: "requestRouterModels",
+        });
+        const call = mockProvider.postMessageToWebview.mock.calls.find((c) => c[0]?.type === "routerModels");
+        expect(call).toBeTruthy();
+        const routerModels = call[0].routerModels;
+        // Aggregate handler initializes many known routers - ensure a few expected keys exist
+        expect(routerModels).toHaveProperty("openrouter");
+        expect(routerModels).toHaveProperty("roo");
+        expect(routerModels).toHaveProperty("requesty");
+    });
+    it("supports filtering another single provider ('openrouter')", async () => {
+        await webviewMessageHandler(mockProvider, {
+            type: "requestRouterModels",
+            values: { provider: "openrouter" },
+        });
+        const call = mockProvider.postMessageToWebview.mock.calls.find((c) => c[0]?.type === "routerModels");
+        expect(call).toBeTruthy();
+        const routerModels = call[0].routerModels;
+        const keys = Object.keys(routerModels);
+        expect(keys).toEqual(["openrouter"]);
+        expect(Object.keys(routerModels.openrouter || {})).toContain("openrouter/qwen2.5");
+        const providersCalled = getModelsMock.mock.calls.map((c) => c[0]?.provider);
+        expect(providersCalled).toEqual(["openrouter"]);
+    });
+    it("flushes cache when LiteLLM credentials are provided in message values", async () => {
+        // Provide LiteLLM credentials via message.values (simulating Refresh Models button)
+        await webviewMessageHandler(mockProvider, {
+            type: "requestRouterModels",
+            values: {
+                litellmApiKey: "test-api-key",
+                litellmBaseUrl: "http://localhost:4000",
+            },
+        });
+        // flushModels should have been called for litellm with refresh=true and credentials
+        expect(flushModelsMock).toHaveBeenCalledWith({ provider: "litellm", apiKey: "test-api-key", baseUrl: "http://localhost:4000" }, true);
+        // getModels should have been called with the provided credentials
+        const litellmCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === "litellm");
+        expect(litellmCalls.length).toBe(1);
+        expect(litellmCalls[0][0]).toEqual({
+            provider: "litellm",
+            apiKey: "test-api-key",
+            baseUrl: "http://localhost:4000",
+        });
+    });
+    it("does not flush cache when using stored LiteLLM credentials", async () => {
+        // Provide stored credentials via apiConfiguration
+        mockProvider.getState.mockResolvedValue({
+            apiConfiguration: {
+                litellmApiKey: "stored-api-key",
+                litellmBaseUrl: "http://stored:4000",
+            },
+        });
+        await webviewMessageHandler(mockProvider, {
+            type: "requestRouterModels",
+        });
+        // flushModels should NOT have been called for litellm
+        const litellmFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0] === "litellm");
+        expect(litellmFlushCalls.length).toBe(0);
+        // getModels should still have been called with stored credentials
+        const litellmCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === "litellm");
+        expect(litellmCalls.length).toBe(1);
+        expect(litellmCalls[0][0]).toEqual({
+            provider: "litellm",
+            apiKey: "stored-api-key",
+            baseUrl: "http://stored:4000",
+        });
+    });
+});
+//# sourceMappingURL=webviewMessageHandler.routerModels.spec.js.map
