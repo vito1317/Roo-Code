@@ -712,8 +712,9 @@ export class McpHub {
             return false;
         }
         try {
-            // If we have a previous channel code and this is a reconnection attempt, try auto-reconnect first
-            if (forcePrompt && this.lastFigmaChannelCode) {
+            // If we have a previous channel code, try auto-reconnect first (even without forcePrompt)
+            // This enables seamless reconnection when starting a new task
+            if (this.lastFigmaChannelCode) {
                 console.log("[McpHub] Attempting auto-reconnection with previous channel code:", this.lastFigmaChannelCode);
                 vscode.window.showInformationMessage(`正在嘗試重新連接到頻道 ${this.lastFigmaChannelCode}... (Attempting to reconnect...)`);
                 try {
@@ -728,7 +729,7 @@ export class McpHub {
                             !resultText.includes("failed") &&
                             !resultText.includes("not connected")) {
                             this.figmaChannelConnected = true;
-                            vscode.window.showInformationMessage(`已重新連接到頻道 ${this.lastFigmaChannelCode} (Reconnected to channel)`);
+                            vscode.window.showInformationMessage(`✓ 已自動連接到頻道 ${this.lastFigmaChannelCode} (Auto-connected to channel)`);
                             console.log("[McpHub] Auto-reconnected to Figma channel:", this.lastFigmaChannelCode);
                             return true;
                         }
@@ -741,14 +742,27 @@ export class McpHub {
                 console.log("[McpHub] Auto-reconnection with previous code failed, prompting for new code");
             }
             // Ask user for the channel code
-            const promptMessage = forcePrompt
-                ? `自動重連失敗。請輸入新的頻道代碼：\n(Auto-reconnect failed. Enter a new channel code:)`
-                : "請輸入 Figma 頻道代碼 (Enter Figma channel code from plugin)";
+            // Show appropriate message based on whether auto-reconnect was attempted
+            let promptMessage;
+            let title;
+            if (this.lastFigmaChannelCode) {
+                // Auto-reconnect was attempted but failed
+                promptMessage = `自動重連失敗。請輸入新的頻道代碼：\n(Auto-reconnect to ${this.lastFigmaChannelCode} failed. Enter a new channel code:)`;
+                title = "重新連接 Figma (Reconnect)";
+            }
+            else if (forcePrompt) {
+                promptMessage = `請輸入頻道代碼重新連接：\n(Enter channel code to reconnect:)`;
+                title = "重新連接 Figma (Reconnect)";
+            }
+            else {
+                promptMessage = "請輸入 Figma 頻道代碼 (Enter Figma channel code from plugin)";
+                title = "連接 Figma (Connect)";
+            }
             const channelCode = await vscode.window.showInputBox({
                 prompt: promptMessage,
                 placeHolder: this.lastFigmaChannelCode || "e.g., abc123",
                 value: this.lastFigmaChannelCode || undefined, // Pre-fill with last code
-                title: forcePrompt ? "重新連接 Figma (Reconnect)" : "連接 Figma (Connect)",
+                title,
                 ignoreFocusOut: true,
             });
             if (!channelCode) {
