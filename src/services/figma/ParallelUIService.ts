@@ -141,8 +141,8 @@ export class ParallelUIService {
 		// Different names - Document/Node info
 		get_file_url: "get_document_info",
 		find_nodes: "scan_nodes_by_types", // For scanning nodes by type
-		get_node: "get_node_info",         // For getting single node info
-		get_nodes: "get_nodes_info",       // For getting multiple nodes info
+		get_node: "get_node_info", // For getting single node info
+		get_nodes: "get_nodes_info", // For getting multiple nodes info
 	}
 
 	private constructor() {}
@@ -161,7 +161,7 @@ export class ParallelUIService {
 		apiConfiguration: ProviderSettings,
 		extensionPath: string,
 		mcpHub?: McpHub,
-		figmaSettings?: { talkToFigmaEnabled?: boolean; figmaWriteEnabled?: boolean }
+		figmaSettings?: { talkToFigmaEnabled?: boolean; figmaWriteEnabled?: boolean },
 	): void {
 		this.apiConfiguration = apiConfiguration
 		this.extensionPath = extensionPath
@@ -388,71 +388,171 @@ export class ParallelUIService {
 
 	/**
 	 * Scan existing elements in a container to detect duplicates
-	 * Returns a list of text contents that already exist
+	 * Returns a list of text contents and frame names that already exist
 	 */
-	private async scanExistingElements(containerFrame?: string): Promise<string[]> {
+	private async scanExistingElements(containerFrame?: string): Promise<{ texts: string[]; frames: string[] }> {
 		if (!this.mcpHub || !this.activeFigmaServer) {
-			return []
+			return { texts: [], frames: [] }
 		}
 
-		try {
-			// Try to scan text nodes in the container
-			const scanArgs: Record<string, unknown> = containerFrame ? { nodeId: containerFrame } : {}
+		const existingTexts: string[] = []
+		const existingFrames: string[] = []
 
+		// Scan for text nodes
+		try {
+			const scanArgs: Record<string, unknown> = containerFrame ? { nodeId: containerFrame } : {}
 			const result = await this.mcpHub.callTool(this.activeFigmaServer, "scan_text_nodes", scanArgs)
 
 			if (result.content) {
 				const textContent = result.content.find((c: { type: string }) => c.type === "text")
 				if (textContent && "text" in textContent) {
 					const text = textContent.text as string
-					// Extract text contents from the scan result
-					// The result might be JSON or a formatted string
 					try {
 						const data = JSON.parse(text)
 						if (Array.isArray(data)) {
-							return data
-								.map((item: { text?: string; characters?: string }) => item.text || item.characters || "")
-								.filter((t: string) => t.length > 0)
+							existingTexts.push(
+								...data
+									.map(
+										(item: { text?: string; characters?: string }) =>
+											item.text || item.characters || "",
+									)
+									.filter((t: string) => t.length > 0),
+							)
 						}
 						if (data.textNodes && Array.isArray(data.textNodes)) {
-							return data.textNodes
-								.map((item: { text?: string; characters?: string }) => item.text || item.characters || "")
-								.filter((t: string) => t.length > 0)
+							existingTexts.push(
+								...data.textNodes
+									.map(
+										(item: { text?: string; characters?: string }) =>
+											item.text || item.characters || "",
+									)
+									.filter((t: string) => t.length > 0),
+							)
 						}
 					} catch {
-						// Not JSON, try to extract text content from the string
 						const textMatches = text.match(/["']([^"']+)["']/g)
 						if (textMatches) {
-							return textMatches.map((m: string) => m.replace(/["']/g, "")).filter((t: string) => t.length > 0)
+							existingTexts.push(
+								...textMatches
+									.map((m: string) => m.replace(/["']/g, ""))
+									.filter((t: string) => t.length > 0),
+							)
 						}
 					}
 				}
 			}
 		} catch (error) {
-			console.warn(`[ParallelUI] Failed to scan existing elements:`, error)
+			console.warn(`[ParallelUI] Failed to scan text nodes:`, error)
 		}
 
-		return []
+		// Scan for frame nodes using scan_nodes_by_types or find_nodes
+		try {
+			const { mappedName: scanToolName } = this.mapToolForServer("find_nodes", {})
+			const scanArgs: Record<string, unknown> = { types: ["FRAME"] }
+			if (containerFrame) {
+				scanArgs.nodeId = containerFrame
+			}
+
+			const result = await this.mcpHub.callTool(this.activeFigmaServer, scanToolName, scanArgs)
+
+			if (result.content) {
+				const textContent = result.content.find((c: { type: string }) => c.type === "text")
+				if (textContent && "text" in textContent) {
+					const text = textContent.text as string
+					try {
+						const data = JSON.parse(text)
+						// Handle different response formats
+						const nodes = Array.isArray(data) ? data : data.nodes || data.frames || []
+						for (const node of nodes) {
+							if (node.name) {
+								existingFrames.push(node.name)
+							}
+						}
+					} catch {
+						// Try to extract frame names from text
+						const nameMatches = text.match(/"name"\s*:\s*"([^"]+)"/g)
+						if (nameMatches) {
+							for (const match of nameMatches) {
+								const nameMatch = match.match(/"name"\s*:\s*"([^"]+)"/)
+								if (nameMatch && nameMatch[1]) {
+									existingFrames.push(nameMatch[1])
+								}
+							}
+						}
+					}
+				}
+			}
+		} catch (error) {
+			console.warn(`[ParallelUI] Failed to scan frame nodes:`, error)
+		}
+
+		console.log(
+			`[ParallelUI] Scanned existing elements: ${existingTexts.length} texts, ${existingFrames.length} frames`,
+		)
+		if (existingFrames.length > 0) {
+			console.log(`[ParallelUI] Existing frames: [${existingFrames.join(", ")}]`)
+		}
+
+		return { texts: existingTexts, frames: existingFrames }
 	}
 
 	/**
 	 * Filter out tasks that would create duplicate elements
+	 * Checks both text content and frame names for duplicates
 	 */
 	private filterDuplicateTasks(
 		tasks: UITaskDefinition[],
-		existingElements: string[],
+		existingElements: { texts: string[]; frames: string[] },
 	): { filteredTasks: UITaskDefinition[]; skippedTasks: UITaskDefinition[] } {
-		const existingSet = new Set(existingElements.map((e) => e.toLowerCase().trim()))
+		const existingTexts = new Set(existingElements.texts.map((e) => e.toLowerCase().trim()))
+		const existingFrames = new Set(existingElements.frames.map((e) => e.toLowerCase().trim()))
 		const filteredTasks: UITaskDefinition[] = []
 		const skippedTasks: UITaskDefinition[] = []
 
 		for (const task of tasks) {
+			let isDuplicate = false
+			let reason = ""
+
+			// Check if task text already exists
 			const taskText = (task.designSpec?.text || "").toLowerCase().trim()
-			if (taskText && existingSet.has(taskText)) {
+			if (taskText && existingTexts.has(taskText)) {
+				isDuplicate = true
+				reason = `text "${taskText}" already exists`
+			}
+
+			// Check if task is creating a frame that already exists (by targetFrame name or description)
+			if (!isDuplicate) {
+				const targetFrame = (task.targetFrame || "").toLowerCase().trim()
+				if (targetFrame && existingFrames.has(targetFrame)) {
+					isDuplicate = true
+					reason = `frame "${targetFrame}" already exists`
+				}
+			}
+
+			// Check if task description mentions creating a frame that already exists
+			if (!isDuplicate) {
+				const description = (task.description || "").toLowerCase()
+				for (const frame of existingFrames) {
+					if (description.includes(frame)) {
+						isDuplicate = true
+						reason = `description references existing frame "${frame}"`
+						break
+					}
+				}
+			}
+
+			if (isDuplicate) {
+				console.log(`[ParallelUI] Skipping duplicate task ${task.id}: ${reason}`)
 				skippedTasks.push(task)
 			} else {
 				filteredTasks.push(task)
 			}
+		}
+
+		if (skippedTasks.length > 0) {
+			console.log(
+				`[ParallelUI] Filtered out ${skippedTasks.length} duplicate tasks: ${skippedTasks.map((t) => t.id).join(", ")}`,
+			)
 		}
 
 		return { filteredTasks, skippedTasks }
@@ -665,7 +765,9 @@ export class ParallelUIService {
 
 		// Store which server we're using for tool calls
 		this.activeFigmaServer = figmaServer.name
-		console.log(`[ParallelUI] Using Figma server: ${this.activeFigmaServer} (settings: talkToFigma=${this.talkToFigmaEnabled}, figmaWrite=${this.figmaWriteEnabled})`)
+		console.log(
+			`[ParallelUI] Using Figma server: ${this.activeFigmaServer} (settings: talkToFigma=${this.talkToFigmaEnabled}, figmaWrite=${this.figmaWriteEnabled})`,
+		)
 
 		// Check if the provider supports tool use
 		// Parallel UI requires models that support function/tool calling
@@ -703,17 +805,76 @@ export class ParallelUIService {
 
 		if (useDirectMcpMode) {
 			console.log(`[ParallelUI] Using direct MCP mode (provider "${provider}" may not support tool use)`)
-			return this.executeTasksDirectMcp(tasks, onProgress, containerFrame)
+
+			// Also filter duplicates in direct MCP mode
+			const existingElements = await this.scanExistingElements(containerFrame)
+			const { filteredTasks: directModeTasks, skippedTasks: directModeSkipped } = this.filterDuplicateTasks(
+				tasks,
+				existingElements,
+			)
+
+			if (directModeSkipped.length > 0) {
+				console.log(`[ParallelUI] Direct mode: Skipping ${directModeSkipped.length} duplicate tasks`)
+				for (const skipped of directModeSkipped) {
+					onProgress?.(skipped.id, "skipped (duplicate)")
+				}
+			}
+
+			if (directModeTasks.length === 0) {
+				const totalDuration = Date.now() - startTime
+				return {
+					success: true,
+					results: directModeSkipped.map((task) => ({
+						taskId: task.id,
+						success: true,
+						nodeIds: [],
+						duration: 0,
+						error: "Skipped: element already exists",
+					})),
+					totalDuration,
+					summary: `[Direct MCP] All ${tasks.length} tasks skipped - elements already exist.`,
+				}
+			}
+
+			return this.executeTasksDirectMcp(directModeTasks, onProgress, containerFrame)
 		}
 
 		console.log(
 			`[ParallelUI] Starting ${tasks.length} parallel UI tasks using McpHub${containerFrame ? ` (inside frame ${containerFrame})` : ""}`,
 		)
 
-		// Scan existing elements to inform sub-AI about what already exists
+		// Scan existing elements to detect duplicates
 		const existingElements = await this.scanExistingElements(containerFrame)
-		if (existingElements.length > 0) {
-			console.log(`[ParallelUI] Found ${existingElements.length} existing elements in container:`, existingElements)
+		if (existingElements.texts.length > 0 || existingElements.frames.length > 0) {
+			console.log(
+				`[ParallelUI] Found existing elements: ${existingElements.texts.length} texts, ${existingElements.frames.length} frames`,
+			)
+		}
+
+		// Filter out duplicate tasks BEFORE executing
+		const { filteredTasks, skippedTasks } = this.filterDuplicateTasks(tasks, existingElements)
+		if (skippedTasks.length > 0) {
+			console.log(`[ParallelUI] ⚠️ Skipping ${skippedTasks.length} duplicate tasks to prevent re-creation`)
+			for (const skipped of skippedTasks) {
+				onProgress?.(skipped.id, "skipped (duplicate)")
+			}
+		}
+
+		// If all tasks were duplicates, return early
+		if (filteredTasks.length === 0) {
+			const totalDuration = Date.now() - startTime
+			return {
+				success: true,
+				results: skippedTasks.map((task) => ({
+					taskId: task.id,
+					success: true,
+					nodeIds: [],
+					duration: 0,
+					error: "Skipped: element already exists",
+				})),
+				totalDuration,
+				summary: `All ${tasks.length} tasks skipped - elements already exist. No duplicates created.`,
+			}
 		}
 
 		// Build color context from all tasks to inform each sub-AI about the overall color scheme
@@ -722,7 +883,7 @@ export class ParallelUIService {
 			bgColors: [],
 			textColors: [],
 		}
-		for (const task of tasks) {
+		for (const task of filteredTasks) {
 			if (task.designSpec?.colors) {
 				if (task.designSpec.colors[0]) {
 					colorContext.bgColors.push(task.designSpec.colors[0])
@@ -739,10 +900,10 @@ export class ParallelUIService {
 			)
 		}
 
-		// Execute all tasks in parallel using sub-AI agents
+		// Execute only non-duplicate tasks in parallel using sub-AI agents
 		// Pass existing elements info and color context so AI knows what already exists and color scheme
-		const taskPromises = tasks.map((task) =>
-			this.executeSingleTask(task, onProgress, containerFrame, existingElements, colorContext),
+		const taskPromises = filteredTasks.map((task) =>
+			this.executeSingleTask(task, onProgress, containerFrame, existingElements.texts, colorContext),
 		)
 
 		const results = await Promise.all(taskPromises)
@@ -751,18 +912,30 @@ export class ParallelUIService {
 		const allFailedToolUse = results.every((r) => !r.success && r.error?.includes("工具調用"))
 		if (allFailedToolUse && results.length > 0) {
 			console.log(`[ParallelUI] All tasks failed due to tool use issues, falling back to direct MCP mode`)
-			return this.executeTasksDirectMcp(tasks, onProgress, containerFrame)
+			return this.executeTasksDirectMcp(filteredTasks, onProgress, containerFrame)
 		}
 
+		// Add skipped tasks to results with success status
+		const skippedResults: UITaskResult[] = skippedTasks.map((task) => ({
+			taskId: task.id,
+			success: true,
+			nodeIds: [],
+			duration: 0,
+			error: "Skipped: element already exists",
+		}))
+
+		const allResults = [...results, ...skippedResults]
 		const totalDuration = Date.now() - startTime
 		const successCount = results.filter((r) => r.success).length
 		const allNodeIds = results.flatMap((r) => r.nodeIds)
 
+		const skippedInfo = skippedTasks.length > 0 ? ` (${skippedTasks.length} duplicates skipped)` : ""
+
 		return {
-			success: successCount === tasks.length,
-			results,
+			success: successCount === filteredTasks.length,
+			results: allResults,
 			totalDuration,
-			summary: `Completed ${successCount}/${tasks.length} UI tasks in ${totalDuration}ms. Created ${allNodeIds.length} nodes.`,
+			summary: `Completed ${successCount}/${filteredTasks.length} UI tasks in ${totalDuration}ms. Created ${allNodeIds.length} nodes.${skippedInfo}`,
 		}
 	}
 

@@ -1084,20 +1084,26 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				const toolPatterns = [
 					// Tool action indicators
 					/^(Let me|I'll|I'm going to|I will|Now I|First,? I|Next,? I).{0,30}(read|write|search|execute|run|check|look|find|create|edit|modify|delete|update|open|close|list|get|fetch|call|use)/i,
-					// Progress indicators
-					/^(Processing|Loading|Searching|Reading|Writing|Executing|Running|Checking|Looking|Finding|Creating|Editing|Modifying|Deleting|Updating|Fetching|Calling)/i,
+					// Progress indicators (English)
+					/^(Processing|Loading|Searching|Reading|Writing|Executing|Running|Checking|Looking|Finding|Creating|Editing|Modifying|Deleting|Updating|Fetching|Calling|Submitting|Connecting|Disconnecting|Initializing|Starting|Stopping)/i,
 					// Chinese progress indicators
-					/^(正在|開始|準備|執行|讀取|寫入|搜尋|搜索|檢查|查找|建立|創建|編輯|修改|刪除|更新|獲取|調用)/,
+					/^(正在|開始|準備|執行|讀取|寫入|搜尋|搜索|檢查|查找|建立|創建|編輯|修改|刪除|更新|獲取|調用|提交|連接|斷開|初始化|啟動|停止)/,
 					// Status messages
 					/^(Done|Completed|Finished|Success|Failed|Error|Warning)/i,
 					// File path mentions (likely tool output)
 					/^(File|Path|Directory|Folder|Found|Located|Created|Modified|Deleted):/i,
 					// Command execution
 					/^(Running|Executing|Command|Terminal|Output|Result):/i,
-					// Short technical messages (less than 20 chars starting with emoji or special chars)
-					/^[🔍🔄✅❌⚠️📁📄💾🔧⏳✨🎨].{0,30}$/,
+					// Emoji-prefixed status/progress messages (any length, common status emojis)
+					/^[🔍🔄✅❌⚠️📁📄💾🔧⏳✨🎨🚀💡📝🔗🎯📊🔥💫🌟⭐📌🏷️🎉👍👎💪🤖🧠📋📦🔒🔓🛠️⚙️🔌📡🌐💻🖥️📱]/,
 					// MCP/API related
 					/^(MCP|API|Tool|Request|Response|Calling|Invoking)/i,
+					// Agent handoff/context/mode switching messages
+					/(handoff|context from|sentinel|architect|designer|coder|switching to|mode switch|transferring to|handing off)/i,
+					// Parallel tasks/batch operations
+					/(parallel|batch|concurrent|executing \d+|processing \d+|completed \d+\/\d+|tasks? (in|completed|failed))/i,
+					// Figma-specific messages
+					/(figma|MCP calls|creating ui|creating button|creating frame|creating rectangle|node created)/i,
 					// Code-like content
 					/^```[\s\S]*```$/,
 					/^`[^`]+`$/,
@@ -1333,7 +1339,15 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				setInputValue(preservedInput)
 			}
 		},
-		[handleSendMessage, setInputValue, switchToMode, alwaysAllowModeSwitch, clineAsk, markFollowUpAsAnswered, sentinelAgentState],
+		[
+			handleSendMessage,
+			setInputValue,
+			switchToMode,
+			alwaysAllowModeSwitch,
+			clineAsk,
+			markFollowUpAsAnswered,
+			sentinelAgentState,
+		],
 	)
 
 	const handleBatchFileResponse = useCallback((response: { [key: string]: boolean }) => {
