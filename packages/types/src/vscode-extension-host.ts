@@ -107,7 +107,6 @@ export interface ExtensionMessage {
 		| "worktreeDefaults"
 		| "worktreeIncludeStatus"
 		| "branchWorktreeIncludeResult"
-		| "mergeWorktreeResult"
 		| "sentinelAgentState"
 		| "figmaConnectionResult"
 	text?: string
@@ -268,10 +267,6 @@ export interface ExtensionMessage {
 	worktreeIncludeStatus?: WorktreeIncludeStatus
 	hasGitignore?: boolean
 	gitignoreContent?: string
-	hasConflicts?: boolean
-	conflictingFiles?: string[]
-	sourceBranch?: string
-	targetBranch?: string
 	// branchWorktreeIncludeResult
 	branch?: string
 	hasWorktreeInclude?: boolean
@@ -334,8 +329,6 @@ export type ExtensionState = Pick<
 	| "terminalZdotdir"
 	| "terminalCompressProgressBar"
 	| "diagnosticsEnabled"
-	| "diffEnabled"
-	| "fuzzyMatchThreshold"
 	| "language"
 	| "modeApiConfigs"
 	| "customModePrompts"
@@ -391,7 +384,7 @@ export type ExtensionState = Pick<
 
 	mode: string
 	customModes: ModeConfig[]
-	toolRequirements?: Record<string, boolean> // Map of tool names to their requirements (e.g. {"apply_diff": true} if diffEnabled)
+	toolRequirements?: Record<string, boolean> // Map of tool names to their requirements (e.g. {"apply_diff": true})
 
 	cwd?: string // Current working directory
 	telemetrySetting: TelemetrySetting
@@ -638,7 +631,6 @@ export interface WebviewMessage {
 		| "checkBranchWorktreeInclude"
 		| "createWorktreeInclude"
 		| "checkoutBranch"
-		| "mergeWorktree"
 	text?: string
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
@@ -735,8 +727,6 @@ export interface WebviewMessage {
 	worktreeCreateNewBranch?: boolean
 	worktreeForce?: boolean
 	worktreeNewWindow?: boolean
-	worktreeTargetBranch?: string
-	worktreeDeleteAfterMerge?: boolean
 	worktreeIncludeContent?: string
 }
 
