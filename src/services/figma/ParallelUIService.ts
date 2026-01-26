@@ -387,6 +387,56 @@ export class ParallelUIService {
 	}
 
 	/**
+	 * Get frame dimensions from Figma
+	 * Returns the width and height of the specified frame
+	 */
+	private async getFrameInfo(frameId: string): Promise<{ width: number; height: number; name: string } | null> {
+		if (!this.mcpHub || !this.activeFigmaServer) {
+			return null
+		}
+
+		try {
+			const { mappedName } = this.mapToolForServer("get_node", {})
+			const result = await this.mcpHub.callTool(this.activeFigmaServer, mappedName, { nodeId: frameId })
+
+			if (result.content) {
+				const textContent = result.content.find((c: { type: string }) => c.type === "text")
+				if (textContent && "text" in textContent) {
+					const text = textContent.text as string
+					try {
+						const data = JSON.parse(text)
+						// Handle different response formats
+						const node = data.node || data.result?.node || data
+						if (node) {
+							const width = node.width || node.absoluteBoundingBox?.width || 0
+							const height = node.height || node.absoluteBoundingBox?.height || 0
+							const name = node.name || "Unknown"
+							console.log(`[ParallelUI] Frame info for ${frameId}: ${name} (${width}x${height})`)
+							return { width, height, name }
+						}
+					} catch {
+						// Try regex extraction
+						const widthMatch = text.match(/"width"\s*:\s*(\d+(?:\.\d+)?)/i)
+						const heightMatch = text.match(/"height"\s*:\s*(\d+(?:\.\d+)?)/i)
+						const nameMatch = text.match(/"name"\s*:\s*"([^"]+)"/i)
+						if (widthMatch && heightMatch) {
+							const width = parseFloat(widthMatch[1])
+							const height = parseFloat(heightMatch[1])
+							const name = nameMatch ? nameMatch[1] : "Unknown"
+							console.log(`[ParallelUI] Frame info (regex) for ${frameId}: ${name} (${width}x${height})`)
+							return { width, height, name }
+						}
+					}
+				}
+			}
+		} catch (error) {
+			console.warn(`[ParallelUI] Failed to get frame info for ${frameId}:`, error)
+		}
+
+		return null
+	}
+
+	/**
 	 * Scan existing elements in a container to detect duplicates
 	 * Returns a list of text contents and frame names that already exist
 	 */
@@ -851,6 +901,15 @@ export class ParallelUIService {
 			)
 		}
 
+		// Get frame dimensions if containerFrame is provided
+		let frameInfo: { width: number; height: number; name: string } | null = null
+		if (containerFrame) {
+			frameInfo = await this.getFrameInfo(containerFrame)
+			if (frameInfo) {
+				console.log(`[ParallelUI] Container frame: "${frameInfo.name}" (${frameInfo.width}x${frameInfo.height})`)
+			}
+		}
+
 		// Filter out duplicate tasks BEFORE executing
 		const { filteredTasks, skippedTasks } = this.filterDuplicateTasks(tasks, existingElements)
 		if (skippedTasks.length > 0) {
@@ -901,9 +960,9 @@ export class ParallelUIService {
 		}
 
 		// Execute only non-duplicate tasks in parallel using sub-AI agents
-		// Pass existing elements info and color context so AI knows what already exists and color scheme
+		// Pass existing elements info, color context, and frame dimensions so AI knows boundaries
 		const taskPromises = filteredTasks.map((task) =>
-			this.executeSingleTask(task, onProgress, containerFrame, existingElements.texts, colorContext),
+			this.executeSingleTask(task, onProgress, containerFrame, existingElements.texts, colorContext, frameInfo),
 		)
 
 		const results = await Promise.all(taskPromises)
@@ -1237,6 +1296,7 @@ export class ParallelUIService {
 	/**
 	 * Execute a single UI task using an AI agent
 	 * @param colorContext Color scheme context containing all colors being used in this session
+	 * @param frameInfo Container frame dimensions to inform AI about boundaries
 	 */
 	private async executeSingleTask(
 		task: UITaskDefinition,
@@ -1244,6 +1304,7 @@ export class ParallelUIService {
 		containerFrame?: string,
 		existingElements?: string[],
 		colorContext?: { bgColors: string[]; textColors: string[] },
+		frameInfo?: { width: number; height: number; name: string } | null,
 	): Promise<UITaskResult> {
 		const startTime = Date.now()
 		const nodeIds: string[] = []
@@ -1251,8 +1312,8 @@ export class ParallelUIService {
 		try {
 			onProgress?.(task.id, "starting")
 
-			// Build the prompt for this specific task with color context
-			const taskPrompt = this.buildTaskPrompt(task, containerFrame, existingElements, colorContext)
+			// Build the prompt for this specific task with color context and frame info
+			const taskPrompt = this.buildTaskPrompt(task, containerFrame, existingElements, colorContext, frameInfo)
 
 			// Create API handler for this task
 			const api = buildApiHandler(this.apiConfiguration!)
@@ -1300,12 +1361,14 @@ export class ParallelUIService {
 	 * NOTE: Positions are now ABSOLUTE - we tell the sub-AI exactly where to place elements
 	 * If containerFrame is provided, elements will be created inside that frame
 	 * @param colorContext Optional color scheme context to inform the sub-AI about overall colors
+	 * @param frameInfo Optional frame dimensions to inform the sub-AI about boundaries
 	 */
 	private buildTaskPrompt(
 		task: UITaskDefinition,
 		containerFrame?: string,
 		existingElements?: string[],
 		colorContext?: { bgColors: string[]; textColors: string[] },
+		frameInfo?: { width: number; height: number; name: string } | null,
 	): string {
 		const width = task.designSpec?.width || 90
 		const height = task.designSpec?.height || 60
@@ -1341,6 +1404,16 @@ export class ParallelUIService {
 		// Simple, direct prompt with EXACT coordinates - sub-AI must use these exact values
 		// IMPORTANT: Use "radius" (not "cornerRadius") for TalkToFigma compatibility
 		let prompt = `Create a UI element "${textContent}" at EXACT position (${posX}, ${posY})\n\n`
+
+		// Add frame boundary information if available
+		if (frameInfo) {
+			prompt += `📐 **Container Frame Info (容器 Frame 資訊):**\n`
+			prompt += `- Frame name: "${frameInfo.name}"\n`
+			prompt += `- Frame size: ${frameInfo.width}px × ${frameInfo.height}px\n`
+			prompt += `- Valid X range: 0 to ${frameInfo.width - width} (your element width is ${width})\n`
+			prompt += `- Valid Y range: 0 to ${frameInfo.height - height} (your element height is ${height})\n`
+			prompt += `- ⚠️ IMPORTANT: All elements MUST be placed WITHIN these boundaries!\n\n`
+		}
 
 		// Add color context to inform sub-AI about the overall color scheme
 		if (colorContext && (colorContext.bgColors.length > 0 || colorContext.textColors.length > 0)) {
