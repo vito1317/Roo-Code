@@ -1078,11 +1078,53 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				!lastMessage.text.startsWith("{") // not a json object
 			) {
 				let text = lastMessage?.text || ""
+
+				// Filter out tool-related and technical content for TTS
+				// Skip messages that are primarily about tool operations
+				const toolPatterns = [
+					// Tool action indicators
+					/^(Let me|I'll|I'm going to|I will|Now I|First,? I|Next,? I).{0,30}(read|write|search|execute|run|check|look|find|create|edit|modify|delete|update|open|close|list|get|fetch|call|use)/i,
+					// Progress indicators
+					/^(Processing|Loading|Searching|Reading|Writing|Executing|Running|Checking|Looking|Finding|Creating|Editing|Modifying|Deleting|Updating|Fetching|Calling)/i,
+					// Chinese progress indicators
+					/^(正在|開始|準備|執行|讀取|寫入|搜尋|搜索|檢查|查找|建立|創建|編輯|修改|刪除|更新|獲取|調用)/,
+					// Status messages
+					/^(Done|Completed|Finished|Success|Failed|Error|Warning)/i,
+					// File path mentions (likely tool output)
+					/^(File|Path|Directory|Folder|Found|Located|Created|Modified|Deleted):/i,
+					// Command execution
+					/^(Running|Executing|Command|Terminal|Output|Result):/i,
+					// Short technical messages (less than 20 chars starting with emoji or special chars)
+					/^[🔍🔄✅❌⚠️📁📄💾🔧⏳✨🎨].{0,30}$/,
+					// MCP/API related
+					/^(MCP|API|Tool|Request|Response|Calling|Invoking)/i,
+					// Code-like content
+					/^```[\s\S]*```$/,
+					/^`[^`]+`$/,
+				]
+
+				// Check if the message matches any tool pattern
+				const isToolMessage = toolPatterns.some((pattern) => pattern.test(text.trim()))
+				if (isToolMessage) {
+					return // Skip TTS for tool-related messages
+				}
+
+				// Remove code blocks
+				text = text.replace(/```[\s\S]*?```/g, "")
+				// Remove inline code
+				text = text.replace(/`[^`]+`/g, "")
+				// Remove mermaid diagrams
 				const mermaidRegex = /```mermaid[\s\S]*?```/g
-				// remove mermaid diagrams from text
 				text = text.replace(mermaidRegex, "")
-				// remove markdown from text
+				// Remove markdown from text
 				text = removeMd(text)
+				// Remove leading/trailing whitespace
+				text = text.trim()
+
+				// Skip if text is too short after filtering (likely just emoji or punctuation)
+				if (text.length < 10) {
+					return
+				}
 
 				// ensure message is not a duplicate of last read message
 				if (text !== lastTtsRef.current) {
