@@ -133,10 +133,30 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 				return
 			}
 
-			// Determine which Figma server to use
-			const figmaServer = mcpHub
-				.getServers()
-				.find((s) => (s.name === "figma-write" || s.name === "TalkToFigma") && s.status === "connected")
+			// Determine which Figma server to use based on user settings
+			const state = await provider.getState()
+			const talkToFigmaEnabled = state.talkToFigmaEnabled ?? true  // Default true
+			const figmaWriteEnabled = state.figmaWriteEnabled ?? false   // Default false
+
+			const servers = mcpHub.getServers()
+			const talkToFigmaConnected = servers.find((s) => s.name === "TalkToFigma" && s.status === "connected")
+			const figmaWriteConnected = servers.find((s) => s.name === "figma-write" && s.status === "connected")
+
+			let figmaServer: typeof talkToFigmaConnected = undefined
+
+			// Use settings to determine preferred server
+			if (talkToFigmaEnabled && talkToFigmaConnected) {
+				figmaServer = talkToFigmaConnected
+			} else if (figmaWriteEnabled && figmaWriteConnected) {
+				figmaServer = figmaWriteConnected
+			} else if (talkToFigmaConnected) {
+				// Fallback: use TalkToFigma if connected
+				figmaServer = talkToFigmaConnected
+			} else if (figmaWriteConnected) {
+				// Fallback: use figma-write if connected
+				figmaServer = figmaWriteConnected
+			}
+
 			if (!figmaServer) {
 				pushToolResult(
 					formatResponse.toolError(
@@ -146,7 +166,7 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 				return
 			}
 			const serverName = figmaServer.name
-			console.log(`[AdjustLayout] Using Figma server: ${serverName}, AI mode: ${useAI}`)
+			console.log(`[AdjustLayout] Using Figma server: ${serverName} (settings: talkToFigma=${talkToFigmaEnabled}, figmaWrite=${figmaWriteEnabled}), AI mode: ${useAI}`)
 
 			// Helper to call Figma tools with server-appropriate mapping
 			const callFigmaTool = async (toolName: string, args: Record<string, unknown>) => {
@@ -154,9 +174,13 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 				const mappedArgs = { ...args }
 
 				if (serverName === "TalkToFigma") {
-					// Map tool names for TalkToFigma
+					// Map tool names for TalkToFigma based on MCP documentation
 					const toolMapping: Record<string, string> = {
 						set_position: "move_node",
+						find_nodes: "scan_nodes_by_types",
+						set_fill: "set_fill_color",
+						set_text_color: "set_fill_color",
+						add_text: "create_text",
 					}
 					mappedName = toolMapping[toolName] || toolName
 				}
@@ -967,13 +991,14 @@ ${JSON.stringify(elementDetails, null, 2)}
 
 		console.log(`[AdjustLayout] Button map keys: ${Array.from(buttonMap.keys()).join(", ")}`)
 
-		// Standard calculator layout rows - include variations
+		// Standard calculator layout rows - include many variations for flexibility
+		// The algorithm will try to match buttons in each row
 		const calcLayout = [
-			["C", "⌫", "±", "%", "÷"], // Function row (may have backspace)
-			["7", "8", "9", "×"], // Numbers row 1
+			["C", "AC", "CE", "⌫", "±", "%", "÷", "/"], // Function row (many variations)
+			["7", "8", "9", "×", "*", "x", "X"], // Numbers row 1 (include multiply variations)
 			["4", "5", "6", "-"], // Numbers row 2
 			["1", "2", "3", "+"], // Numbers row 3
-			["0", ".", "="], // Bottom row (0 is usually wider)
+			["0", ".", "="], // Bottom row (0 should span 2 columns)
 		]
 
 		const placedIds = new Set<string>()
@@ -1459,21 +1484,35 @@ ${JSON.stringify(elementDetails, null, 2)}
 		const minY = Math.min(...rectangles.map((r) => r.y))
 
 		// Display detection criteria:
-		// 1. Must be significantly wider than average (>= 2x for calculator displays)
-		// 2. Must be at or near the TOP of the layout (within 1.5x average height from minimum Y)
-		// 3. Should NOT be a typical button size (exclude "0" button which is just 2x width)
-		const displayThreshold = avgWidth * 2  // Increased from 1.5x to 2x
-		const topPositionThreshold = minY + avgHeight * 1.5  // Must be near the top
+		// 1. Must be significantly wider than average (>= 2.5x for calculator displays)
+		// 2. Must be at the VERY TOP of the layout (within 1x average height from minimum Y)
+		// 3. Must have display-like aspect ratio (much wider than tall)
+		// 4. Must NOT be at the bottom (the "0" button spans 2 columns but is NOT a display)
+		const displayThreshold = avgWidth * 2.5  // Must be much wider than buttons
+		const maxY = Math.max(...rectangles.map((r) => r.y))
+		const topPositionThreshold = minY + avgHeight * 1.0  // Must be at the very top
+		const bottomThreshold = maxY - avgHeight * 2  // Elements below this are "bottom row"
 
 		const displayRects = rectangles.filter((r) => {
 			const isWideEnough = r.width >= displayThreshold
 			const isAtTop = r.y <= topPositionThreshold
-			// Also check if it's much wider than tall (display aspect ratio)
+			const isNotAtBottom = r.y < bottomThreshold  // Exclude bottom row elements
+			// Display aspect ratio: much wider than tall (at least 3x)
 			const aspectRatio = r.width / r.height
-			const hasDisplayAspectRatio = aspectRatio > 3  // Displays are typically very wide
+			const hasDisplayAspectRatio = aspectRatio > 3
 
-			// Must be wide AND at top, OR have display-like aspect ratio AND at top
-			return isAtTop && (isWideEnough || hasDisplayAspectRatio)
+			// For calculator: display must be BOTH wide AND at top AND not at bottom
+			// The "0" button is wide but at the BOTTOM - so we exclude it
+			const isDisplay = isAtTop && isNotAtBottom && (isWideEnough || hasDisplayAspectRatio)
+
+			if (r.width > avgWidth * 1.8) {
+				console.log(
+					`[AdjustLayout] Wide rect check: y=${r.y}, minY=${minY}, maxY=${maxY}, ` +
+						`isAtTop=${isAtTop}, isNotAtBottom=${isNotAtBottom}, aspect=${aspectRatio.toFixed(1)}, isDisplay=${isDisplay}`,
+				)
+			}
+
+			return isDisplay
 		})
 
 		const buttonRects = rectangles.filter((r) => !displayRects.includes(r))

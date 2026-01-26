@@ -145,26 +145,7 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 
 			task.consecutiveMistakeCount = 0
 
-			// Show approval message
-			const callSummary = parsedCalls
-				.map((c, i) => `${i + 1}. ${c.tool}(${JSON.stringify(c.args).substring(0, 50)}...)`)
-				.join("\n")
-
-			const toolMessage = JSON.stringify({
-				tool: "parallelMcpCalls",
-				server: params.server,
-				callCount: parsedCalls.length,
-				calls: callSummary,
-			})
-
-			await task.say("text", `🔄 Executing ${parsedCalls.length} MCP calls in parallel on "${params.server}":\n${callSummary}`)
-
-			const didApprove = await askApproval("tool", toolMessage)
-			if (!didApprove) {
-				return
-			}
-
-			// Get McpHub
+			// Get McpHub early so we can determine actual server
 			const provider = task.providerRef.deref()
 			if (!provider) {
 				pushToolResult(formatResponse.toolError("Provider reference lost"))
@@ -174,6 +155,96 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 			const mcpHub = provider.getMcpHub?.()
 			if (!mcpHub) {
 				pushToolResult(formatResponse.toolError("McpHub not available"))
+				return
+			}
+
+			// Determine actual server to use based on settings (for Figma servers)
+			let actualServer = params.server
+			const isFigmaServer = params.server === "figma-write" || params.server === "TalkToFigma" || params.server?.toLowerCase().includes("figma")
+
+			if (isFigmaServer) {
+				// Get user settings to determine preferred Figma server
+				const state = await provider.getState()
+				const talkToFigmaEnabled = state.talkToFigmaEnabled ?? true  // Default true
+				const figmaWriteEnabled = state.figmaWriteEnabled ?? false   // Default false
+
+				const servers = mcpHub.getServers()
+				const talkToFigmaConnected = servers.some((s) => s.name === "TalkToFigma" && s.status === "connected")
+				const figmaWriteConnected = servers.some((s) => s.name === "figma-write" && s.status === "connected")
+
+				// Use settings to determine preferred server
+				if (talkToFigmaEnabled && talkToFigmaConnected) {
+					actualServer = "TalkToFigma"
+				} else if (figmaWriteEnabled && figmaWriteConnected) {
+					actualServer = "figma-write"
+				} else if (talkToFigmaConnected) {
+					// Fallback: use TalkToFigma if connected
+					actualServer = "TalkToFigma"
+				} else if (figmaWriteConnected) {
+					// Fallback: use figma-write if connected
+					actualServer = "figma-write"
+				}
+
+				if (actualServer !== params.server) {
+					console.log(`[ParallelMcpCalls] Using ${actualServer} instead of requested ${params.server} (based on settings)`)
+				}
+			}
+
+			// Tool name mapping between figma-write and TalkToFigma
+			// Based on TalkToFigma MCP documentation
+			const figmaWriteToTalkToFigma: Record<string, string> = {
+				// Position/Movement
+				set_position: "move_node",
+				// Colors
+				set_fill: "set_fill_color",
+				set_text_color: "set_fill_color", // TalkToFigma uses set_fill_color for text color too
+				// Text creation
+				add_text: "create_text",
+				// Document info
+				get_file_url: "get_document_info",
+				// Node scanning
+				find_nodes: "scan_nodes_by_types",
+			}
+			const talkToFigmaToFigmaWrite: Record<string, string> = {
+				// Position/Movement
+				move_node: "set_position",
+				// Colors
+				set_fill_color: "set_fill",
+				// Text creation
+				create_text: "add_text",
+				// Document info
+				get_document_info: "get_file_url",
+				// Node scanning
+				scan_nodes_by_types: "find_nodes",
+			}
+
+			// Map tool name based on actual server
+			const mapToolName = (toolName: string): string => {
+				if (actualServer === "TalkToFigma" && figmaWriteToTalkToFigma[toolName]) {
+					return figmaWriteToTalkToFigma[toolName]
+				}
+				if (actualServer === "figma-write" && talkToFigmaToFigmaWrite[toolName]) {
+					return talkToFigmaToFigmaWrite[toolName]
+				}
+				return toolName
+			}
+
+			// Show approval message
+			const callSummary = parsedCalls
+				.map((c, i) => `${i + 1}. ${mapToolName(c.tool)}(${JSON.stringify(c.args).substring(0, 50)}...)`)
+				.join("\n")
+
+			const toolMessage = JSON.stringify({
+				tool: "parallelMcpCalls",
+				server: actualServer,
+				callCount: parsedCalls.length,
+				calls: callSummary,
+			})
+
+			await task.say("text", `🔄 Executing ${parsedCalls.length} MCP calls in parallel on "${actualServer}":\n${callSummary}`)
+
+			const didApprove = await askApproval("tool", toolMessage)
+			if (!didApprove) {
 				return
 			}
 
@@ -200,18 +271,19 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 				const batchResults = await Promise.all(
 					batch.map(async (call, localIndex) => {
 						const globalIndex = batchStart + localIndex
+						const mappedToolName = mapToolName(call.tool)
 						try {
-							const result = await mcpHub.callTool(params.server, call.tool, call.args)
+							const result = await mcpHub.callTool(actualServer, mappedToolName, call.args)
 							return {
 								index: globalIndex,
-								tool: call.tool,
+								tool: mappedToolName,
 								success: true,
 								result,
 							}
 						} catch (error) {
 							return {
 								index: globalIndex,
-								tool: call.tool,
+								tool: mappedToolName,
 								success: false,
 								error: error instanceof Error ? error.message : String(error),
 							}

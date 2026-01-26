@@ -66,24 +66,47 @@ export class AdjustLayoutTool extends BaseTool {
                 pushToolResult(formatResponse.toolError("McpHub not available"));
                 return;
             }
-            // Determine which Figma server to use
-            const figmaServer = mcpHub
-                .getServers()
-                .find((s) => (s.name === "figma-write" || s.name === "TalkToFigma") && s.status === "connected");
+            // Determine which Figma server to use based on user settings
+            const state = await provider.getState();
+            const talkToFigmaEnabled = state.talkToFigmaEnabled ?? true; // Default true
+            const figmaWriteEnabled = state.figmaWriteEnabled ?? false; // Default false
+            const servers = mcpHub.getServers();
+            const talkToFigmaConnected = servers.find((s) => s.name === "TalkToFigma" && s.status === "connected");
+            const figmaWriteConnected = servers.find((s) => s.name === "figma-write" && s.status === "connected");
+            let figmaServer = undefined;
+            // Use settings to determine preferred server
+            if (talkToFigmaEnabled && talkToFigmaConnected) {
+                figmaServer = talkToFigmaConnected;
+            }
+            else if (figmaWriteEnabled && figmaWriteConnected) {
+                figmaServer = figmaWriteConnected;
+            }
+            else if (talkToFigmaConnected) {
+                // Fallback: use TalkToFigma if connected
+                figmaServer = talkToFigmaConnected;
+            }
+            else if (figmaWriteConnected) {
+                // Fallback: use figma-write if connected
+                figmaServer = figmaWriteConnected;
+            }
             if (!figmaServer) {
                 pushToolResult(formatResponse.toolError("No Figma MCP server connected. Please ensure figma-write or TalkToFigma is running."));
                 return;
             }
             const serverName = figmaServer.name;
-            console.log(`[AdjustLayout] Using Figma server: ${serverName}, AI mode: ${useAI}`);
+            console.log(`[AdjustLayout] Using Figma server: ${serverName} (settings: talkToFigma=${talkToFigmaEnabled}, figmaWrite=${figmaWriteEnabled}), AI mode: ${useAI}`);
             // Helper to call Figma tools with server-appropriate mapping
             const callFigmaTool = async (toolName, args) => {
                 let mappedName = toolName;
                 const mappedArgs = { ...args };
                 if (serverName === "TalkToFigma") {
-                    // Map tool names for TalkToFigma
+                    // Map tool names for TalkToFigma based on MCP documentation
                     const toolMapping = {
                         set_position: "move_node",
+                        find_nodes: "scan_nodes_by_types",
+                        set_fill: "set_fill_color",
+                        set_text_color: "set_fill_color",
+                        add_text: "create_text",
                     };
                     mappedName = toolMapping[toolName] || toolName;
                 }
@@ -92,19 +115,20 @@ export class AdjustLayoutTool extends BaseTool {
             // Get nodes to arrange
             let nodes = [];
             let containerInfo = { width: 400, height: 600 };
+            // Parse nodeIds if provided
+            let nodeIds = [];
             if (params.nodeIds) {
-                // Parse provided node IDs
-                let nodeIds;
                 try {
                     nodeIds = JSON.parse(params.nodeIds);
+                    // Filter out empty strings and invalid IDs
+                    nodeIds = nodeIds.filter((id) => id && typeof id === "string" && id.trim().length > 0);
                 }
                 catch {
-                    task.consecutiveMistakeCount++;
-                    task.recordToolError("adjust_layout");
-                    task.didToolFailInCurrentTurn = true;
-                    pushToolResult(formatResponse.toolError("Invalid nodeIds format. Expected JSON array."));
-                    return;
+                    console.warn("[AdjustLayout] Invalid nodeIds format, will try 'within' parameter");
                 }
+            }
+            // Use nodeIds if we have valid IDs, otherwise fallback to 'within'
+            if (nodeIds.length > 0) {
                 await task.say("text", `🔍 正在獲取 ${nodeIds.length} 個節點的資訊...`);
                 if (serverName === "TalkToFigma") {
                     const result = await callFigmaTool("get_nodes_info", { nodeIds });
@@ -150,7 +174,19 @@ export class AdjustLayoutTool extends BaseTool {
                 return;
             }
             if (nodes.length === 0) {
-                pushToolResult(formatResponse.toolResult("No nodes found to arrange."));
+                // Provide more helpful error message
+                let helpMsg = "No nodes found to arrange.\n\n" +
+                    "Tips:\n" +
+                    "1. Make sure you provide a valid 'within' parameter (container frame ID)\n" +
+                    "2. Or provide 'nodeIds' with valid node IDs from previous create operations\n" +
+                    "3. Use TalkToFigma's get_selection or get_document_info to find frame IDs";
+                if (params.within) {
+                    helpMsg += `\n\nYou provided within="${params.within}" but no children were found. The frame might be empty or the ID might be incorrect.`;
+                }
+                if (params.nodeIds) {
+                    helpMsg += `\n\nYou provided nodeIds but the array was empty or contained invalid IDs.`;
+                }
+                pushToolResult(formatResponse.toolResult(helpMsg));
                 return;
             }
             task.consecutiveMistakeCount = 0;
@@ -279,7 +315,47 @@ export class AdjustLayoutTool extends BaseTool {
             let aiPositions = await this.getAIPositionDecisions(task, aiPrompt, allElements, context);
             // Apply boundary checking to ensure elements stay within container
             aiPositions = this.clampPositionsToContainer(aiPositions, allElements.map((e) => ({ id: e.id, width: e.width, height: e.height })), context.containerWidth, context.containerHeight, context.startX);
-            await task.say("text", `🎯 AI 已決定 ${aiPositions.length} 個元素的位置，開始執行...`);
+            await task.say("text", `🎯 AI 已決定 ${aiPositions.length} 個元素的位置...`);
+            // If adjustColors is enabled, extract and show color info for approval
+            let colorInfoList = [];
+            if (adjustColors) {
+                await task.say("text", `🎨 正在提取顏色資訊以供審批...`);
+                // Collect all nodes for color extraction
+                const allNodes = [
+                    ...display.map((d) => d.rect),
+                    ...display.filter((d) => d.text).map((d) => d.text),
+                    ...paired.map((p) => p.rect),
+                    ...paired.map((p) => p.text),
+                    ...standalone,
+                ];
+                colorInfoList = await this.extractColorInfo(mcpHub, serverName, allNodes);
+                if (colorInfoList.length > 0) {
+                    const colorSummary = this.buildColorSummary(colorInfoList);
+                    // Show color info and ask for approval
+                    const colorApprovalMessage = JSON.stringify({
+                        tool: "colorApproval",
+                        action: "審批顏色 (Color Approval)",
+                        colors: colorInfoList.map((c) => ({
+                            name: c.nodeName,
+                            type: c.nodeType,
+                            bg: c.backgroundColor,
+                            text: c.textColor,
+                        })),
+                    });
+                    await task.say("text", `🎨 **顏色審批 (Color Approval)**\n\n` +
+                        colorSummary +
+                        `\n請確認以上顏色是否正確。如需調整顏色，請取消並指定新的顏色。`);
+                    // Ask for color approval
+                    const colorApproved = await task.ask("tool", colorApprovalMessage);
+                    if (colorApproved.response !== "yesButtonClicked") {
+                        await task.say("text", `❌ 顏色審批被取消，請重新指定顏色後再試。`);
+                        pushToolResult(formatResponse.toolResult(`Color approval was cancelled. Please specify the desired colors and try again.`));
+                        return;
+                    }
+                    await task.say("text", `✅ 顏色已審批通過，繼續執行佈局調整...`);
+                }
+            }
+            await task.say("text", `🚀 開始執行佈局調整...`);
             // Execute all position changes
             const calls = [];
             for (const pos of aiPositions) {
@@ -523,6 +599,95 @@ ${JSON.stringify(elementDetails, null, 2)}
         return this.calculateFallbackPositions(elements, context);
     }
     /**
+     * Extract color information from Figma nodes for color approval
+     * Queries the Figma API to get fill colors from rectangles and text colors from text nodes
+     */
+    async extractColorInfo(mcpHub, serverName, nodes) {
+        const colors = [];
+        for (const node of nodes) {
+            try {
+                // Get detailed node info including fills
+                const result = await mcpHub.callTool(serverName, "get_node_info", { nodeId: node.id });
+                let nodeData = null;
+                if (typeof result === "string") {
+                    nodeData = JSON.parse(result);
+                }
+                else if (result?.content) {
+                    const textContent = result.content.find((c) => c.type === "text");
+                    if (textContent?.text) {
+                        nodeData = JSON.parse(textContent.text);
+                    }
+                }
+                if (nodeData) {
+                    const colorInfo = {
+                        nodeId: node.id,
+                        nodeName: node.name,
+                        nodeType: node.type,
+                    };
+                    // Extract fill color for rectangles
+                    if (node.type === "RECTANGLE" && nodeData.fills && Array.isArray(nodeData.fills)) {
+                        const solidFill = nodeData.fills.find((f) => f.type === "SOLID" && f.visible !== false);
+                        if (solidFill?.color) {
+                            const { r, g, b } = solidFill.color;
+                            colorInfo.backgroundColor = this.rgbToHex(r, g, b);
+                        }
+                    }
+                    // Extract text color
+                    if (node.type === "TEXT" && nodeData.fills && Array.isArray(nodeData.fills)) {
+                        const solidFill = nodeData.fills.find((f) => f.type === "SOLID" && f.visible !== false);
+                        if (solidFill?.color) {
+                            const { r, g, b } = solidFill.color;
+                            colorInfo.textColor = this.rgbToHex(r, g, b);
+                        }
+                    }
+                    if (colorInfo.backgroundColor || colorInfo.textColor) {
+                        colors.push(colorInfo);
+                    }
+                }
+            }
+            catch (error) {
+                console.warn(`[AdjustLayout] Failed to extract color for node ${node.id}:`, error);
+            }
+        }
+        return colors;
+    }
+    /**
+     * Convert RGB values (0-1) to hex color string
+     */
+    rgbToHex(r, g, b) {
+        const toHex = (v) => {
+            const hex = Math.round(v * 255).toString(16);
+            return hex.length === 1 ? "0" + hex : hex;
+        };
+        return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+    }
+    /**
+     * Build color summary for approval message
+     */
+    buildColorSummary(colors) {
+        const bgColors = colors.filter(c => c.backgroundColor);
+        const textColors = colors.filter(c => c.textColor);
+        let summary = "## 當前顏色資訊 (Current Colors)\n\n";
+        if (bgColors.length > 0) {
+            summary += "**背景顏色 (Background Colors):**\n";
+            const uniqueBg = [...new Set(bgColors.map(c => c.backgroundColor))];
+            uniqueBg.forEach(color => {
+                const count = bgColors.filter(c => c.backgroundColor === color).length;
+                summary += `- ${color} (${count} 個元素)\n`;
+            });
+            summary += "\n";
+        }
+        if (textColors.length > 0) {
+            summary += "**文字顏色 (Text Colors):**\n";
+            const uniqueText = [...new Set(textColors.map(c => c.textColor))];
+            uniqueText.forEach(color => {
+                const count = textColors.filter(c => c.textColor === color).length;
+                summary += `- ${color} (${count} 個文字)\n`;
+            });
+        }
+        return summary;
+    }
+    /**
      * Calculate fallback positions using standard calculator layout
      * Handles various button text representations (×/*, ÷//, etc.)
      */
@@ -574,13 +739,14 @@ ${JSON.stringify(elementDetails, null, 2)}
             }
         }
         console.log(`[AdjustLayout] Button map keys: ${Array.from(buttonMap.keys()).join(", ")}`);
-        // Standard calculator layout rows - include variations
+        // Standard calculator layout rows - include many variations for flexibility
+        // The algorithm will try to match buttons in each row
         const calcLayout = [
-            ["C", "⌫", "±", "%", "÷"], // Function row (may have backspace)
-            ["7", "8", "9", "×"], // Numbers row 1
+            ["C", "AC", "CE", "⌫", "±", "%", "÷", "/"], // Function row (many variations)
+            ["7", "8", "9", "×", "*", "x", "X"], // Numbers row 1 (include multiply variations)
             ["4", "5", "6", "-"], // Numbers row 2
             ["1", "2", "3", "+"], // Numbers row 3
-            ["0", ".", "="], // Bottom row (0 is usually wider)
+            ["0", ".", "="], // Bottom row (0 should span 2 columns)
         ];
         const placedIds = new Set();
         for (const row of calcLayout) {
@@ -663,6 +829,8 @@ ${JSON.stringify(elementDetails, null, 2)}
             gapY: context.gapY,
             startX: context.startX,
             startY: context.startY,
+            containerWidth: context.containerWidth,
+            containerHeight: context.containerHeight,
         });
         // Build element size map for boundary checking
         const allElements = [
@@ -674,6 +842,9 @@ ${JSON.stringify(elementDetails, null, 2)}
         ];
         // Apply boundary checking to ensure elements stay within container
         positions = this.clampPositionsToContainer(positions, allElements, context.containerWidth, context.containerHeight, context.startX);
+        // Note: We no longer resize buttons here as it causes "squeeze" issues.
+        // Instead, positions are calculated to fit within container bounds (see calculatePairedPositions).
+        // If buttons still exceed bounds, the clampPositionsToContainer will keep them inside.
         // Execute position changes in batches
         let successCount = 0;
         let failedCount = 0;
@@ -827,10 +998,23 @@ ${JSON.stringify(elementDetails, null, 2)}
                     content = textContent?.text;
                 }
             }
-            if (!content)
+            if (!content) {
+                console.warn("[AdjustLayout] No content in get_node_info result");
                 return { nodes: [], duplicateIds: [] };
+            }
+            console.log("[AdjustLayout] Parsing node info content:", content.substring(0, 500));
             const parsed = JSON.parse(content);
-            const children = parsed.children || parsed.result?.children || [];
+            // Try multiple paths to find children (TalkToFigma might use different response formats)
+            let children = parsed.children || parsed.result?.children || parsed.node?.children || [];
+            // If still no children, check if this is a different response format
+            if (!Array.isArray(children) || children.length === 0) {
+                // Some MCP servers return the node directly without wrapping
+                if (parsed.type && parsed.id) {
+                    // This is the node itself, not wrapped - children should be at top level
+                    children = parsed.children || [];
+                }
+                console.log("[AdjustLayout] Children search - found:", Array.isArray(children) ? children.length : "not array", "keys in parsed:", Object.keys(parsed).join(", "));
+            }
             if (!Array.isArray(children))
                 return { nodes: [], duplicateIds: [] };
             // Parse all children with correct position extraction
@@ -879,10 +1063,12 @@ ${JSON.stringify(elementDetails, null, 2)}
     }
     /**
      * Clamp positions to stay within container bounds
-     * Ensures elements don't exceed the container boundaries
+     * Only clamps X (horizontal) positions to prevent buttons from exceeding container width.
+     * Y positions are NOT clamped to avoid "squeezing" buttons vertically when container isn't tall enough.
      * Works with both { id, x, y } and { nodeId, x, y } formats
      */
-    clampPositionsToContainer(positions, elements, containerWidth, containerHeight, margin = 10) {
+    clampPositionsToContainer(positions, elements, containerWidth, _containerHeight, // Not used - we don't clamp Y to avoid squeeze
+    margin = 10) {
         // Build element map that works with both id and nodeId
         const elementMap = new Map();
         for (const e of elements) {
@@ -896,16 +1082,14 @@ ${JSON.stringify(elementDetails, null, 2)}
             const element = elementMap.get(posId);
             if (!element)
                 return pos;
-            // Clamp X: ensure element stays within container (with margin)
+            // Only clamp X: ensure element stays within container width (with margin)
+            // We do NOT clamp Y because it causes elements to overlap ("squeeze") when container isn't tall enough
             const maxX = containerWidth - element.width - margin;
             const clampedX = Math.max(margin, Math.min(pos.x, maxX));
-            // Clamp Y: ensure element stays within container (with margin)
-            const maxY = containerHeight - element.height - margin;
-            const clampedY = Math.max(margin, Math.min(pos.y, maxY));
-            if (clampedX !== pos.x || clampedY !== pos.y) {
-                console.log(`[AdjustLayout] Clamped ${posId}: (${pos.x}, ${pos.y}) -> (${clampedX}, ${clampedY})`);
+            if (clampedX !== pos.x) {
+                console.log(`[AdjustLayout] Clamped X for ${posId}: ${pos.x} -> ${clampedX}`);
             }
-            return { ...pos, x: clampedX, y: clampedY };
+            return { ...pos, x: clampedX, y: pos.y };
         });
     }
     /**
@@ -955,19 +1139,29 @@ ${JSON.stringify(elementDetails, null, 2)}
         const avgHeight = rectangles.reduce((sum, r) => sum + r.height, 0) / rectangles.length;
         const minY = Math.min(...rectangles.map((r) => r.y));
         // Display detection criteria:
-        // 1. Must be significantly wider than average (>= 2x for calculator displays)
-        // 2. Must be at or near the TOP of the layout (within 1.5x average height from minimum Y)
-        // 3. Should NOT be a typical button size (exclude "0" button which is just 2x width)
-        const displayThreshold = avgWidth * 2; // Increased from 1.5x to 2x
-        const topPositionThreshold = minY + avgHeight * 1.5; // Must be near the top
+        // 1. Must be significantly wider than average (>= 2.5x for calculator displays)
+        // 2. Must be at the VERY TOP of the layout (within 1x average height from minimum Y)
+        // 3. Must have display-like aspect ratio (much wider than tall)
+        // 4. Must NOT be at the bottom (the "0" button spans 2 columns but is NOT a display)
+        const displayThreshold = avgWidth * 2.5; // Must be much wider than buttons
+        const maxY = Math.max(...rectangles.map((r) => r.y));
+        const topPositionThreshold = minY + avgHeight * 1.0; // Must be at the very top
+        const bottomThreshold = maxY - avgHeight * 2; // Elements below this are "bottom row"
         const displayRects = rectangles.filter((r) => {
             const isWideEnough = r.width >= displayThreshold;
             const isAtTop = r.y <= topPositionThreshold;
-            // Also check if it's much wider than tall (display aspect ratio)
+            const isNotAtBottom = r.y < bottomThreshold; // Exclude bottom row elements
+            // Display aspect ratio: much wider than tall (at least 3x)
             const aspectRatio = r.width / r.height;
-            const hasDisplayAspectRatio = aspectRatio > 3; // Displays are typically very wide
-            // Must be wide AND at top, OR have display-like aspect ratio AND at top
-            return isAtTop && (isWideEnough || hasDisplayAspectRatio);
+            const hasDisplayAspectRatio = aspectRatio > 3;
+            // For calculator: display must be BOTH wide AND at top AND not at bottom
+            // The "0" button is wide but at the BOTTOM - so we exclude it
+            const isDisplay = isAtTop && isNotAtBottom && (isWideEnough || hasDisplayAspectRatio);
+            if (r.width > avgWidth * 1.8) {
+                console.log(`[AdjustLayout] Wide rect check: y=${r.y}, minY=${minY}, maxY=${maxY}, ` +
+                    `isAtTop=${isAtTop}, isNotAtBottom=${isNotAtBottom}, aspect=${aspectRatio.toFixed(1)}, isDisplay=${isDisplay}`);
+            }
+            return isDisplay;
         });
         const buttonRects = rectangles.filter((r) => !displayRects.includes(r));
         console.log(`[AdjustLayout] Avg size: ${avgWidth}x${avgHeight}, Min Y: ${minY}`);
@@ -1084,7 +1278,7 @@ ${JSON.stringify(elementDetails, null, 2)}
      * Arranges buttons according to standard calculator layout based on their text content
      */
     calculatePairedPositions(paired, standalone, display, options) {
-        const { layout, columns, gapX, gapY, startX, startY } = options;
+        const { layout, columns, gapX, gapY, startX, startY, containerWidth, containerHeight } = options;
         const positions = [];
         let currentY = startY;
         // 1. Position display elements first (at top, full width)
@@ -1099,9 +1293,21 @@ ${JSON.stringify(elementDetails, null, 2)}
         }
         // 2. Position buttons below display(s) using calculator-aware layout
         const buttonStartY = currentY;
-        // Get typical button size
-        const btnWidth = paired[0]?.rect.width || 60;
+        // Get typical button size - but if we have container width, calculate to fit
+        let btnWidth = paired[0]?.rect.width || 60;
         const btnHeight = paired[0]?.rect.height || 60;
+        // Calculate maximum button width to ensure all buttons fit within container
+        if (containerWidth) {
+            const availableWidth = containerWidth - (2 * startX); // Account for left and right margins
+            const maxBtnWidthForColumns = Math.floor((availableWidth - (columns - 1) * gapX) / columns);
+            // Use the smaller of actual button width or max calculated width
+            if (btnWidth > maxBtnWidthForColumns) {
+                console.log(`[AdjustLayout] Button width ${btnWidth}px exceeds available space. ` +
+                    `Container: ${containerWidth}px, columns: ${columns}, gap: ${gapX}px. ` +
+                    `Adjusting to ${maxBtnWidthForColumns}px per button.`);
+                btnWidth = maxBtnWidthForColumns;
+            }
+        }
         // Build a map of buttons by their normalized text content
         const buttonMap = new Map();
         for (const pair of paired) {

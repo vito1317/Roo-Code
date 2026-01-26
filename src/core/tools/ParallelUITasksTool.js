@@ -331,18 +331,35 @@ export class ParallelUITasksTool extends BaseTool {
             const maxColumnsByCount = isSmallElements ? 6 : 4;
             const optimalColumns = Math.min(Math.ceil(Math.sqrt(taskCount)), maxColumnsByCount, Math.max(1, maxColumnsByWidth));
             const GRID_COLUMNS = optimalColumns;
+            // IMPORTANT: Adjust button sizes if they don't fit within the container
+            // This prevents buttons from exceeding frame boundaries
+            const totalWidthNeeded = GRID_COLUMNS * avgTaskWidth + (GRID_COLUMNS - 1) * GAP;
+            let adjustedTaskWidth = avgTaskWidth;
+            if (totalWidthNeeded > availableWidth && GRID_COLUMNS > 0) {
+                // Calculate the maximum width per button that fits
+                adjustedTaskWidth = Math.floor((availableWidth - (GRID_COLUMNS - 1) * GAP) / GRID_COLUMNS);
+                console.log(`[ParallelUI] Button width adjusted: ${avgTaskWidth}px -> ${adjustedTaskWidth}px to fit ${GRID_COLUMNS} columns in ${availableWidth}px`);
+                // Update all task specs with adjusted width
+                for (const t of parsedTasks) {
+                    if (t.designSpec) {
+                        t.designSpec.width = adjustedTaskWidth;
+                    }
+                }
+            }
             // Start position: relative to frame (0,0) with padding, or absolute for no frame
             const START_X = hasContainerFrame ? FRAME_PADDING : 20;
             const START_Y = hasContainerFrame ? FRAME_PADDING : 20;
+            // Recalculate cell width with adjusted task width
+            const ADJUSTED_CELL_WIDTH = adjustedTaskWidth + GAP;
             // Calculate total grid size for logging
-            const gridWidth = GRID_COLUMNS * CELL_WIDTH + FRAME_PADDING;
+            const gridWidth = GRID_COLUMNS * ADJUSTED_CELL_WIDTH + FRAME_PADDING;
             const gridHeight = Math.ceil(taskCount / GRID_COLUMNS) * CELL_HEIGHT + FRAME_PADDING;
-            console.log(`[ParallelUI] Dynamic layout: ${GRID_COLUMNS} columns (max by width: ${maxColumnsByWidth}), cell=${CELL_WIDTH}x${CELL_HEIGHT}px, element=${avgTaskWidth}x${avgTaskHeight}px, grid=${gridWidth}x${gridHeight}px, frameWidth=${estimatedFrameWidth}, tasks=${taskCount}`);
+            console.log(`[ParallelUI] Dynamic layout: ${GRID_COLUMNS} columns (max by width: ${maxColumnsByWidth}), cell=${ADJUSTED_CELL_WIDTH}x${CELL_HEIGHT}px, element=${adjustedTaskWidth}x${avgTaskHeight}px, grid=${gridWidth}x${gridHeight}px, frameWidth=${estimatedFrameWidth}, tasks=${taskCount}`);
             // Show approval message with position and color info
             const taskSummary = parsedTasks
                 .map((t, i) => {
                 const pos = t.position || {
-                    x: START_X + (i % GRID_COLUMNS) * CELL_WIDTH,
+                    x: START_X + (i % GRID_COLUMNS) * ADJUSTED_CELL_WIDTH,
                     y: START_Y + Math.floor(i / GRID_COLUMNS) * CELL_HEIGHT,
                 };
                 const colorInfo = t.designSpec?.colors?.[0] ? ` 🎨 ${t.designSpec.colors[0]}` : "";
@@ -355,7 +372,7 @@ export class ParallelUITasksTool extends BaseTool {
                 taskCount: parsedTasks.length,
                 tasks: taskSummary,
             });
-            await task.say("text", `🎨 Starting ${parsedTasks.length} parallel UI drawing tasks:\n${taskSummary}\n\n📍 Grid layout: ${GRID_COLUMNS} columns, ${CELL_WIDTH}x${CELL_HEIGHT}px cells`);
+            await task.say("text", `🎨 Starting ${parsedTasks.length} parallel UI drawing tasks:\n${taskSummary}\n\n📍 Grid layout: ${GRID_COLUMNS} columns, ${ADJUSTED_CELL_WIDTH}x${CELL_HEIGHT}px cells`);
             const didApprove = await askApproval("tool", toolMessage);
             if (!didApprove) {
                 return;
@@ -375,18 +392,35 @@ export class ParallelUITasksTool extends BaseTool {
             }
             // Get McpHub for Figma tool calls
             const mcpHub = provider.getMcpHub?.();
-            service.configure(state.apiConfiguration, provider.context?.extensionPath || "", mcpHub);
-            // Determine which Figma server to use
-            let figmaServerName = "figma-write";
+            service.configure(state.apiConfiguration, provider.context?.extensionPath || "", mcpHub, {
+                talkToFigmaEnabled: state.talkToFigmaEnabled ?? true,
+                figmaWriteEnabled: state.figmaWriteEnabled ?? false,
+            });
+            // Determine which Figma server to use based on user settings
+            const talkToFigmaEnabled = state.talkToFigmaEnabled ?? true; // Default true
+            const figmaWriteEnabled = state.figmaWriteEnabled ?? false; // Default false
+            let figmaServerName = "TalkToFigma";
             if (mcpHub) {
-                const figmaServer = mcpHub
-                    .getServers()
-                    .find((s) => (s.name === "figma-write" || s.name === "TalkToFigma") && s.status === "connected");
-                if (figmaServer) {
-                    figmaServerName = figmaServer.name;
+                const servers = mcpHub.getServers();
+                const talkToFigmaConnected = servers.find((s) => s.name === "TalkToFigma" && s.status === "connected");
+                const figmaWriteConnected = servers.find((s) => s.name === "figma-write" && s.status === "connected");
+                // Use settings to determine preferred server
+                if (talkToFigmaEnabled && talkToFigmaConnected) {
+                    figmaServerName = "TalkToFigma";
+                }
+                else if (figmaWriteEnabled && figmaWriteConnected) {
+                    figmaServerName = "figma-write";
+                }
+                else if (talkToFigmaConnected) {
+                    // Fallback: use TalkToFigma if connected
+                    figmaServerName = "TalkToFigma";
+                }
+                else if (figmaWriteConnected) {
+                    // Fallback: use figma-write if connected
+                    figmaServerName = "figma-write";
                 }
             }
-            console.log(`[ParallelUITasksTool] Using Figma server: ${figmaServerName}`);
+            console.log(`[ParallelUITasksTool] Using Figma server: ${figmaServerName} (settings: talkToFigma=${talkToFigmaEnabled}, figmaWrite=${figmaWriteEnabled})`);
             // Coerce argument types to numbers where needed
             const coerceArgumentTypes = (tool, args) => {
                 const result = { ...args };

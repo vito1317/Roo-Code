@@ -515,19 +515,35 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 			// Get McpHub for Figma tool calls
 			const mcpHub = provider.getMcpHub?.()
 
-			service.configure(state.apiConfiguration, provider.context?.extensionPath || "", mcpHub)
+			service.configure(state.apiConfiguration, provider.context?.extensionPath || "", mcpHub, {
+				talkToFigmaEnabled: state.talkToFigmaEnabled ?? true,
+				figmaWriteEnabled: state.figmaWriteEnabled ?? false,
+			})
 
-			// Determine which Figma server to use
-			let figmaServerName = "figma-write"
+			// Determine which Figma server to use based on user settings
+			const talkToFigmaEnabled = state.talkToFigmaEnabled ?? true  // Default true
+			const figmaWriteEnabled = state.figmaWriteEnabled ?? false   // Default false
+
+			let figmaServerName = "TalkToFigma"
 			if (mcpHub) {
-				const figmaServer = mcpHub
-					.getServers()
-					.find((s) => (s.name === "figma-write" || s.name === "TalkToFigma") && s.status === "connected")
-				if (figmaServer) {
-					figmaServerName = figmaServer.name
+				const servers = mcpHub.getServers()
+				const talkToFigmaConnected = servers.find((s) => s.name === "TalkToFigma" && s.status === "connected")
+				const figmaWriteConnected = servers.find((s) => s.name === "figma-write" && s.status === "connected")
+
+				// Use settings to determine preferred server
+				if (talkToFigmaEnabled && talkToFigmaConnected) {
+					figmaServerName = "TalkToFigma"
+				} else if (figmaWriteEnabled && figmaWriteConnected) {
+					figmaServerName = "figma-write"
+				} else if (talkToFigmaConnected) {
+					// Fallback: use TalkToFigma if connected
+					figmaServerName = "TalkToFigma"
+				} else if (figmaWriteConnected) {
+					// Fallback: use figma-write if connected
+					figmaServerName = "figma-write"
 				}
 			}
-			console.log(`[ParallelUITasksTool] Using Figma server: ${figmaServerName}`)
+			console.log(`[ParallelUITasksTool] Using Figma server: ${figmaServerName} (settings: talkToFigma=${talkToFigmaEnabled}, figmaWrite=${figmaWriteEnabled})`)
 
 			// Coerce argument types to numbers where needed
 			const coerceArgumentTypes = (tool: string, args: Record<string, unknown>): Record<string, unknown> => {

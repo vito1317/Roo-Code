@@ -113,25 +113,36 @@ export class ParallelUIService {
 	private apiConfiguration: ProviderSettings | null = null
 	private extensionPath: string = ""
 	private mcpHub: McpHub | null = null
-	private activeFigmaServer: string = "figma-write"
+	private activeFigmaServer: string = "TalkToFigma"
+	// Figma server preferences from global settings
+	private talkToFigmaEnabled: boolean = true
+	private figmaWriteEnabled: boolean = false
 
 	/**
-	 * Tool name mapping from figma-write to TalkToFigma (cursor-talk-to-figma-mcp)
+	 * Tool name mapping from figma-write to TalkToFigma
+	 * Based on TalkToFigma MCP documentation
 	 * figma-write tool name → TalkToFigma tool name
 	 */
 	private static readonly TOOL_MAPPING: Record<string, string> = {
-		// Same names
+		// Same names (no mapping needed but listed for clarity)
 		create_frame: "create_frame",
 		create_rectangle: "create_rectangle",
 		delete_node: "delete_node",
-		// Different names
-		add_text: "create_text",
+		clone_node: "clone_node",
+		resize_node: "resize_node",
+		set_corner_radius: "set_corner_radius",
+		// Different names - Position/Movement
 		set_position: "move_node",
+		// Different names - Text
+		add_text: "create_text",
+		// Different names - Colors
 		set_fill: "set_fill_color",
 		set_text_color: "set_fill_color", // TalkToFigma uses set_fill_color for text color too
-		find_nodes: "get_node_info",
+		// Different names - Document/Node info
 		get_file_url: "get_document_info",
-		group_nodes: "clone_node", // TalkToFigma doesn't have group_nodes, use clone as fallback
+		find_nodes: "scan_nodes_by_types", // For scanning nodes by type
+		get_node: "get_node_info",         // For getting single node info
+		get_nodes: "get_nodes_info",       // For getting multiple nodes info
 	}
 
 	private constructor() {}
@@ -144,13 +155,23 @@ export class ParallelUIService {
 	}
 
 	/**
-	 * Configure the service with API settings and McpHub
+	 * Configure the service with API settings, McpHub, and Figma preferences
 	 */
-	configure(apiConfiguration: ProviderSettings, extensionPath: string, mcpHub?: McpHub): void {
+	configure(
+		apiConfiguration: ProviderSettings,
+		extensionPath: string,
+		mcpHub?: McpHub,
+		figmaSettings?: { talkToFigmaEnabled?: boolean; figmaWriteEnabled?: boolean }
+	): void {
 		this.apiConfiguration = apiConfiguration
 		this.extensionPath = extensionPath
 		if (mcpHub) {
 			this.mcpHub = mcpHub
+		}
+		// Store Figma server preferences
+		if (figmaSettings) {
+			this.talkToFigmaEnabled = figmaSettings.talkToFigmaEnabled ?? true
+			this.figmaWriteEnabled = figmaSettings.figmaWriteEnabled ?? false
 		}
 		// Debug logging
 		console.log(`[ParallelUI] Configured with:`, {
@@ -158,6 +179,8 @@ export class ParallelUIService {
 			modelId: apiConfiguration?.apiModelId,
 			baseUrl: apiConfiguration?.openAiBaseUrl,
 			hasConfig: !!apiConfiguration,
+			talkToFigmaEnabled: this.talkToFigmaEnabled,
+			figmaWriteEnabled: this.figmaWriteEnabled,
 		})
 	}
 
@@ -611,10 +634,26 @@ export class ParallelUIService {
 			}
 		}
 
-		// Check if any Figma MCP server is connected (figma-write or TalkToFigma)
-		const figmaServer = this.mcpHub
-			.getServers()
-			.find((s) => (s.name === "figma-write" || s.name === "TalkToFigma") && s.status === "connected")
+		// Check if any Figma MCP server is connected based on user settings
+		const servers = this.mcpHub.getServers()
+		const talkToFigmaConnected = servers.find((s) => s.name === "TalkToFigma" && s.status === "connected")
+		const figmaWriteConnected = servers.find((s) => s.name === "figma-write" && s.status === "connected")
+
+		let figmaServer: typeof talkToFigmaConnected = undefined
+
+		// Use settings to determine preferred server
+		if (this.talkToFigmaEnabled && talkToFigmaConnected) {
+			figmaServer = talkToFigmaConnected
+		} else if (this.figmaWriteEnabled && figmaWriteConnected) {
+			figmaServer = figmaWriteConnected
+		} else if (talkToFigmaConnected) {
+			// Fallback: use TalkToFigma if connected
+			figmaServer = talkToFigmaConnected
+		} else if (figmaWriteConnected) {
+			// Fallback: use figma-write if connected
+			figmaServer = figmaWriteConnected
+		}
+
 		if (!figmaServer) {
 			return {
 				success: false,
@@ -626,7 +665,7 @@ export class ParallelUIService {
 
 		// Store which server we're using for tool calls
 		this.activeFigmaServer = figmaServer.name
-		console.log(`[ParallelUI] Using Figma server: ${this.activeFigmaServer}`)
+		console.log(`[ParallelUI] Using Figma server: ${this.activeFigmaServer} (settings: talkToFigma=${this.talkToFigmaEnabled}, figmaWrite=${this.figmaWriteEnabled})`)
 
 		// Check if the provider supports tool use
 		// Parallel UI requires models that support function/tool calling
