@@ -177,9 +177,8 @@ describe("isToolAllowedForMode", () => {
             expect(isToolAllowedForMode("browser_action", "architect", [])).toBe(true);
             expect(isToolAllowedForMode("use_mcp_tool", "architect", [])).toBe(true);
         });
-        it("applies restrictions to apply_diff with concurrent file edits (MULTI_FILE_APPLY_DIFF experiment)", () => {
+        it("applies restrictions to apply_diff", () => {
             // Native-only: file restrictions for apply_diff are enforced against the top-level `path`.
-            // (Legacy XML args parsing has been removed.)
             // Should allow markdown files in architect mode
             expect(isToolAllowedForMode("apply_diff", "architect", [], undefined, {
                 path: "test.md",

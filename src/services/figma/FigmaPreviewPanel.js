@@ -82,11 +82,13 @@ export class FigmaPreviewPanel {
     }
     async createOrShowPanel() {
         if (this.panel) {
-            this.panel.reveal(vscode.ViewColumn.Beside);
+            // Use ViewColumn.One for fullscreen display (not split view)
+            this.panel.reveal(vscode.ViewColumn.One);
             await this.updatePanelContent();
             return;
         }
-        this.panel = vscode.window.createWebviewPanel("roo.figmaPreview", "🎨 Figma Preview", vscode.ViewColumn.Beside, {
+        // Use ViewColumn.One for fullscreen display (not split view)
+        this.panel = vscode.window.createWebviewPanel("roo.figmaPreview", "🎨 Figma Preview", vscode.ViewColumn.One, {
             enableScripts: true,
             retainContextWhenHidden: true,
         });
@@ -109,7 +111,7 @@ export class FigmaPreviewPanel {
 				<head>
 					<meta charset="utf-8">
 					<meta name="viewport" content="width=device-width,initial-scale=1">
-					<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src https://www.figma.com https://*.figma.com; style-src 'unsafe-inline';">
+					<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src https://www.figma.com https://*.figma.com; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 					<title>Figma Preview</title>
 					<style>
 						body {
@@ -161,9 +163,16 @@ export class FigmaPreviewPanel {
 						.reload-btn:hover {
 							background: #1177bb;
 						}
-						iframe {
+						.iframe-container {
 							flex: 1;
+							position: relative;
+						}
+						iframe {
+							position: absolute;
+							top: 0;
+							left: 0;
 							width: 100%;
+							height: 100%;
 							border: none;
 						}
 						.loading {
@@ -173,6 +182,13 @@ export class FigmaPreviewPanel {
 							transform: translate(-50%, -50%);
 							color: #888;
 							font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+							z-index: 10;
+							background: #1e1e1e;
+							padding: 20px 40px;
+							border-radius: 8px;
+						}
+						.loading.hidden {
+							display: none;
 						}
 					</style>
 				</head>
@@ -184,18 +200,41 @@ export class FigmaPreviewPanel {
 								<span>Figma Preview</span>
 								<span class="header-url" title="${this.currentFigmaUrl}">${this.currentFigmaUrl}</span>
 							</div>
-							<button class="reload-btn" onclick="document.getElementById('figma-frame').src = document.getElementById('figma-frame').src">
+							<button class="reload-btn" onclick="reloadFrame()">
 								↻ Reload
 							</button>
 						</div>
-						<div class="loading" id="loading">Loading Figma...</div>
-						<iframe
-							id="figma-frame"
-							src="${embedUrl}"
-							allowfullscreen
-							onload="document.getElementById('loading').style.display='none'">
-						</iframe>
+						<div class="iframe-container">
+							<div class="loading" id="loading">Loading Figma...</div>
+							<iframe
+								id="figma-frame"
+								src="${embedUrl}"
+								allowfullscreen>
+							</iframe>
+						</div>
 					</div>
+					<script>
+						var loadingEl = document.getElementById('loading');
+						var iframe = document.getElementById('figma-frame');
+
+						// Hide loading after iframe loads
+						iframe.onload = function() {
+							loadingEl.classList.add('hidden');
+						};
+
+						// Also hide loading after a timeout (Figma embed can be slow)
+						setTimeout(function() {
+							loadingEl.classList.add('hidden');
+						}, 3000);
+
+						function reloadFrame() {
+							loadingEl.classList.remove('hidden');
+							iframe.src = iframe.src;
+							setTimeout(function() {
+								loadingEl.classList.add('hidden');
+							}, 3000);
+						}
+					</script>
 				</body>
 			</html>
 		`;

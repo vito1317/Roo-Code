@@ -201,10 +201,6 @@ export function filterNativeToolsForMode(nativeTools, mode, customModes, experim
     if (settings?.browserToolEnabled === false) {
         allowedToolNames.delete("browser_action");
     }
-    // Conditionally exclude apply_diff if diffs are disabled
-    if (settings?.diffEnabled === false) {
-        allowedToolNames.delete("apply_diff");
-    }
     // Conditionally exclude access_mcp_resource if MCP is not enabled or there are no resources
     if (!mcpHub || !hasAnyMcpResources(mcpHub)) {
         allowedToolNames.delete("access_mcp_resource");

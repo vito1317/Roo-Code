@@ -211,8 +211,4 @@ export async function handleCheckoutBranch(provider, branch) {
     const cwd = provider.cwd;
     return worktreeService.checkoutBranch(cwd, branch);
 }
-export async function handleMergeWorktree(provider, options) {
-    const cwd = provider.cwd;
-    return worktreeService.mergeWorktree(cwd, options);
-}
 //# sourceMappingURL=handlers.js.map

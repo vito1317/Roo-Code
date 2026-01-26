@@ -31,7 +31,6 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
             didCompleteReadingStream: false,
             didRejectTool: false,
             didAlreadyUseTool: false,
-            diffEnabled: false,
             consecutiveMistakeCount: 0,
             clineMessages: [],
             api: {

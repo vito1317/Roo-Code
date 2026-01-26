@@ -216,6 +216,7 @@ export async function parseMentions(text, cwd, urlContentFetcher, fileContextTra
         }
     }
     // Process valid command mentions using cached results
+    let slashCommandHelp = "";
     for (const [commandName, command] of validCommands) {
         try {
             let commandOutput = "";
@@ -223,10 +224,10 @@ export async function parseMentions(text, cwd, urlContentFetcher, fileContextTra
                 commandOutput += `Description: ${command.description}\n\n`;
             }
             commandOutput += command.content;
-            parsedText += `\n\n<command name="${commandName}">\n${commandOutput}\n</command>`;
+            slashCommandHelp += `\n\n<command name="${commandName}">\n${commandOutput}\n</command>`;
         }
         catch (error) {
-            parsedText += `\n\n<command name="${commandName}">\nError loading command '${commandName}': ${error.message}\n</command>`;
+            slashCommandHelp += `\n\n<command name="${commandName}">\nError loading command '${commandName}': ${error.message}\n</command>`;
         }
     }
     if (urlMention) {
@@ -237,7 +238,7 @@ export async function parseMentions(text, cwd, urlContentFetcher, fileContextTra
             console.error(`Error closing browser: ${error.message}`);
         }
     }
-    return { text: parsedText, mode: commandMode };
+    return { text: parsedText, mode: commandMode, slashCommandHelp: slashCommandHelp.trim() || undefined };
 }
 async function getFileOrFolderContent(mentionPath, cwd, rooIgnoreController, showRooIgnoredFiles = false, maxReadFileLine) {
     const unescapedPath = unescapeSpaces(mentionPath);

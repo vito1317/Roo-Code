@@ -120,7 +120,7 @@ describe("MessageManager", () => {
                 },
                 {
                     ts: 299,
-                    role: "assistant",
+                    role: "user",
                     content: [{ type: "text", text: "Summary" }],
                     isSummary: true,
                     condenseId,
@@ -153,7 +153,7 @@ describe("MessageManager", () => {
                 },
                 {
                     ts: 299,
-                    role: "assistant",
+                    role: "user",
                     content: [{ type: "text", text: "Summary" }],
                     isSummary: true,
                     condenseId,
@@ -184,7 +184,7 @@ describe("MessageManager", () => {
                 },
                 {
                     ts: 199,
-                    role: "assistant",
+                    role: "user",
                     content: [{ type: "text", text: "Summary" }],
                     isSummary: true,
                     condenseId,
@@ -217,7 +217,7 @@ describe("MessageManager", () => {
                 { ts: 100, role: "user", content: [{ type: "text", text: "First" }] },
                 {
                     ts: 199,
-                    role: "assistant",
+                    role: "user",
                     content: [{ type: "text", text: "Summary 1" }],
                     isSummary: true,
                     condenseId: condenseId1,
@@ -225,7 +225,7 @@ describe("MessageManager", () => {
                 { ts: 300, role: "user", content: [{ type: "text", text: "Second" }] },
                 {
                     ts: 399,
-                    role: "assistant",
+                    role: "user",
                     content: [{ type: "text", text: "Summary 2" }],
                     isSummary: true,
                     condenseId: condenseId2,
@@ -382,7 +382,7 @@ describe("MessageManager", () => {
                 },
                 {
                     ts: 499,
-                    role: "assistant",
+                    role: "user",
                     content: [{ type: "text", text: "Summary" }],
                     isSummary: true,
                     condenseId,

@@ -79,6 +79,9 @@ export function formatContentBlockToMarkdown(block) {
         }
         case "reasoning":
             return `[Reasoning]\n${block.text}`;
+        case "thoughtSignature":
+            // Not relevant for human-readable exports
+            return "";
         default:
             return `[Unexpected content type: ${block.type}]`;
     }

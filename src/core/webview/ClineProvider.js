@@ -81,7 +81,7 @@ export class ClineProvider extends EventEmitter {
     static CLOUD_ORGANIZATIONS_CACHE_DURATION_MS = 5 * 1000; // 5 seconds
     isViewLaunched = false;
     settingsImportedAt;
-    latestAnnouncementId = "jan-2026-v3.42.0-chatgpt-usage-limits-claude-code-removed-grok-free-ends"; // v3.42.0 ChatGPT Usage Limits, Claude Code Removed, Grok Code Fast Free Ends
+    latestAnnouncementId = "jan-2026-v3.43.0-intelligent-context-condensation"; // v3.43.0 Intelligent Context Condensation
     providerSettingsManager;
     customModesManager;
     constructor(context, outputChannel, renderContext = "sidebar", contextProxy, mdmService) {
@@ -749,14 +749,12 @@ export class ClineProvider extends EventEmitter {
                 this.log(`Provider profile '${historyItem.apiConfigName}' from history no longer exists. Using current configuration.`);
             }
         }
-        const { apiConfiguration, diffEnabled: enableDiff, enableCheckpoints, checkpointTimeout, fuzzyMatchThreshold, experiments, cloudUserInfo, taskSyncEnabled, } = await this.getState();
+        const { apiConfiguration, enableCheckpoints, checkpointTimeout, experiments, cloudUserInfo, taskSyncEnabled } = await this.getState();
         const task = new Task({
             provider: this,
             apiConfiguration,
-            enableDiff,
             enableCheckpoints,
             checkpointTimeout,
-            fuzzyMatchThreshold,
             consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
             historyItem,
             experiments,
@@ -1611,7 +1609,7 @@ export class ClineProvider extends EventEmitter {
         }
     }
     async getStateToPostToWebview() {
-        const { apiConfiguration, lastShownAnnouncementId, customInstructions, alwaysAllowReadOnly, alwaysAllowReadOnlyOutsideWorkspace, alwaysAllowWrite, alwaysAllowWriteOutsideWorkspace, alwaysAllowWriteProtected, alwaysAllowExecute, allowedCommands, deniedCommands, alwaysAllowBrowser, alwaysAllowMcp, alwaysAllowModeSwitch, alwaysAllowSubtasks, allowedMaxRequests, allowedMaxCost, autoCondenseContext, autoCondenseContextPercent, soundEnabled, ttsEnabled, ttsSpeed, diffEnabled, enableCheckpoints, checkpointTimeout, taskHistory, soundVolume, browserViewportSize, screenshotQuality, remoteBrowserHost, remoteBrowserEnabled, cachedChromeHostUrl, writeDelayMs, terminalOutputLineLimit, terminalOutputCharacterLimit, terminalShellIntegrationTimeout, terminalShellIntegrationDisabled, terminalCommandDelay, terminalPowershellCounter, terminalZshClearEolMark, terminalZshOhMy, terminalZshP10k, terminalZdotdir, fuzzyMatchThreshold, mcpEnabled, enableMcpServerCreation, currentApiConfigName, listApiConfigMeta, pinnedApiConfigs, mode, customModePrompts, customSupportPrompts, enhancementApiConfigId, autoApprovalEnabled, customModes, experiments, maxOpenTabsContext, maxWorkspaceFiles, browserToolEnabled, telemetrySetting, showRooIgnoredFiles, enableSubfolderRules, language, maxReadFileLine, maxImageFileSize, maxTotalImageSize, terminalCompressProgressBar, historyPreviewCollapsed, reasoningBlockCollapsed, enterBehavior, cloudUserInfo, cloudIsAuthenticated, sharingEnabled, publicSharingEnabled, organizationAllowList, organizationSettingsVersion, maxConcurrentFileReads, customCondensingPrompt, codebaseIndexConfig, codebaseIndexModels, profileThresholds, alwaysAllowFollowupQuestions, followupAutoApproveTimeoutMs, includeDiagnosticMessages, maxDiagnosticMessages, includeTaskHistoryInEnhance, includeCurrentTime, includeCurrentCost, maxGitStatusFiles, taskSyncEnabled, remoteControlEnabled, imageGenerationProvider, openRouterImageApiKey, openRouterImageGenerationSelectedModel, featureRoomoteControlEnabled, isBrowserSessionActive, figmaEnabled, } = await this.getState();
+        const { apiConfiguration, lastShownAnnouncementId, customInstructions, alwaysAllowReadOnly, alwaysAllowReadOnlyOutsideWorkspace, alwaysAllowWrite, alwaysAllowWriteOutsideWorkspace, alwaysAllowWriteProtected, alwaysAllowExecute, allowedCommands, deniedCommands, alwaysAllowBrowser, alwaysAllowMcp, alwaysAllowModeSwitch, alwaysAllowSubtasks, allowedMaxRequests, allowedMaxCost, autoCondenseContext, autoCondenseContextPercent, soundEnabled, ttsEnabled, ttsSpeed, enableCheckpoints, checkpointTimeout, taskHistory, soundVolume, browserViewportSize, screenshotQuality, remoteBrowserHost, remoteBrowserEnabled, cachedChromeHostUrl, writeDelayMs, terminalOutputLineLimit, terminalOutputCharacterLimit, terminalShellIntegrationTimeout, terminalShellIntegrationDisabled, terminalCommandDelay, terminalPowershellCounter, terminalZshClearEolMark, terminalZshOhMy, terminalZshP10k, terminalZdotdir, mcpEnabled, enableMcpServerCreation, currentApiConfigName, listApiConfigMeta, pinnedApiConfigs, mode, customModePrompts, customSupportPrompts, enhancementApiConfigId, autoApprovalEnabled, customModes, experiments, maxOpenTabsContext, maxWorkspaceFiles, browserToolEnabled, telemetrySetting, showRooIgnoredFiles, enableSubfolderRules, language, maxReadFileLine, maxImageFileSize, maxTotalImageSize, terminalCompressProgressBar, historyPreviewCollapsed, reasoningBlockCollapsed, enterBehavior, cloudUserInfo, cloudIsAuthenticated, sharingEnabled, publicSharingEnabled, organizationAllowList, organizationSettingsVersion, maxConcurrentFileReads, customCondensingPrompt, codebaseIndexConfig, codebaseIndexModels, profileThresholds, alwaysAllowFollowupQuestions, followupAutoApproveTimeoutMs, includeDiagnosticMessages, maxDiagnosticMessages, includeTaskHistoryInEnhance, includeCurrentTime, includeCurrentCost, maxGitStatusFiles, taskSyncEnabled, remoteControlEnabled, imageGenerationProvider, openRouterImageApiKey, openRouterImageGenerationSelectedModel, featureRoomoteControlEnabled, isBrowserSessionActive, figmaEnabled, figmaWriteEnabled, talkToFigmaEnabled, figmaFileUrl, figmaWebPreviewEnabled, } = await this.getState();
         let cloudOrganizations = [];
         try {
             if (!CloudService.instance.isCloudAgent) {
@@ -1655,6 +1653,10 @@ export class ClineProvider extends EventEmitter {
             alwaysAllowSubtasks: alwaysAllowSubtasks ?? false,
             isBrowserSessionActive,
             figmaEnabled: figmaEnabled ?? false,
+            figmaWriteEnabled: figmaWriteEnabled ?? false,
+            talkToFigmaEnabled: talkToFigmaEnabled ?? true,
+            figmaFileUrl: figmaFileUrl,
+            figmaWebPreviewEnabled: figmaWebPreviewEnabled ?? false,
             allowedMaxRequests,
             allowedMaxCost,
             autoCondenseContext: autoCondenseContext ?? true,
@@ -1672,7 +1674,6 @@ export class ClineProvider extends EventEmitter {
             soundEnabled: soundEnabled ?? false,
             ttsEnabled: ttsEnabled ?? false,
             ttsSpeed: ttsSpeed ?? 1.0,
-            diffEnabled: diffEnabled ?? true,
             enableCheckpoints: enableCheckpoints ?? true,
             checkpointTimeout: checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
             shouldShowAnnouncement: telemetrySetting !== "unset" && lastShownAnnouncementId !== this.latestAnnouncementId,
@@ -1695,7 +1696,6 @@ export class ClineProvider extends EventEmitter {
             terminalZshOhMy: terminalZshOhMy ?? false,
             terminalZshP10k: terminalZshP10k ?? false,
             terminalZdotdir: terminalZdotdir ?? false,
-            fuzzyMatchThreshold: fuzzyMatchThreshold ?? 1.0,
             mcpEnabled: mcpEnabled ?? true,
             enableMcpServerCreation: enableMcpServerCreation ?? true,
             currentApiConfigName: currentApiConfigName ?? "default",
@@ -1925,7 +1925,6 @@ export class ClineProvider extends EventEmitter {
             soundEnabled: stateValues.soundEnabled ?? false,
             ttsEnabled: stateValues.ttsEnabled ?? false,
             ttsSpeed: stateValues.ttsSpeed ?? 1.0,
-            diffEnabled: stateValues.diffEnabled ?? true,
             enableCheckpoints: stateValues.enableCheckpoints ?? true,
             checkpointTimeout: stateValues.checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
             soundVolume: stateValues.soundVolume,
@@ -1934,7 +1933,6 @@ export class ClineProvider extends EventEmitter {
             remoteBrowserHost: stateValues.remoteBrowserHost,
             remoteBrowserEnabled: stateValues.remoteBrowserEnabled ?? false,
             cachedChromeHostUrl: stateValues.cachedChromeHostUrl,
-            fuzzyMatchThreshold: stateValues.fuzzyMatchThreshold ?? 1.0,
             writeDelayMs: stateValues.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
             terminalOutputLineLimit: stateValues.terminalOutputLineLimit ?? 500,
             terminalOutputCharacterLimit: stateValues.terminalOutputCharacterLimit ?? DEFAULT_TERMINAL_OUTPUT_CHARACTER_LIMIT,
@@ -2339,7 +2337,7 @@ export class ClineProvider extends EventEmitter {
                 await this.setProviderProfile(configuration.currentApiConfigName);
             }
         }
-        const { apiConfiguration, organizationAllowList, diffEnabled: enableDiff, enableCheckpoints, checkpointTimeout, fuzzyMatchThreshold, experiments, cloudUserInfo, remoteControlEnabled, } = await this.getState();
+        const { apiConfiguration, organizationAllowList, enableCheckpoints, checkpointTimeout, experiments, cloudUserInfo, remoteControlEnabled, } = await this.getState();
         // Single-open-task invariant: always enforce for user-initiated top-level tasks
         if (!parentTask) {
             try {
@@ -2355,10 +2353,8 @@ export class ClineProvider extends EventEmitter {
         const task = new Task({
             provider: this,
             apiConfiguration,
-            enableDiff,
             enableCheckpoints,
             checkpointTimeout,
-            fuzzyMatchThreshold,
             consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
             task: text,
             images,

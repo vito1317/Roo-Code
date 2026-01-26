@@ -33,7 +33,7 @@ export async function buildNativeToolsArray(options) {
  * @returns BuildToolsResult with tools array and optional allowedFunctionNames
  */
 export async function buildNativeToolsArrayWithRestrictions(options) {
-    const { provider, cwd, mode, customModes, experiments, apiConfiguration, maxReadFileLine, maxConcurrentFileReads, browserToolEnabled, modelInfo, diffEnabled, includeAllToolsWithRestrictions, } = options;
+    const { provider, cwd, mode, customModes, experiments, apiConfiguration, maxReadFileLine, maxConcurrentFileReads, browserToolEnabled, modelInfo, includeAllToolsWithRestrictions, } = options;
     const mcpHub = provider.getMcpHub();
     // Get CodeIndexManager for feature checking.
     const { CodeIndexManager } = await import("../../services/code-index/manager");
@@ -43,7 +43,6 @@ export async function buildNativeToolsArrayWithRestrictions(options) {
         todoListEnabled: apiConfiguration?.todoListEnabled ?? true,
         browserToolEnabled: browserToolEnabled ?? true,
         modelInfo,
-        diffEnabled,
     };
     // Determine if partial reads are enabled based on maxReadFileLine setting.
     const partialReadsEnabled = maxReadFileLine !== -1;

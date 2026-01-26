@@ -43,7 +43,7 @@ import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export";
 import { getCommand } from "../../utils/commands";
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"]);
 import { setPendingTodoList } from "../tools/UpdateTodoListTool";
-import { handleListWorktrees, handleCreateWorktree, handleDeleteWorktree, handleSwitchWorktree, handleGetAvailableBranches, handleGetWorktreeDefaults, handleGetWorktreeIncludeStatus, handleCheckBranchWorktreeInclude, handleCreateWorktreeInclude, handleCheckoutBranch, handleMergeWorktree, } from "./worktree";
+import { handleListWorktrees, handleCreateWorktree, handleDeleteWorktree, handleSwitchWorktree, handleGetAvailableBranches, handleGetWorktreeDefaults, handleGetWorktreeIncludeStatus, handleCheckBranchWorktreeInclude, handleCreateWorktreeInclude, handleCheckoutBranch, } from "./worktree";
 export const webviewMessageHandler = async (provider, message, marketplaceManager) => {
     // Utility functions provided for concise get/update of global state via contextProxy API.
     const getGlobalState = (key) => provider.contextProxy.getValue(key);
@@ -441,7 +441,16 @@ export const webviewMessageHandler = async (provider, message, marketplaceManage
             }
             break;
         case "updateSettings":
+            console.log("[updateSettings] Received settings update:", Object.keys(message.updatedSettings || {}));
             if (message.updatedSettings) {
+                // Explicitly log figma web preview settings to debug
+                console.log("[updateSettings] figmaFileUrl in message:", "figmaFileUrl" in message.updatedSettings, message.updatedSettings.figmaFileUrl);
+                console.log("[updateSettings] figmaWebPreviewEnabled in message:", "figmaWebPreviewEnabled" in message.updatedSettings, message.updatedSettings.figmaWebPreviewEnabled);
+                // Log all figma-related settings being received
+                const figmaKeys = Object.entries(message.updatedSettings).filter(([k]) => k.startsWith("figma") || k === "talkToFigmaEnabled");
+                if (figmaKeys.length > 0) {
+                    console.log("[updateSettings] Figma settings in message:", figmaKeys);
+                }
                 for (const [key, value] of Object.entries(message.updatedSettings)) {
                     let newValue = value;
                     if (key === "language") {
@@ -540,7 +549,17 @@ export const webviewMessageHandler = async (provider, message, marketplaceManage
                             continue;
                         }
                     }
+                    else if (key.startsWith("figma")) {
+                        // Explicit handling for Figma settings to ensure they're saved correctly
+                        console.log(`[Figma Settings] Saving ${key}:`, value);
+                        newValue = value;
+                    }
                     await provider.contextProxy.setValue(key, newValue);
+                    // Verify Figma settings were saved
+                    if (key.startsWith("figma")) {
+                        const savedValue = provider.contextProxy.getValue(key);
+                        console.log(`[Figma Settings] Verified ${key}:`, savedValue);
+                    }
                 }
                 await provider.postStateToWebview();
             }
@@ -1233,7 +1252,7 @@ export const webviewMessageHandler = async (provider, message, marketplaceManage
                 await fs.mkdir(rooDir, { recursive: true });
                 const exists = await fileExistsAtPath(mcpPath);
                 if (!exists) {
-                    await safeWriteJson(mcpPath, { mcpServers: {} });
+                    await safeWriteJson(mcpPath, { mcpServers: {} }, { prettyPrint: true });
                 }
                 await openFile(mcpPath);
             }
@@ -3133,35 +3152,6 @@ export const webviewMessageHandler = async (provider, message, marketplaceManage
             catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 await provider.postMessageToWebview({ type: "worktreeResult", success: false, text: errorMessage });
-            }
-            break;
-        }
-        case "mergeWorktree": {
-            try {
-                const result = await handleMergeWorktree(provider, {
-                    worktreePath: message.worktreePath,
-                    targetBranch: message.worktreeTargetBranch,
-                    deleteAfterMerge: message.worktreeDeleteAfterMerge,
-                });
-                await provider.postMessageToWebview({
-                    type: "mergeWorktreeResult",
-                    success: result.success,
-                    text: result.message,
-                    hasConflicts: result.hasConflicts,
-                    conflictingFiles: result.conflictingFiles,
-                    sourceBranch: result.sourceBranch,
-                    targetBranch: result.targetBranch,
-                });
-            }
-            catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                await provider.postMessageToWebview({
-                    type: "mergeWorktreeResult",
-                    success: false,
-                    text: errorMessage,
-                    hasConflicts: false,
-                    conflictingFiles: [],
-                });
             }
             break;
         }

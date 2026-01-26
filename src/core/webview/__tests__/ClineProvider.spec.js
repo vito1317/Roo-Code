@@ -274,7 +274,6 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 }));
 vi.mock("../diff/strategies/multi-search-replace", () => ({
     MultiSearchReplaceDiffStrategy: vi.fn().mockImplementation(() => ({
-        getToolDescription: () => "test",
         getName: () => "test-strategy",
         applyDiff: vi.fn(),
     })),
@@ -473,11 +472,9 @@ describe("ClineProvider", () => {
             uriScheme: "vscode",
             soundEnabled: false,
             ttsEnabled: false,
-            diffEnabled: false,
             enableCheckpoints: false,
             writeDelayMs: 1000,
             browserViewportSize: "900x600",
-            fuzzyMatchThreshold: 1.0,
             mcpEnabled: true,
             enableMcpServerCreation: false,
             mode: defaultModeSlug,
@@ -639,7 +636,6 @@ describe("ClineProvider", () => {
         expect(state).toHaveProperty("taskHistory");
         expect(state).toHaveProperty("soundEnabled");
         expect(state).toHaveProperty("ttsEnabled");
-        expect(state).toHaveProperty("diffEnabled");
         expect(state).toHaveProperty("writeDelayMs");
     });
     test("language is set to VSCode language", async () => {
@@ -648,13 +644,6 @@ describe("ClineProvider", () => {
         vscode.env.language = "pt-BR";
         const state = await provider.getState();
         expect(state.language).toBe("pt-BR");
-    });
-    test("diffEnabled defaults to true when not set", async () => {
-        // Mock globalState.get to return undefined for diffEnabled
-        ;
-        mockContext.globalState.get.mockReturnValue(undefined);
-        const state = await provider.getState();
-        expect(state.diffEnabled).toBe(true);
     });
     test("writeDelayMs defaults to 1000ms", async () => {
         // Mock globalState.get to return undefined for writeDelayMs
@@ -1184,9 +1173,9 @@ describe("ClineProvider", () => {
                 mode: "code",
             }));
         });
-        test("generates system prompt with diff enabled", async () => {
+        test("generates system prompt with various configurations", async () => {
             await provider.resolveWebviewView(mockWebviewView);
-            // Mock getState to return diffEnabled: true
+            // Mock getState with typical configuration
             vi.spyOn(provider, "getState").mockResolvedValue({
                 apiConfiguration: {
                     apiProvider: "openrouter",
@@ -1197,38 +1186,8 @@ describe("ClineProvider", () => {
                 enableMcpServerCreation: true,
                 mcpEnabled: false,
                 browserViewportSize: "900x600",
-                diffEnabled: true,
-                fuzzyMatchThreshold: 0.8,
                 experiments: experimentDefault,
                 browserToolEnabled: true,
-            });
-            // Trigger getSystemPrompt
-            const handler = getMessageHandler();
-            await handler({ type: "getSystemPrompt", mode: "code" });
-            // Verify system prompt was generated and sent
-            expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({
-                type: "systemPrompt",
-                text: expect.any(String),
-                mode: "code",
-            }));
-        });
-        test("generates system prompt with diff disabled", async () => {
-            await provider.resolveWebviewView(mockWebviewView);
-            // Mock getState to return diffEnabled: false
-            vi.spyOn(provider, "getState").mockResolvedValue({
-                apiConfiguration: {
-                    apiProvider: "openrouter",
-                    apiModelId: "test-model",
-                },
-                customModePrompts: {},
-                mode: "code",
-                mcpEnabled: false,
-                browserViewportSize: "900x600",
-                diffEnabled: false,
-                fuzzyMatchThreshold: 0.8,
-                experiments: experimentDefault,
-                enableMcpServerCreation: true,
-                browserToolEnabled: false,
             });
             // Trigger getSystemPrompt
             const handler = getMessageHandler();

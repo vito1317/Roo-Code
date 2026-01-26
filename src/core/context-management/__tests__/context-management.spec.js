@@ -527,7 +527,10 @@ describe("Context Management", () => {
                 currentProfileId: "default",
             });
             // Verify summarizeConversation was called with the right parameters
-            expect(summarizeSpy).toHaveBeenCalledWith(messagesWithSmallContent, mockApiHandler, "System prompt", taskId, 70001, true, undefined);
+            expect(summarizeSpy).toHaveBeenCalledWith(messagesWithSmallContent, mockApiHandler, "System prompt", taskId, true, // isAutomaticTrigger
+            undefined, // customCondensingPrompt
+            undefined, // metadata
+            undefined);
             // Verify the result contains the summary information
             expect(result).toMatchObject({
                 messages: mockSummarizeResponse.messages,
@@ -671,7 +674,10 @@ describe("Context Management", () => {
                 currentProfileId: "default",
             });
             // Verify summarizeConversation was called with the right parameters
-            expect(summarizeSpy).toHaveBeenCalledWith(messagesWithSmallContent, mockApiHandler, "System prompt", taskId, 60000, true, undefined);
+            expect(summarizeSpy).toHaveBeenCalledWith(messagesWithSmallContent, mockApiHandler, "System prompt", taskId, true, // isAutomaticTrigger
+            undefined, // customCondensingPrompt
+            undefined, // metadata
+            undefined);
             // Verify the result contains the summary information
             expect(result).toMatchObject({
                 messages: mockSummarizeResponse.messages,

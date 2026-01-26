@@ -12,7 +12,7 @@ export async function processUserContentMentions({ userContent, cwd, urlContentF
     // 2. ToolResultBlockParam's content/context text arrays if it contains
     // "<user_message>" - we place all user generated content in this tag
     // so it can effectively be used as a marker for when we should parse mentions.
-    const content = await Promise.all(userContent.map(async (block) => {
+    const content = (await Promise.all(userContent.map(async (block) => {
         const shouldProcessMentions = (text) => text.includes("<user_message>");
         if (block.type === "text") {
             if (shouldProcessMentions(block.text)) {
@@ -21,10 +21,19 @@ export async function processUserContentMentions({ userContent, cwd, urlContentF
                 if (!commandMode && result.mode) {
                     commandMode = result.mode;
                 }
-                return {
-                    ...block,
-                    text: result.text,
-                };
+                const blocks = [
+                    {
+                        ...block,
+                        text: result.text,
+                    },
+                ];
+                if (result.slashCommandHelp) {
+                    blocks.push({
+                        type: "text",
+                        text: result.slashCommandHelp,
+                    });
+                }
+                return blocks;
             }
             return block;
         }
@@ -36,6 +45,21 @@ export async function processUserContentMentions({ userContent, cwd, urlContentF
                     if (!commandMode && result.mode) {
                         commandMode = result.mode;
                     }
+                    if (result.slashCommandHelp) {
+                        return {
+                            ...block,
+                            content: [
+                                {
+                                    type: "text",
+                                    text: result.text,
+                                },
+                                {
+                                    type: "text",
+                                    text: result.slashCommandHelp,
+                                },
+                            ],
+                        };
+                    }
                     return {
                         ...block,
                         content: result.text,
@@ -44,26 +68,35 @@ export async function processUserContentMentions({ userContent, cwd, urlContentF
                 return block;
             }
             else if (Array.isArray(block.content)) {
-                const parsedContent = await Promise.all(block.content.map(async (contentBlock) => {
+                const parsedContent = (await Promise.all(block.content.map(async (contentBlock) => {
                     if (contentBlock.type === "text" && shouldProcessMentions(contentBlock.text)) {
                         const result = await parseMentions(contentBlock.text, cwd, urlContentFetcher, fileContextTracker, rooIgnoreController, showRooIgnoredFiles, includeDiagnosticMessages, maxDiagnosticMessages, maxReadFileLine);
                         // Capture the first mode found
                         if (!commandMode && result.mode) {
                             commandMode = result.mode;
                         }
-                        return {
-                            ...contentBlock,
-                            text: result.text,
-                        };
+                        const blocks = [
+                            {
+                                ...contentBlock,
+                                text: result.text,
+                            },
+                        ];
+                        if (result.slashCommandHelp) {
+                            blocks.push({
+                                type: "text",
+                                text: result.slashCommandHelp,
+                            });
+                        }
+                        return blocks;
                     }
                     return contentBlock;
-                }));
+                }))).flat();
                 return { ...block, content: parsedContent };
             }
             return block;
         }
         return block;
-    }));
+    }))).flat();
     return { content, mode: commandMode };
 }
 //# sourceMappingURL=processUserContentMentions.js.map

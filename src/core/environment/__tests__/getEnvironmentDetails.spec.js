@@ -2,7 +2,6 @@
 import pWaitFor from "p-wait-for";
 import delay from "delay";
 import { getEnvironmentDetails } from "../getEnvironmentDetails";
-import { EXPERIMENT_IDS, experiments } from "../../../shared/experiments";
 import { getFullModeDetails } from "../../../shared/modes";
 import { isToolAllowedForMode } from "../../tools/validateToolUse";
 import { getApiMetrics } from "../../../shared/getApiMetrics";
@@ -30,7 +29,6 @@ vi.mock("delay", () => ({
 vi.mock("execa", () => ({
     execa: vi.fn(),
 }));
-vi.mock("../../../shared/experiments");
 vi.mock("../../../shared/modes");
 vi.mock("../../../shared/getApiMetrics");
 vi.mock("../../../services/glob/list-files");
@@ -88,7 +86,6 @@ describe("getEnvironmentDetails", () => {
                 createMessage: vi.fn(),
                 countTokens: vi.fn(),
             },
-            diffEnabled: true,
             providerRef: {
                 deref: vi.fn().mockReturnValue(mockProvider),
                 [Symbol.toStringTag]: "WeakRef",
@@ -247,13 +244,6 @@ describe("getEnvironmentDetails", () => {
         // Verify the methods were called
         expect(mockActiveTerminal.getCurrentWorkingDirectory).toHaveBeenCalled();
         expect(mockInactiveTerminal.getCurrentWorkingDirectory).toHaveBeenCalled();
-    });
-    it("should include experiment-specific details when Power Steering is enabled", async () => {
-        mockState.experiments = { [EXPERIMENT_IDS.POWER_STEERING]: true };
-        experiments.isEnabled.mockReturnValue(true);
-        const result = await getEnvironmentDetails(mockCline);
-        expect(result).toContain("<role>You are a code assistant</role>");
-        expect(result).toContain("<custom_instructions>Custom instructions</custom_instructions>");
     });
     it("should handle missing provider or state", async () => {
         // Mock provider to return null.

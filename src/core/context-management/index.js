@@ -143,8 +143,9 @@ export function willManageContext({ totalTokens, contextWindow, maxTokens, autoC
  * @param {ContextManagementOptions} options - The options for truncation/condensation
  * @returns {Promise<ApiMessage[]>} The original, condensed, or truncated conversation messages.
  */
-export async function manageContext({ messages, totalTokens, contextWindow, maxTokens, apiHandler, autoCondenseContext, autoCondenseContextPercent, systemPrompt, taskId, customCondensingPrompt, profileThresholds, currentProfileId, }) {
+export async function manageContext({ messages, totalTokens, contextWindow, maxTokens, apiHandler, autoCondenseContext, autoCondenseContextPercent, systemPrompt, taskId, customCondensingPrompt, profileThresholds, currentProfileId, metadata, environmentDetails, }) {
     let error;
+    let errorDetails;
     let cost = 0;
     // Calculate the maximum tokens reserved for response
     const reservedTokens = maxTokens || ANTHROPIC_DEFAULT_MAX_TOKENS;
@@ -182,10 +183,11 @@ export async function manageContext({ messages, totalTokens, contextWindow, maxT
         const contextPercent = (100 * prevContextTokens) / contextWindow;
         if (contextPercent >= effectiveThreshold || prevContextTokens > allowedTokens) {
             // Attempt to intelligently condense the context
-            const result = await summarizeConversation(messages, apiHandler, systemPrompt, taskId, prevContextTokens, true, // automatic trigger
-            customCondensingPrompt);
+            const result = await summarizeConversation(messages, apiHandler, systemPrompt, taskId, true, // automatic trigger
+            customCondensingPrompt, metadata, environmentDetails);
             if (result.error) {
                 error = result.error;
+                errorDetails = result.errorDetails;
                 cost = result.cost;
             }
             else {
@@ -217,12 +219,13 @@ export async function manageContext({ messages, totalTokens, contextWindow, maxT
             summary: "",
             cost,
             error,
+            errorDetails,
             truncationId: truncationResult.truncationId,
             messagesRemoved: truncationResult.messagesRemoved,
             newContextTokensAfterTruncation,
         };
     }
     // No truncation or condensation needed
-    return { messages, summary: "", cost, prevContextTokens, error };
+    return { messages, summary: "", cost, prevContextTokens, error, errorDetails };
 }
 //# sourceMappingURL=index.js.map

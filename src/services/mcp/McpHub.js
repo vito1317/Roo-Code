@@ -117,6 +117,8 @@ export class McpHub {
     reconnectTimers = new Map();
     static MAX_RECONNECT_DELAY = 8000; // 8 seconds max delay
     static BASE_RECONNECT_DELAY = 1000; // 1 second base delay
+    // Figma preview auto-open tracking (per session)
+    figmaPreviewAutoOpened = false;
     constructor(provider) {
         this.providerRef = new WeakRef(provider);
         this.watchMcpSettingsFile();
@@ -598,6 +600,7 @@ export class McpHub {
                 args: ["-y", "ai-figma-mcp@latest"],
                 type: "stdio",
                 timeout: 60, // 60 seconds
+                cwd: vscode.workspace.workspaceFolders?.at(0)?.uri.fsPath ?? process.cwd(),
                 alwaysAllow: [
                     // Connection Management
                     "join_channel",
@@ -774,7 +777,21 @@ export class McpHub {
         }
     }
     /**
-     * Handle Figma tool call failure - reset connection and prompt for reconnection
+     * Open the Figma preview panel
+     */
+    async openFigmaPreviewPanel(figmaUrl, extensionUri) {
+        try {
+            const { FigmaPreviewPanel } = await import("../figma/FigmaPreviewPanel");
+            const figmaPreview = FigmaPreviewPanel.initialize(extensionUri);
+            await figmaPreview.show(figmaUrl);
+            console.log("[McpHub] Figma preview panel opened automatically");
+        }
+        catch (error) {
+            console.error("[McpHub] Failed to open Figma preview:", error);
+        }
+    }
+    /**
+     * Handle Figma tool call failure - auto-reconnect with same channel code
      * Returns true if reconnection was successful
      */
     async handleFigmaConnectionError(errorMessage) {
@@ -802,7 +819,35 @@ export class McpHub {
         if (isConnectionError) {
             // Reset connection state
             this.resetFigmaChannelConnection();
-            // Show error message and prompt for action
+            // Try auto-reconnect with stored channel code first (silently)
+            if (this.lastFigmaChannelCode) {
+                console.log("[McpHub] Attempting silent auto-reconnect to channel:", this.lastFigmaChannelCode);
+                vscode.window.showInformationMessage(`正在自動重新連接到頻道 ${this.lastFigmaChannelCode}... (Auto-reconnecting to channel...)`);
+                try {
+                    const autoResult = await this.callTool("TalkToFigma", "join_channel", {
+                        channel: this.lastFigmaChannelCode,
+                    });
+                    if (autoResult) {
+                        const textContent = autoResult.content?.find((c) => c.type === "text");
+                        const resultText = textContent && "text" in textContent ? textContent.text.toLowerCase() : "";
+                        // Check if auto-reconnect succeeded
+                        if (!resultText.includes("error") &&
+                            !resultText.includes("failed") &&
+                            !resultText.includes("not connected")) {
+                            this.figmaChannelConnected = true;
+                            vscode.window.showInformationMessage(`✓ 已自動重新連接到頻道 ${this.lastFigmaChannelCode} (Auto-reconnected successfully)`);
+                            console.log("[McpHub] Silent auto-reconnect successful:", this.lastFigmaChannelCode);
+                            return true;
+                        }
+                    }
+                }
+                catch (autoError) {
+                    console.log("[McpHub] Silent auto-reconnect failed:", autoError);
+                }
+                // Auto-reconnect failed, show prompt
+                vscode.window.showWarningMessage(`自動重連失敗。(Auto-reconnect to ${this.lastFigmaChannelCode} failed.)`);
+            }
+            // Show error message and prompt for action (only if auto-reconnect failed or no stored code)
             const action = await vscode.window.showWarningMessage("Figma 連線中斷或失敗。\n(Figma connection lost or failed.)", "重啟伺服器 (Restart Server)", "輸入新代碼 (New Code)", "取消 (Cancel)");
             if (action === "重啟伺服器 (Restart Server)") {
                 // Try to restart the MCP server first
@@ -816,7 +861,7 @@ export class McpHub {
                         await this.restartConnection("TalkToFigma", talkToFigmaConn.server.source);
                         // After restart, clear old channel code and prompt for new one
                         // This ensures the input dialog appears instead of auto-reconnecting
-                        this.lastFigmaChannelCode = undefined;
+                        this.lastFigmaChannelCode = null;
                         this.figmaChannelConnected = false;
                         vscode.window.showInformationMessage("伺服器已重啟，請輸入新的連接代碼。(Server restarted, please enter new channel code.)");
                         return this.promptTalkToFigmaChannelConnection(true);
@@ -1241,7 +1286,7 @@ export class McpHub {
                     // Create a placeholder disconnected connection
                     const config = connection.server.config;
                     this.connections.push({
-                        type: "connecting",
+                        type: "disconnected",
                         server: {
                             name,
                             config,
@@ -1249,6 +1294,8 @@ export class McpHub {
                             error: error instanceof Error ? error.message : String(error),
                             source,
                         },
+                        client: null,
+                        transport: null,
                     });
                     await this.notifyWebviewOfServerChanges();
                 }
@@ -1940,7 +1987,7 @@ export class McpHub {
         }
         this.isProgrammaticUpdate = true;
         try {
-            await safeWriteJson(configPath, updatedConfig);
+            await safeWriteJson(configPath, updatedConfig, { prettyPrint: true });
         }
         finally {
             // Reset flag after watcher debounce period (non-blocking)
@@ -2012,7 +2059,7 @@ export class McpHub {
                 const updatedConfig = {
                     mcpServers: config.mcpServers,
                 };
-                await safeWriteJson(configPath, updatedConfig);
+                await safeWriteJson(configPath, updatedConfig, { prettyPrint: true });
                 // Update server connections with the correct source
                 await this.updateServerConnections(config.mcpServers, serverSource);
                 vscode.window.showInformationMessage(t("mcp:info.server_deleted", { serverName }));
@@ -2073,6 +2120,33 @@ export class McpHub {
             // For TalkToFigma, also map tool-specific parameters (like fillColor format)
             if (serverName === "TalkToFigma") {
                 processedArguments = this.mapTalkToFigmaArguments(toolName, processedArguments);
+            }
+        }
+        // Auto-open Figma preview when AI is about to create elements
+        const figmaCreationTools = [
+            "create_rectangle",
+            "create_frame",
+            "create_text",
+            "add_text",
+            "create_ellipse",
+            "create_line",
+            "create_polygon",
+            "create_star",
+            "place_image_base64",
+        ];
+        if (isFigmaServer && figmaCreationTools.includes(toolName) && !this.figmaPreviewAutoOpened) {
+            const provider = this.providerRef.deref();
+            if (provider) {
+                const figmaWebPreviewEnabled = provider.getValue("figmaWebPreviewEnabled");
+                const figmaFileUrl = provider.getValue("figmaFileUrl");
+                if (figmaWebPreviewEnabled && figmaFileUrl) {
+                    console.log(`[McpHub] Auto-opening Figma preview for creation tool: ${toolName}`);
+                    this.figmaPreviewAutoOpened = true;
+                    // Open Figma preview panel directly
+                    this.openFigmaPreviewPanel(figmaFileUrl, provider.context.extensionUri).catch((error) => {
+                        console.error("[McpHub] Failed to auto-open Figma preview:", error);
+                    });
+                }
             }
         }
         try {
@@ -2236,7 +2310,7 @@ export class McpHub {
             if (typeof result.radius === "string") {
                 result.radius = parseFloat(result.radius) || 8;
             }
-            if (result.radius === undefined || result.radius < 8) {
+            if (result.radius === undefined || result.radius === null || typeof result.radius !== "number" || result.radius < 8) {
                 result.radius = 12; // Use 12 as default for better visibility
                 console.log(`[McpHub] create_rectangle: Set default radius: ${result.radius}`);
             }
@@ -2370,9 +2444,13 @@ export class McpHub {
         // set_corner_radius - Handle different parameter names between figma-write and TalkToFigma
         if (toolName === "set_corner_radius") {
             // Get the radius value from any available parameter
-            let radiusValue = result.radius ?? result.cornerRadius ?? 8;
-            if (typeof radiusValue === "string") {
-                radiusValue = parseFloat(radiusValue) || 8;
+            let radiusValue = 8;
+            const rawRadius = result.radius ?? result.cornerRadius;
+            if (typeof rawRadius === "string") {
+                radiusValue = parseFloat(rawRadius) || 8;
+            }
+            else if (typeof rawRadius === "number") {
+                radiusValue = rawRadius;
             }
             // Ensure minimum visibility
             if (radiusValue < 8) {
@@ -2451,7 +2529,7 @@ export class McpHub {
         }
         this.isProgrammaticUpdate = true;
         try {
-            await safeWriteJson(normalizedPath, config);
+            await safeWriteJson(normalizedPath, config, { prettyPrint: true });
         }
         finally {
             // Reset flag after watcher debounce period (non-blocking)
