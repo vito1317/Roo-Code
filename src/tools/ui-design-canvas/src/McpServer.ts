@@ -781,7 +781,8 @@ const app = express();
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Accept, Cache-Control, X-Requested-With, Authorization");
+  res.header("Access-Control-Max-Age", "86400"); // Cache preflight for 24 hours
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
@@ -790,7 +791,7 @@ app.use((req, res, next) => {
 const transports = new Map<string, SSEServerTransport>();
 
 app.get("/sse", async (req, res) => {
-  console.error("[ui-design-canvas] SSE connection established");
+  console.log("[ui-design-canvas] SSE connection established");
   const transport = new SSEServerTransport("/message", res);
 
   // NOTE: Do NOT call transport.start() manually!
@@ -841,6 +842,65 @@ app.get("/health", (req, res) => {
 // Get current design (for preview panel)
 app.get("/design", (req, res) => {
   res.json(store.getDesign());
+});
+
+// SSE endpoint for real-time design updates (for preview panel)
+const designUpdateClients: Set<any> = new Set();
+
+app.get("/design-updates", (req, res) => {
+  console.log("[ui-design-canvas] Design updates SSE connection established");
+  
+  // Set SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.flushHeaders();
+  
+  // Add client to the set
+  designUpdateClients.add(res);
+  
+  // Send initial design
+  res.write(`data: ${JSON.stringify(store.getDesign())}\n\n`);
+  
+  // Remove client on disconnect
+  req.on("close", () => {
+    console.error("[ui-design-canvas] Design updates SSE connection closed");
+    designUpdateClients.delete(res);
+  });
+});
+
+// Subscribe to store updates and broadcast to all connected clients
+store.subscribe((design) => {
+  console.error(`[ui-design-canvas] Broadcasting design update to ${designUpdateClients.size} clients`);
+  const data = JSON.stringify(design);
+  for (const client of designUpdateClients) {
+    try {
+      client.write(`data: ${data}\n\n`);
+    } catch (e) {
+      // Client disconnected, remove from set
+      designUpdateClients.delete(client);
+    }
+  }
+});
+
+// Execute a tool directly (from preview panel)
+app.post("/tool", express.json(), async (req, res) => {
+  try {
+    const { name, arguments: args } = req.body;
+
+    if (!name) {
+      res.status(400).json({ error: "Missing tool name" });
+      return;
+    }
+
+    console.error(`[ui-design-canvas] Direct tool call: ${name}`, args);
+    const result = await handleTool(name, args || {});
+    res.json(result);
+  } catch (error) {
+    console.error("[ui-design-canvas] Tool execution error:", error);
+    res.status(500).json({ error: "Tool execution failed", message: String(error) });
+  }
 });
 
 // Update full design (from preview panel edits)

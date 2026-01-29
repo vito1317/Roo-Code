@@ -320,7 +320,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 // Define available tool groups.
 export const TOOL_GROUPS: Record<ToolGroup, ToolGroupConfig> = {
 	read: {
-		tools: ["read_file", "fetch_instructions", "search_files", "list_files", "codebase_search"],
+		tools: ["read_file", "search_files", "list_files", "codebase_search"],
 	},
 	edit: {
 		tools: ["apply_diff", "write_to_file", "generate_image"],
@@ -351,6 +351,8 @@ export const ALWAYS_AVAILABLE_TOOLS: ToolName[] = [
 	"run_slash_command",
 	"handoff_context", // Sentinel Edition: Always available for agent handoffs
 	"start_background_service", // Sentinel Edition: Always available for starting servers
+	"use_mcp_tool", // Sentinel Edition: Always available for MCP tool calls (critical for Designer)
+	"access_mcp_resource", // Sentinel Edition: Always available for MCP resource access
 	"parallel_ui_tasks", // Sentinel Edition: Always available for parallel UI design
 	"parallel_mcp_calls", // Sentinel Edition: Always available for parallel MCP operations
 	"adjust_layout", // Sentinel Edition: Always available for auto-layout of Figma nodes

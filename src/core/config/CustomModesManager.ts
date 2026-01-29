@@ -50,9 +50,18 @@ export class CustomModesManager {
 
 	private disposables: vscode.Disposable[] = []
 	private isWriting = false
-	private writeQueue: Array<() => Promise<void>> = []
+	private writeQueue: Array<() => Promise<void>>= []
 	private cachedModes: ModeConfig[] | null = null
 	private cachedAt: number = 0
+	// Track MCP connection status to invalidate cache only when status changes
+	private cachedMcpStatus: string = ""
+	
+	// McpHub getter for dynamic MCP connection status
+	private mcpHubGetter?: () => { 
+		getServers(): Array<{name: string; status: string}>
+		isUIDesignCanvasConnected?(): boolean
+		isTalkToFigmaConnected?(): boolean 
+	} | undefined
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -61,6 +70,22 @@ export class CustomModesManager {
 		this.watchCustomModesFiles().catch((error) => {
 			console.error("[CustomModesManager] Failed to setup file watchers:", error)
 		})
+	}
+
+	/**
+	 * Set the McpHub getter function for dynamic MCP connection status.
+	 * This allows getCustomModes() to automatically include MCP status for context-aware modes like Designer.
+	 */
+	public setMcpHubGetter(getter: () => { 
+		getServers(): Array<{name: string; status: string}>
+		isUIDesignCanvasConnected?(): boolean
+		isTalkToFigmaConnected?(): boolean 
+	} | undefined): void {
+		this.mcpHubGetter = getter
+		// Invalidate cache when mcpHub getter is set
+		this.cachedModes = null
+		this.cachedAt = 0
+		this.cachedMcpStatus = ""
 	}
 
 	private async queueWrite(operation: () => Promise<void>): Promise<void> {
@@ -354,11 +379,22 @@ export class CustomModesManager {
 		}
 	}
 
-	public async getCustomModes(): Promise<ModeConfig[]> {
+	public async getCustomModes(mcpHub?: { getServers(): Array<{name: string; status: string}>; isUIDesignCanvasConnected?(): boolean; isTalkToFigmaConnected?(): boolean }): Promise<ModeConfig[]> {
+		// Use mcpHubGetter if mcpHub not explicitly provided
+		const effectiveMcpHub = mcpHub ?? this.mcpHubGetter?.()
+		
+		// Compute current MCP status fingerprint for cache invalidation
+		// Only invalidate cache if MCP connection status actually changes
+		const currentMcpStatus = effectiveMcpHub 
+			? `ui:${effectiveMcpHub.isUIDesignCanvasConnected?.() ?? false},figma:${effectiveMcpHub.isTalkToFigmaConnected?.() ?? false}`
+			: ""
+		
 		// Check if we have a valid cached result.
+		// Cache is valid if: within TTL AND MCP status hasn't changed
 		const now = Date.now()
+		const mcpStatusUnchanged = currentMcpStatus === this.cachedMcpStatus
 
-		if (this.cachedModes && now - this.cachedAt < CustomModesManager.cacheTTL) {
+		if (this.cachedModes && now - this.cachedAt < CustomModesManager.cacheTTL && mcpStatusUnchanged) {
 			return this.cachedModes
 		}
 
@@ -371,7 +407,8 @@ export class CustomModesManager {
 		const roomodesModes = roomodesPath ? await this.loadModesFromFile(roomodesPath) : []
 
 		// Get Sentinel modes (built-in for Sentinel Edition).
-		const sentinelModes = getSentinelModesConfig()
+		// Pass effectiveMcpHub to get dynamic MCP connection status for Designer's customInstructions
+		const sentinelModes = getSentinelModesConfig(effectiveMcpHub)
 
 		// Create maps to store modes by source.
 		const projectModes = new Map<string, ModeConfig>()
@@ -405,6 +442,7 @@ export class CustomModesManager {
 
 		this.cachedModes = mergedModes
 		this.cachedAt = now
+		this.cachedMcpStatus = currentMcpStatus
 
 		return mergedModes
 	}
@@ -1011,6 +1049,7 @@ export class CustomModesManager {
 	private clearCache(): void {
 		this.cachedModes = null
 		this.cachedAt = 0
+		this.cachedMcpStatus = ""
 	}
 
 	dispose(): void {

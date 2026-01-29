@@ -652,6 +652,24 @@ export const webviewMessageHandler = async (
 						if (mcpHub) {
 							await mcpHub.handleMcpEnabledChange(newValue as boolean)
 						}
+					} else if (key === "figmaEnabled") {
+						// Handle main Figma Integration toggle - when disabled, also stop TalkToFigma
+						newValue = value ?? false
+						console.log(`[Figma Settings] Toggling Figma Integration to:`, newValue)
+						const mcpHub = provider.getMcpHub()
+						if (mcpHub && !newValue) {
+							// When Figma integration is disabled, stop TalkToFigma server
+							console.log(`[Figma Settings] Disabling Figma, stopping TalkToFigma server`)
+							await mcpHub.handleTalkToFigmaEnabledChange(false)
+						}
+					} else if (key === "talkToFigmaEnabled") {
+						// Handle TalkToFigma toggle - start or stop the TalkToFigma MCP server
+						newValue = value ?? true
+						console.log(`[TalkToFigma Settings] Toggling TalkToFigma to:`, newValue)
+						const mcpHub = provider.getMcpHub()
+						if (mcpHub) {
+							await mcpHub.handleTalkToFigmaEnabledChange(newValue as boolean)
+						}
 					} else if (key === "mcpUiEnabled" || key === "mcpUiServerUrl") {
 						// Handle MCP-UI settings - reconnect server when settings change
 						newValue = value
@@ -681,8 +699,9 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
-					} else if (key.startsWith("figma")) {
-						// Explicit handling for Figma settings to ensure they're saved correctly
+					} else if (key.startsWith("figma") && key !== "figmaEnabled") {
+						// Explicit handling for other Figma settings to ensure they're saved correctly
+						// (figmaEnabled is already handled above)
 						console.log(`[Figma Settings] Saving ${key}:`, value)
 						newValue = value
 					}

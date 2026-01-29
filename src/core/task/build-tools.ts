@@ -135,7 +135,14 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 
 	// Filter MCP tools based on mode restrictions.
 	const mcpTools = getMcpServerTools(mcpHub)
+	console.log(`[buildNativeToolsArray] mcpTools count: ${mcpTools.length}, names:`, mcpTools.map(t => (t as any).function?.name).join(", "))
 	const filteredMcpTools = filterMcpToolsForMode(mcpTools, mode, customModes, experiments)
+	console.log(`[buildNativeToolsArray] filteredMcpTools count: ${filteredMcpTools.length} for mode: ${mode}`)
+	
+	// Log native tools to debug parallel_mcp_calls availability
+	const nativeToolNames = filteredNativeTools.map(t => (t as any).function?.name).join(", ")
+	console.log(`[buildNativeToolsArray] filteredNativeTools count: ${filteredNativeTools.length} for mode: ${mode}`)
+	console.log(`[buildNativeToolsArray] Native tools: ${nativeToolNames.substring(0, 500)}...`)
 
 	// Add custom tools if they are available and the experiment is enabled.
 	let nativeCustomTools: OpenAI.Chat.ChatCompletionFunctionTool[] = []

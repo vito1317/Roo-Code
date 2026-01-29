@@ -128,6 +128,11 @@ export class UIDesignCanvasPanel {
           case "takeScreenshot":
             await this.takeScreenshot();
             break;
+
+          case "mcpToolCall":
+            // Handle MCP tool calls from webview (edit operations like delete, create, update)
+            await this.handleMcpToolCall(message.tool, message.args);
+            break;
         }
       },
       null,
@@ -146,19 +151,19 @@ export class UIDesignCanvasPanel {
   }
 
   public static createOrShow(extensionUri: vscode.Uri): UIDesignCanvasPanel {
-    const column = vscode.ViewColumn.Beside;
+    // Use ViewColumn.One to display in main editor area (fullscreen instead of split)
 
     // If panel exists, show it
     if (UIDesignCanvasPanel.currentPanel) {
-      UIDesignCanvasPanel.currentPanel.panel.reveal(column);
+      UIDesignCanvasPanel.currentPanel.panel.reveal(vscode.ViewColumn.One);
       return UIDesignCanvasPanel.currentPanel;
     }
 
-    // Create new panel
+    // Create new panel in main editor area (fullscreen)
     const panel = vscode.window.createWebviewPanel(
       "uiDesignCanvas",
       "UI Design Canvas",
-      column,
+      vscode.ViewColumn.One,
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -376,6 +381,60 @@ export class UIDesignCanvasPanel {
       }
     } catch (error) {
       console.error("[UIDesignCanvas] Error syncing to MCP server:", error);
+    }
+  }
+
+  /**
+   * Handle MCP tool calls from webview (delete, create, update operations)
+   */
+  private async handleMcpToolCall(toolName: string, args: any): Promise<void> {
+    if (!this.mcpServerPort) {
+      console.error("[UIDesignCanvas] MCP server port not set");
+      return;
+    }
+
+    console.log(`[UIDesignCanvas] MCP tool call: ${toolName}`, args);
+
+    try {
+      // Call the MCP server's tool endpoint
+      const response = await fetch(`http://127.0.0.1:${this.mcpServerPort}/tool`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: toolName, arguments: args }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`[UIDesignCanvas] Tool ${toolName} result:`, result);
+
+        // Refresh the design from server after tool execution
+        await this.refreshDesignFromServer();
+      } else {
+        console.error(`[UIDesignCanvas] Tool ${toolName} failed:`, response.status);
+      }
+    } catch (error) {
+      console.error(`[UIDesignCanvas] Error calling tool ${toolName}:`, error);
+    }
+  }
+
+  /**
+   * Refresh design from MCP server and update webview
+   */
+  private async refreshDesignFromServer(): Promise<void> {
+    if (!this.mcpServerPort) return;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${this.mcpServerPort}/design`);
+      if (response.ok) {
+        this.design = await response.json();
+        this.panel.webview.postMessage({
+          type: "updateDesign",
+          design: this.design,
+        });
+        console.log("[UIDesignCanvas] Design refreshed from server");
+      }
+    } catch (error) {
+      console.error("[UIDesignCanvas] Failed to refresh design:", error);
     }
   }
 
@@ -670,21 +729,27 @@ export default ${componentName};
    * Get the webview HTML content
    */
   private getWebviewContent(): string {
-    // Read the canvas.html file
-    const htmlPath = path.join(
-      this.extensionUri.fsPath,
-      "tools",
-      "ui-design-canvas",
-      "webview",
-      "canvas.html"
-    );
+    // Try multiple possible paths for canvas.html
+    const possiblePaths = [
+      path.join(this.extensionUri.fsPath, "tools", "ui-design-canvas", "webview", "canvas.html"),
+      path.join(this.extensionUri.fsPath, "dist", "tools", "ui-design-canvas", "webview", "canvas.html"),
+      path.join(this.extensionUri.fsPath, "src", "tools", "ui-design-canvas", "webview", "canvas.html"),
+    ];
 
-    try {
-      return fs.readFileSync(htmlPath, "utf-8");
-    } catch (error) {
-      // Fallback if file not found (e.g., in production build)
-      return this.getInlineWebviewContent();
+    for (const htmlPath of possiblePaths) {
+      try {
+        if (fs.existsSync(htmlPath)) {
+          console.log(`[UIDesignCanvas] Loading canvas.html from: ${htmlPath}`);
+          return fs.readFileSync(htmlPath, "utf-8");
+        }
+      } catch (error) {
+        console.error(`[UIDesignCanvas] Failed to read ${htmlPath}:`, error);
+      }
     }
+
+    // Fallback if file not found
+    console.error(`[UIDesignCanvas] canvas.html not found in any of:`, possiblePaths);
+    return this.getInlineWebviewContent();
   }
 
   /**

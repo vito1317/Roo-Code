@@ -97,12 +97,84 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 
 			// Build handoff data based on current agent
 			const currentState = fsm.getCurrentState()
+		
+			// STRICT VALIDATION: Designer must have created actual UI elements
+			if (currentState === AgentState.DESIGNER) {
+				const createdComponents = Array.isArray(parsedContext.createdComponents)
+					? parsedContext.createdComponents
+					: Array.isArray(parsedContext.created_components)
+					? parsedContext.created_components
+					: []
+				
+				const expectedElements = typeof parsedContext.expectedElements === "number"
+					? parsedContext.expectedElements
+					: typeof parsedContext.expected_elements === "number"
+					? parsedContext.expected_elements
+					: 0
+				
+				// Reject if no elements were created
+			// Reject if no elements were created
+				// Also reject if only "frame" type elements with no children (empty containers don't count)
+				const hasActualContent = createdComponents.some((comp: any) => {
+					// If it's an object with children, it has content
+					if (typeof comp === "object" && comp.children && comp.children.length > 0) {
+						return true
+					}
+					// If it's a simple string, count it as a frame name (no actual content)
+					return false
+				})
+				
+				// STRICT: Require at least 15 elements for a proper design
+				const MIN_REQUIRED_ELEMENTS = 15
+				
+				if (createdComponents.length === 0 || expectedElements === 0) {
+					task.recordToolError("handoff_context")
+					pushToolResult(
+						formatResponse.toolError(
+							`❌ **Empty Handoff Rejected!**\n\n` +
+							`Designer 必須先使用 MCP 工具創建 UI 元素才能 handoff！\n\n` +
+							`**你提交的內容：**\n` +
+							`- createdComponents: ${createdComponents.length} 個（需要 > 0）\n` +
+							`- expectedElements: ${expectedElements}（需要 > 0）\n\n` +
+							`**請先使用以下工具創建 UI 元素：**\n` +
+							`1. \`use_mcp_tool\` - 使用 UIDesignCanvas 服務創建元素\n` +
+							`2. \`parallel_ui_tasks\` - 批量創建多個 UI 元素\n` +
+							`3. \`parallel_mcp_calls\` - 批量執行 MCP 工具\n\n` +
+							`**注意：只創建 Frame 不算完成設計！必須在 Frame 內創建按鈕、文字、圖標等 UI 元素！**\n\n` +
+							`創建元素後再 handoff，請重試！`
+						)
+					)
+					return
+				}
+				
+				// ADDITIONAL CHECK: If only frames without content, reject
+				if (expectedElements < MIN_REQUIRED_ELEMENTS) {
+					task.recordToolError("handoff_context")
+					pushToolResult(
+						formatResponse.toolError(
+							`❌ **設計不完整！元素數量不足！**\n\n` +
+							`你只創建了 ${expectedElements} 個元素，至少需要 ${MIN_REQUIRED_ELEMENTS} 個！\n\n` +
+							`**你目前創建的：**\n` +
+							createdComponents.slice(0, 10).map((c: any) => `- ${typeof c === "string" ? c : c.name || c.type || "unknown"}`).join("\n") +
+							(createdComponents.length > 10 ? `\n... 還有 ${createdComponents.length - 10} 個` : "") +
+							`\n\n**一個完整的畫面應該包含：**\n` +
+							`- 導航欄（Logo、標題、按鈕）\n` +
+							`- 主要內容區域（卡片、列表項目）\n` +
+							`- 表單元素（輸入框、按鈕）\n` +
+							`- 圖標和裝飾元素\n\n` +
+							`**請繼續使用 MCP 工具創建更多 UI 元素！**`
+						)
+					)
+					return
+				}
+			}
+			
 			const handoffData = this.buildHandoffData(currentState, parsedContext, notes)
 
 			// Show what's being submitted
 			await task.say(
 				"text",
-				`\ud83d\udd04 Submitting handoff context from ${currentState}...`,
+				`🔄 Submitting handoff context from ${currentState}...`,
 			)
 
 			// Trigger FSM transition
@@ -201,17 +273,66 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 		}
 
 		switch (currentState) {
-			case AgentState.ARCHITECT:
+			case AgentState.ARCHITECT: {
+				// Extract design flags to root level for StateMachine routing
+				// These flags determine whether to route to Designer or Builder
+				const needsDesign = parsedContext.needsDesign === true || parsedContext.needs_design === true
+				const hasUI = parsedContext.hasUI === true || parsedContext.has_ui === true
+				const useFigma = parsedContext.useFigma === true || parsedContext.use_figma === true
+				const usePenpot = parsedContext.usePenpot === true || parsedContext.use_penpot === true
+				const useUIDesignCanvas = parsedContext.useUIDesignCanvas === true || parsedContext.use_ui_design_canvas === true
+				
+				console.log("[HandoffContextTool] Architect design flags:", { needsDesign, hasUI, useFigma, usePenpot, useUIDesignCanvas })
+				
 				return {
 					...base,
+					// Design flags at root level for StateMachine routing
+					needsDesign,
+					hasUI,
+					useFigma,
+					usePenpot,
+					useUIDesignCanvas,
+					// Full plan in architectPlan for reference
 					architectPlan: parsedContext as unknown as ArchitectPlan,
 				}
+			}
 
-			case AgentState.DESIGNER:
+			case AgentState.DESIGNER: {
+				// CRITICAL: Extract element counts for FSM transition validation
+				// The StateMachine requires expectedElements >= 15 for handoff to pass
+				const expectedElements = typeof parsedContext.expectedElements === "number" 
+					? parsedContext.expectedElements 
+					: typeof parsedContext.expected_elements === "number"
+					? parsedContext.expected_elements
+					: 0
+				
+				const actualElements = typeof parsedContext.actualElements === "number"
+					? parsedContext.actualElements
+					: typeof parsedContext.actual_elements === "number"
+					? parsedContext.actual_elements
+					: expectedElements // fallback to expected if actual not specified
+				
+				const createdComponents = Array.isArray(parsedContext.createdComponents)
+					? parsedContext.createdComponents
+					: Array.isArray(parsedContext.created_components)
+					? parsedContext.created_components
+					: []
+				
+				console.log(`[HandoffContextTool] Designer handoff: expectedElements=${expectedElements}, actualElements=${actualElements}, createdComponents=${createdComponents.length}`)
+				
+				// WARNING: If expectedElements < 15, the FSM will reject this handoff
+				if (expectedElements < 15) {
+					console.warn(`[HandoffContextTool] WARNING: Designer submitting with only ${expectedElements} elements (minimum is 15). FSM will likely reject this handoff.`)
+				}
+				
 				return {
 					...base,
 					designSpecs: parsedContext.designSpecs as string || JSON.stringify(parsedContext),
+					expectedElements,
+					actualElements,
+					createdComponents: createdComponents as string[],
 				}
+			}
 
 			case AgentState.DESIGN_REVIEW:
 				// Extract designReviewPassed and other review fields

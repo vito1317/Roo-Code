@@ -76,6 +76,7 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
+import { UIDesignCanvasPanel } from "../../services/ui-design/UIDesignCanvasPanel"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed, setTtsVoice } from "../../utils/tts"
@@ -193,6 +194,10 @@ export class ClineProvider
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebview()
 		})
+		
+		// Set mcpHubGetter so getCustomModes can automatically get MCP connection status
+		// This enables dynamic design tool selection for Designer agent
+		this.customModesManager.setMcpHubGetter(() => this.mcpHub)
 
 		// Initialize MCP Hub through the singleton manager
 		McpServerManager.getInstance(this.context, this)
@@ -461,6 +466,24 @@ export class ClineProvider
 				cline.sentinelStateMachine = createSentinelFSM(cline, this)
 				await cline.sentinelStateMachine.start()
 				this.log(`[Sentinel] FSM initialized for task ${cline.taskId} in mode ${currentMode}`)
+				
+				// Open UIDesignCanvas preview panel immediately for Designer mode
+				// This ensures the panel is ready to receive design updates from the start
+				if (currentMode === "sentinel-designer") {
+					const state = await this.getState()
+					const uiDesignCanvasEnabled = state.uiDesignCanvasEnabled ?? true
+					const mcpHubInstance = this.getMcpHub()
+					const talkToFigmaConnected = mcpHubInstance?.isTalkToFigmaConnected?.() ?? false
+					const figmaWriteConnected = mcpHubInstance?.getServers()?.some(
+						(s) => s.name === "figma-write" && s.status === "connected"
+					) ?? false
+					
+					// Open UIDesignCanvas if enabled and no Figma alternatives are connected
+					if (uiDesignCanvasEnabled && !talkToFigmaConnected && !figmaWriteConnected) {
+						this.log(`[Designer] Opening UIDesignCanvas preview panel for Designer mode`)
+						UIDesignCanvasPanel.createOrShow(this.context.extensionUri)
+					}
+				}
 			}
 		}
 

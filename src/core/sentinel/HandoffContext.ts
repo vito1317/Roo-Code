@@ -42,6 +42,12 @@ export interface ArchitectPlan {
 	}
 	acceptanceCriteria: string[]
 	risks: IdentifiedRisk[]
+	// Design tool selection flags
+	needsDesign?: boolean
+	hasUI?: boolean
+	useFigma?: boolean
+	usePenpot?: boolean
+	useUIDesignCanvas?: boolean
 }
 
 /**
@@ -232,6 +238,23 @@ export interface HandoffContext {
 	designReviewStatus?: string // "approved" | "rejected" - alternative format
 	completion_percentage?: string // e.g. "60%" - used for rejection threshold check
 	missingComponents?: string[] // List of missing components if rejected
+	createdComponents?: string[] // List of components created by Designer (e.g. ["header", "button", "form"])
+
+	// Design tool selection flags (extracted from Architect's handoff)
+	needsDesign?: boolean
+	hasUI?: boolean
+	useFigma?: boolean
+	usePenpot?: boolean
+	useUIDesignCanvas?: boolean
+
+	// MCP connection status for dynamic tool selection
+	mcpConnectionStatus?: {
+		uiDesignCanvas?: boolean
+		penpot?: boolean
+		talkToFigma?: boolean
+		figmaWrite?: boolean
+		mcpUi?: boolean
+	}
 
 	// Common fields
 	previousAgentNotes: string

@@ -167,11 +167,38 @@ export class SentinelStateMachine {
 		},
 
 		// Designer completes → Design Review verifies
+		// IMPORTANT: Require expectedElements >= 15 to prevent low-quality designs
 		{
 			from: AgentState.DESIGNER,
 			to: AgentState.DESIGN_REVIEW,
-			condition: (ctx) => !!ctx?.designSpecs || ctx?.expectedElements !== undefined,
-			label: "Design submitted, handoff to Design Review for verification",
+			condition: (ctx) => {
+				// Minimum element threshold - prevents placeholder-only designs
+				const MIN_ELEMENTS = 15
+				
+				// Designer must have created enough elements for a real UI
+				const elementCount = typeof ctx?.expectedElements === "number" ? ctx.expectedElements : 0
+				const hasEnoughElements = elementCount >= MIN_ELEMENTS
+				
+				// Also check for designSpecs + createdComponents as fallback
+				const hasDesignSpecs = !!ctx?.designSpecs
+				const hasCreatedComponents = Array.isArray(ctx?.createdComponents) && ctx.createdComponents.length >= 3
+				
+				if (hasEnoughElements) {
+					console.log(`[SentinelFSM] Designer handoff approved: ${elementCount} elements created`)
+					return true
+				}
+				
+				// Fallback: designSpecs with multiple createdComponents
+				if (hasDesignSpecs && hasCreatedComponents) {
+					console.log(`[SentinelFSM] Designer handoff approved via fallback: ${ctx.createdComponents?.length} components`)
+					return true
+				}
+				
+				// Reject handoff if design quality is too low
+				console.log(`[SentinelFSM] Designer handoff REJECTED: only ${elementCount} elements (minimum ${MIN_ELEMENTS}), designSpecs=${hasDesignSpecs}, createdComponents=${ctx?.createdComponents?.length || 0}`)
+				return false
+			},
+			label: "Design submitted with sufficient quality, handoff to Design Review for verification",
 		},
 
 		// Design Review approves → Builder implements
@@ -443,6 +470,7 @@ export class SentinelStateMachine {
 				// Check if Designer should create UI mockup
 				const plan = handoffData.architectPlan as Record<string, unknown> | undefined
 				console.log("[SentinelFSM] architectPlan:", plan)
+				console.log("[SentinelFSM] handoffData root:", JSON.stringify(handoffData, null, 2))
 
 				// Helper to check truthy values (handles "true", true, 1, etc.)
 				const isTruthy = (val: unknown): boolean => {
@@ -450,20 +478,44 @@ export class SentinelStateMachine {
 					return false
 				}
 
-				// Check various flags that indicate UI design is needed
-				if (plan) {
-					const needsDesign = isTruthy(plan.needsDesign) || isTruthy(plan.needs_design)
-					const hasUI = isTruthy(plan.hasUI) || isTruthy(plan.has_ui) || isTruthy(plan.hasUi)
-					const useFigma = isTruthy(plan.useFigma) || isTruthy(plan.use_figma)
-					const usePenpot = isTruthy(plan.usePenpot) || isTruthy(plan.use_penpot)
-					const useUIDesignCanvas = isTruthy(plan.useUIDesignCanvas) || isTruthy(plan.use_ui_design_canvas)
+				// Check flags at both root level AND inside architectPlan
+				// Architect might set these flags in either location
+				const rootData = handoffData as Record<string, unknown>
+				
+				// Debug: Log the exact raw values before isTruthy check
+				console.log("[SentinelFSM] Raw flag values from plan:", {
+					needsDesign: plan?.needsDesign,
+					needs_design: plan?.needs_design,
+					hasUI: plan?.hasUI,
+					has_ui: plan?.has_ui,
+					useUIDesignCanvas: plan?.useUIDesignCanvas,
+					use_ui_design_canvas: plan?.use_ui_design_canvas
+				})
+				console.log("[SentinelFSM] Raw flag values from root:", {
+					needsDesign: rootData.needsDesign,
+					needs_design: rootData.needs_design,
+					hasUI: rootData.hasUI,
+					has_ui: rootData.has_ui,
+					useUIDesignCanvas: rootData.useUIDesignCanvas,
+					use_ui_design_canvas: rootData.use_ui_design_canvas
+				})
+				
+				const needsDesign = isTruthy(plan?.needsDesign) || isTruthy(plan?.needs_design) || 
+					isTruthy(rootData.needsDesign) || isTruthy(rootData.needs_design)
+				const hasUI = isTruthy(plan?.hasUI) || isTruthy(plan?.has_ui) || isTruthy(plan?.hasUi) ||
+					isTruthy(rootData.hasUI) || isTruthy(rootData.has_ui) || isTruthy(rootData.hasUi)
+				const useFigma = isTruthy(plan?.useFigma) || isTruthy(plan?.use_figma) ||
+					isTruthy(rootData.useFigma) || isTruthy(rootData.use_figma)
+				const usePenpot = isTruthy(plan?.usePenpot) || isTruthy(plan?.use_penpot) ||
+					isTruthy(rootData.usePenpot) || isTruthy(rootData.use_penpot)
+				const useUIDesignCanvas = isTruthy(plan?.useUIDesignCanvas) || isTruthy(plan?.use_ui_design_canvas) ||
+					isTruthy(rootData.useUIDesignCanvas) || isTruthy(rootData.use_ui_design_canvas)
 
-					console.log("[SentinelFSM] Design flags - needsDesign:", needsDesign, "hasUI:", hasUI, "useFigma:", useFigma, "usePenpot:", usePenpot, "useUIDesignCanvas:", useUIDesignCanvas)
+				console.log("[SentinelFSM] Design flags (after isTruthy) - needsDesign:", needsDesign, "hasUI:", hasUI, "useFigma:", useFigma, "usePenpot:", usePenpot, "useUIDesignCanvas:", useUIDesignCanvas)
 
-					if (needsDesign || hasUI || useFigma || usePenpot || useUIDesignCanvas) {
-						console.log("[SentinelFSM] UI design requested - routing to Designer for mockup generation")
-						return AgentState.DESIGNER
-					}
+				if (needsDesign || hasUI || useFigma || usePenpot || useUIDesignCanvas) {
+					console.log("[SentinelFSM] UI design requested - routing to Designer for mockup generation")
+					return AgentState.DESIGNER
 				}
 
 				// Also check notes for Figma/UI keywords as fallback
@@ -473,43 +525,81 @@ export class SentinelStateMachine {
 					return AgentState.DESIGNER
 				}
 
-				// CRITICAL: Also check the original user request for Figma keywords
+				// CRITICAL: Also check the original user request for design/UI keywords
 				// This ensures we route to Designer even if Architect forgot to set the flags
 				const task = this.taskRef.deref()
+				console.log("[SentinelFSM] Checking user request keywords, task exists:", !!task)
 				if (task) {
 					// Find the first user feedback message which contains the original user request
-					const firstUserMessage = task.clineMessages?.find(m => m.type === "say" && m.say === "user_feedback")
+					// In Sentinel mode, the first message might be "text" instead of "user_feedback"
+					const allMessages = task.clineMessages || []
+					console.log("[SentinelFSM] Total clineMessages:", allMessages.length)
+					console.log("[SentinelFSM] Message types:", allMessages.map(m => `${m.type}/${m.say || m.ask}`).slice(0, 10).join(", "))
+					
+					// First try to find user_feedback, then fall back to first text message with content
+					let firstUserMessage = allMessages.find(m => m.type === "say" && m.say === "user_feedback")
+					if (!firstUserMessage) {
+						// In Sentinel mode, the first message might be a "text" type that contains the user's request
+						firstUserMessage = allMessages.find(m => m.type === "say" && m.say === "text" && m.text && m.text.length > 0)
+					}
+					console.log("[SentinelFSM] First user message found:", !!firstUserMessage, "type:", firstUserMessage?.say, "text:", firstUserMessage?.text?.substring(0, 50))
+					
 					if (firstUserMessage && firstUserMessage.text) {
 						const userRequest = firstUserMessage.text.toLowerCase()
-						const figmaKeywords = ["figma", "使用figma", "用figma", "請先使用figma", "先figma", "設計稿", "mockup", "ui設計"]
+						console.log("[SentinelFSM] User request (first 100 chars):", userRequest.substring(0, 100))
+						
+						// Check for explicit design tool keywords
+						const figmaKeywords = ["figma", "使用figma", "用figma", "請先使用figma", "先figma", "設計稿", "mockup"]
 						if (figmaKeywords.some(keyword => userRequest.includes(keyword))) {
 							console.log("[SentinelFSM] Figma keywords found in ORIGINAL USER REQUEST - routing to Designer")
+							if (this.currentContext?.architectPlan) {
+								(this.currentContext.architectPlan as unknown as Record<string, unknown>).useFigma = true
+							}
 							return AgentState.DESIGNER
 						}
+						
 						// Check for Penpot keywords
 						const penpotKeywords = ["penpot", "使用penpot", "用penpot", "請先使用penpot", "先penpot"]
 						if (penpotKeywords.some(keyword => userRequest.includes(keyword))) {
 							console.log("[SentinelFSM] Penpot keywords found in ORIGINAL USER REQUEST - routing to Designer")
+							if (this.currentContext?.architectPlan) {
+								(this.currentContext.architectPlan as unknown as Record<string, unknown>).usePenpot = true
+							}
 							return AgentState.DESIGNER
 						}
-						// Also check for UI/app/web keywords that imply design is needed
-						const uiKeywords = ["app", "應用", "網頁", "web", "介面", "interface", "畫面", "頁面", "dashboard", "儀表板"]
-						const hasUI = uiKeywords.some(keyword => userRequest.includes(keyword))
-						if (hasUI) {
-							console.log("[SentinelFSM] UI/app keywords found in user request, checking if design tools are connected...")
-							// Check if TalkToFigma or Penpot is available
-							const provider = this.providerRef.deref()
-							const mcpHub = provider?.getMcpHub?.()
-							if (mcpHub) {
-								if (mcpHub.isTalkToFigmaConnected()) {
-									console.log("[SentinelFSM] TalkToFigma is connected, routing to Designer for Figma design")
-									return AgentState.DESIGNER
-								}
-								if (mcpHub.isPenpotMcpConnected()) {
-									console.log("[SentinelFSM] Penpot MCP is connected, routing to Designer for Penpot design")
-									return AgentState.DESIGNER
-								}
+						
+						// AGGRESSIVE UI DETECTION: Check for ANY UI/app/design related keywords
+						// If found, route to Designer with UIDesignCanvas as default
+						const designKeywords = [
+							// Chinese design keywords
+							"設計", "ui設計", "介面設計", "界面設計", "視覺設計", "畫面設計",
+							"幫我設計", "請設計", "設計一個", "設計個",
+							// App/Web keywords
+							"app", "應用", "應用程式", "網頁", "網站", "web", "網絡應用", "webapp",
+							"手機app", "行動應用", "mobile app",
+							// UI component keywords
+							"介面", "界面", "interface", "畫面", "頁面", "page", "screen",
+							"dashboard", "儀表板", "控制面板",
+							"登入", "login", "註冊", "register", "表單", "form",
+							"按鈕", "button", "選單", "menu", "導航", "navigation", "nav",
+							"卡片", "card", "列表", "list", "表格", "table",
+							// Design style keywords
+							"ui", "ux", "前端", "frontend", "視覺", "visual",
+							"布局", "layout", "排版", "版面",
+							// Specific app types
+							"運動app", "健身app", "計算機", "calculator", "todo", "待辦", "筆記", "note"
+						]
+						
+						if (designKeywords.some(keyword => userRequest.includes(keyword))) {
+							console.log("[SentinelFSM] UI/Design keywords detected in user request - routing to Designer with UIDesignCanvas")
+							// Set UIDesignCanvas as default for UI tasks
+							if (this.currentContext?.architectPlan) {
+								const plan = this.currentContext.architectPlan as unknown as Record<string, unknown>
+								plan.useUIDesignCanvas = true
+								plan.needsDesign = true
+								plan.hasUI = true
 							}
+							return AgentState.DESIGNER
 						}
 					}
 				}
@@ -524,6 +614,10 @@ export class SentinelStateMachine {
 
 			// Phase 1c: Design Review → Builder (if approved) or Designer (if rejected)
 			case AgentState.DESIGN_REVIEW: {
+				// [HANDOFF LOGGING] Full handoff data dump for debugging
+				console.log("[SentinelFSM] ========== DESIGN REVIEW HANDOFF DECISION ==========")
+				console.log("[SentinelFSM] Full handoffData:", JSON.stringify(handoffData, null, 2))
+				
 				// Check for rejection - support multiple formats
 				// Default to rejected (designReviewPassed must be explicitly true to pass)
 				const isApproved = handoffData.designReviewPassed === true
@@ -535,10 +629,14 @@ export class SentinelStateMachine {
 
 				console.log("[SentinelFSM] Design Review check:", {
 					designReviewPassed: handoffData.designReviewPassed,
+					designReviewPassedType: typeof handoffData.designReviewPassed,
 					designReviewStatus: handoffData.designReviewStatus,
 					completion_percentage: handoffData.completion_percentage,
 					isApproved,
 					isRejected,
+					reason: !isApproved ? "designReviewPassed !== true" : 
+						handoffData.designReviewStatus === "rejected" ? "designReviewStatus is rejected" :
+						(handoffData.completion_percentage && parseInt(handoffData.completion_percentage) < 80) ? "completion_percentage < 80" : "unknown"
 				})
 
 				if (isRejected) {
@@ -751,13 +849,32 @@ export class SentinelStateMachine {
 		console.log(`[SentinelFSM] switchToAgentMode: Switching to mode "${targetModeSlug}" for state ${agentState}`)
 
 		try {
-			await provider.handleModeSwitch(targetModeSlug)
-			console.log(`[SentinelFSM] switchToAgentMode: Successfully switched to "${targetModeSlug}"`)
+			// Before switching mode, populate mcpConnectionStatus in currentContext for Designer
+			if (agentState === AgentState.DESIGNER) {
+				const mcpHub = provider.getMcpHub()
+				const mcpConnectionStatus = {
+					uiDesignCanvas: mcpHub?.isUIDesignCanvasConnected?.() ?? false,
+					penpot: mcpHub?.getServers()?.some(s => s.name.toLowerCase().includes("penpot") && s.status === "connected") ?? false,
+					talkToFigma: mcpHub?.isTalkToFigmaConnected?.() ?? false,
+					figmaWrite: mcpHub?.getServers()?.some(s => s.name === "figma-write" && s.status === "connected") ?? false,
+					mcpUi: mcpHub?.getServers()?.some(s => s.name.toLowerCase().includes("mcp-ui") && s.status === "connected") ?? false,
+				}
+				console.log(`[SentinelFSM] Populating mcpConnectionStatus for Designer:`, mcpConnectionStatus)
+				
+				// Update currentContext with mcpConnectionStatus
+				if (this.currentContext) {
+					this.currentContext.mcpConnectionStatus = mcpConnectionStatus
+				}
+			}
 
-			// Auto-open Figma preview when entering Designer mode
+			// Pre-open design preview panel BEFORE mode switch for Designer
+			// This ensures the panel is ready to receive design updates immediately
 			if (agentState === AgentState.DESIGNER) {
 				await this.openFigmaPreviewForDesigner(provider)
 			}
+
+			await provider.handleModeSwitch(targetModeSlug)
+			console.log(`[SentinelFSM] switchToAgentMode: Successfully switched to "${targetModeSlug}"`)
 		} catch (error) {
 			console.error(`[SentinelFSM] switchToAgentMode: Failed to switch to "${targetModeSlug}":`, error)
 		}
@@ -774,14 +891,22 @@ export class SentinelStateMachine {
 
 			// Check if we should use UIDesignCanvas (from handoff context, state, or as default)
 			const mcpHub = provider.getMcpHub()
-			const uiDesignCanvasConnected = mcpHub?.getServers()?.some(
-				(s) => s.name === "UIDesignCanvas" && s.status === "connected"
-			)
+			const uiDesignCanvasConnected = mcpHub?.isUIDesignCanvasConnected?.() ?? false
 			const uiDesignCanvasEnabled = state.uiDesignCanvasEnabled ?? true  // Default true for built-in tool
-			const useUIDesignCanvas = this.currentContext?.architectPlan?.useUIDesignCanvas ||
-				(uiDesignCanvasEnabled && uiDesignCanvasConnected)
 
-			console.log(`[SentinelFSM] Design preview check - useUIDesignCanvas: ${useUIDesignCanvas}, enabled: ${uiDesignCanvasEnabled}, connected: ${uiDesignCanvasConnected}`)
+			// Check Figma connection status
+			const talkToFigmaConnected = mcpHub?.isTalkToFigmaConnected?.() ?? false
+			const figmaWriteConnected = mcpHub?.getServers()?.some(
+				(s) => s.name === "figma-write" && s.status === "connected"
+			) ?? false
+
+			// Use UIDesignCanvas if:
+			// 1. Explicitly requested in architect plan, OR
+			// 2. UIDesignCanvas is enabled AND (connected OR no Figma alternatives are connected)
+			const useUIDesignCanvas = this.currentContext?.architectPlan?.useUIDesignCanvas ||
+				(uiDesignCanvasEnabled && (uiDesignCanvasConnected || (!talkToFigmaConnected && !figmaWriteConnected)))
+
+			console.log(`[SentinelFSM] Design preview check - useUIDesignCanvas: ${useUIDesignCanvas}, enabled: ${uiDesignCanvasEnabled}, connected: ${uiDesignCanvasConnected}, talkToFigma: ${talkToFigmaConnected}, figmaWrite: ${figmaWriteConnected}`)
 
 			if (useUIDesignCanvas) {
 				// Open UIDesignCanvas preview panel

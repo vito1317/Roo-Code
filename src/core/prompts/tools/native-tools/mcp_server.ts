@@ -13,18 +13,23 @@ import { normalizeToolSchema, type JsonSchema } from "../../../../utils/json-sch
  */
 export function getMcpServerTools(mcpHub?: McpHub): OpenAI.Chat.ChatCompletionTool[] {
 	if (!mcpHub) {
+		console.log("[getMcpServerTools] No mcpHub provided, returning empty tools")
 		return []
 	}
 
 	const servers = mcpHub.getServers()
+	console.log(`[getMcpServerTools] Found ${servers.length} MCP servers:`, servers.map(s => `${s.name}(${s.status})`).join(", "))
+	
 	const tools: OpenAI.Chat.ChatCompletionTool[] = []
 	// Track seen tool names to prevent duplicates (e.g., when same server exists in both global and project configs)
 	const seenToolNames = new Set<string>()
 
 	for (const server of servers) {
 		if (!server.tools) {
+			console.log(`[getMcpServerTools] Server ${server.name} has no tools`)
 			continue
 		}
+		console.log(`[getMcpServerTools] Server ${server.name} has ${server.tools.length} tools:`, server.tools.map(t => t.name).join(", "))
 		for (const tool of server.tools) {
 			// Filter tools where tool.enabledForPrompt is not explicitly false
 			if (tool.enabledForPrompt === false) {

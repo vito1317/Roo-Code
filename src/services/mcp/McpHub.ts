@@ -756,10 +756,17 @@ export class McpHub {
 	 */
 	private async initializeBuiltInTalkToFigmaServer(): Promise<void> {
 		try {
-			// Check if TalkToFigma is enabled in settings
+			// Check if Figma Integration or TalkToFigma is enabled in settings
 			const provider = this.providerRef.deref()
 			if (provider) {
 				const state = await provider.getState()
+				// Check main Figma toggle first
+				const figmaEnabled = state?.figmaEnabled ?? true // Default to true
+				if (!figmaEnabled) {
+					console.log("[McpHub] Figma Integration is disabled, skipping TalkToFigma initialization")
+					return
+				}
+				// Then check TalkToFigma specific toggle
 				const talkToFigmaEnabled = state?.talkToFigmaEnabled ?? true // Default to true
 				if (!talkToFigmaEnabled) {
 					console.log("[McpHub] TalkToFigma is disabled in settings, skipping initialization")
@@ -2119,6 +2126,16 @@ export class McpHub {
 			try {
 				console.log(`[McpHub] Auto-reconnecting to "${name}"...`)
 
+				// For built-in SSE servers, use restartConnection to properly restart the server process
+				const builtInSseServers = ["UIDesignCanvas", "PenpotMCP"]
+				if (builtInSseServers.includes(name)) {
+					console.log(`[McpHub] Using restartConnection for built-in SSE server "${name}"`)
+					await this.restartConnection(name, source)
+					this.reconnectAttempts.delete(key)
+					console.log(`[McpHub] Auto-reconnect to "${name}" successful`)
+					return
+				}
+
 				// Read config from the connection BEFORE deleting
 				const config = JSON.parse(connection.server.config)
 				const validatedConfig = this.validateServerConfig(config, name)
@@ -2620,6 +2637,78 @@ export class McpHub {
 			return
 		}
 
+		// Special handling for built-in UIDesignCanvas server
+		if (serverName === "UIDesignCanvas") {
+			console.log("[McpHub] Restarting built-in UIDesignCanvas server")
+			vscode.window.showInformationMessage("正在重新連接 UI Design Canvas 伺服器... (Reconnecting to UI Design Canvas server...)")
+
+			// Stop existing server and delete connection
+			try {
+				await this.stopUIDesignCanvasServer()
+			} catch (stopError) {
+				console.log("[McpHub] Error stopping UIDesignCanvas (ignoring):", stopError)
+			}
+
+			try {
+				await this.deleteConnection(serverName, source)
+			} catch (deleteError) {
+				console.log("[McpHub] Error disconnecting UIDesignCanvas (ignoring):", deleteError)
+			}
+
+			// Wait a bit for port to be released
+			await delay(1000)
+
+			// Re-initialize the built-in server
+			try {
+				await this.initializeBuiltInUIDesignCanvasServer()
+				vscode.window.showInformationMessage("UI Design Canvas 伺服器連接成功！(UI Design Canvas server connected!)")
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				console.error("[McpHub] UIDesignCanvas reconnection failed:", errorMsg)
+				vscode.window.showErrorMessage(`UI Design Canvas 連接失敗: ${errorMsg}`)
+			}
+
+			await this.notifyWebviewOfServerChanges()
+			this.isConnecting = false
+			return
+		}
+
+		// Special handling for built-in PenpotMCP server
+		if (serverName === "PenpotMCP") {
+			console.log("[McpHub] Restarting built-in PenpotMCP server")
+			vscode.window.showInformationMessage("正在重新連接 Penpot MCP 伺服器... (Reconnecting to Penpot MCP server...)")
+
+			// Stop existing server and delete connection
+			try {
+				await this.stopPenpotServer()
+			} catch (stopError) {
+				console.log("[McpHub] Error stopping PenpotMCP (ignoring):", stopError)
+			}
+
+			try {
+				await this.deleteConnection(serverName, source)
+			} catch (deleteError) {
+				console.log("[McpHub] Error disconnecting PenpotMCP (ignoring):", deleteError)
+			}
+
+			// Wait a bit for ports to be released
+			await delay(1000)
+
+			// Re-initialize the built-in server
+			try {
+				await this.initializeBuiltInPenpotServer()
+				vscode.window.showInformationMessage("Penpot MCP 伺服器連接成功！(Penpot MCP server connected!)")
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				console.error("[McpHub] PenpotMCP reconnection failed:", errorMsg)
+				vscode.window.showErrorMessage(`Penpot MCP 連接失敗: ${errorMsg}`)
+			}
+
+			await this.notifyWebviewOfServerChanges()
+			this.isConnecting = false
+			return
+		}
+
 		// Special handling for built-in MCP-UI server
 		if (serverName === "MCP-UI") {
 			console.log("[McpHub] Manually restarting built-in MCP-UI server")
@@ -2875,6 +2964,10 @@ export class McpHub {
 		source?: "global" | "project",
 	): Promise<void> {
 		try {
+			// List of built-in servers that don't have config files
+			const builtInServers = ["TalkToFigma", "UIDesignCanvas", "Penpot", "MCP-UI"]
+			const isBuiltIn = builtInServers.includes(serverName)
+
 			// Find the connection to determine if it's a global or project server
 			const connection = this.findConnection(serverName, source)
 			if (!connection) {
@@ -2882,7 +2975,41 @@ export class McpHub {
 			}
 
 			const serverSource = connection.server.source || "global"
-			// Update the server config in the appropriate file
+
+			// Special handling for built-in servers - save state to extension state instead of file
+			if (isBuiltIn) {
+				console.log(`[McpHub] Toggling built-in server ${serverName} disabled=${disabled}`)
+				
+				// Update connection object directly (built-in servers don't use config files)
+				connection.server.disabled = disabled
+				
+				if (disabled && connection.server.status === "connected") {
+					// Disconnect the server
+					this.removeFileWatchersForServer(serverName)
+					await this.deleteConnection(serverName, serverSource)
+					console.log(`[McpHub] Built-in server ${serverName} disabled and disconnected`)
+				} else if (!disabled && connection.server.status === "disconnected") {
+					// Re-enable: delete and reinitialize
+					await this.deleteConnection(serverName, serverSource)
+					
+					// Reinitialize based on server type
+					if (serverName === "TalkToFigma") {
+						await this.initializeBuiltInTalkToFigmaServer()
+					} else if (serverName === "UIDesignCanvas") {
+						await this.initializeBuiltInUIDesignCanvasServer()
+					} else if (serverName === "Penpot") {
+						await this.initializeBuiltInPenpotServer()
+					} else if (serverName === "MCP-UI") {
+						await this.initializeBuiltInMcpUiServer()
+					}
+					console.log(`[McpHub] Built-in server ${serverName} re-enabled`)
+				}
+				
+				await this.notifyWebviewOfServerChanges()
+				return
+			}
+
+			// Non-built-in servers: Update the server config in the appropriate file
 			await this.updateServerConfig(serverName, { disabled }, serverSource)
 
 			// Update the connection object
@@ -3280,6 +3407,12 @@ export class McpHub {
 		}
 
 		try {
+			// [MCP LOGGING] Log the request
+			const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5)
+			console.log(`[MCP-REQ:${requestId}] Server: ${serverName}, Tool: ${toolName}`)
+			console.log(`[MCP-REQ:${requestId}] Arguments:`, JSON.stringify(processedArguments, null, 2))
+			
+			const startTime = Date.now()
 			const result = await connection.client.request(
 				{
 					method: "tools/call",
@@ -3293,6 +3426,17 @@ export class McpHub {
 					timeout,
 				},
 			)
+			
+			// [MCP LOGGING] Log the response
+			const duration = Date.now() - startTime
+			const resultSummary = result.content?.map((c: any) => {
+				if (c.type === "text") return { type: "text", textPreview: (c.text as string).substring(0, 500) }
+				if (c.type === "image") return { type: "image", mimeType: c.mimeType }
+				return c
+			})
+			console.log(`[MCP-RES:${requestId}] Duration: ${duration}ms, isError: ${result.isError}`)
+			console.log(`[MCP-RES:${requestId}] Content:`, JSON.stringify(resultSummary, null, 2))
+
 
 			// Check if the result indicates a Figma connection error
 			// Only trigger error handling for tool call failures, not for "please join" messages before connection
@@ -3779,6 +3923,39 @@ export class McpHub {
 		} catch (error) {
 			this.showErrorMessage(`Failed to update settings for tool ${toolName}`, error)
 			throw error // Re-throw to ensure the error is properly handled
+		}
+	}
+
+	/**
+	 * Handles enabling/disabling TalkToFigma MCP server
+	 * When disabled, stops the TalkToFigma server; when enabled, starts it
+	 * @param enabled Whether TalkToFigma should be enabled or disabled
+	 * @returns Promise<void>
+	 */
+	async handleTalkToFigmaEnabledChange(enabled: boolean): Promise<void> {
+		console.log(`[McpHub] handleTalkToFigmaEnabledChange called with enabled=${enabled}`)
+		if (!enabled) {
+			// If TalkToFigma is being disabled, disconnect the server
+			const talkToFigmaConnection = this.connections.find((conn) => conn.server.name === "TalkToFigma")
+			if (talkToFigmaConnection) {
+				try {
+					console.log("[McpHub] Disconnecting TalkToFigma server...")
+					await this.deleteConnection("TalkToFigma", talkToFigmaConnection.server.source)
+					console.log("[McpHub] TalkToFigma server disconnected successfully")
+					// Notify webview of server changes
+					await this.notifyWebviewOfServerChanges()
+				} catch (error) {
+					console.error(`Failed to disconnect TalkToFigma server: ${error}`)
+				}
+			} else {
+				console.log("[McpHub] TalkToFigma server not found, nothing to disconnect")
+			}
+		} else {
+			// If TalkToFigma is being enabled, initialize the server
+			console.log("[McpHub] Enabling TalkToFigma server...")
+			await this.initializeBuiltInTalkToFigmaServer()
+			// Notify webview of server changes
+			await this.notifyWebviewOfServerChanges()
 		}
 	}
 

@@ -308,20 +308,9 @@ export async function presentAssistantMessage(cline: Task) {
 				const shouldRouteToArchitect = isSentinelAgent(currentMode) && currentMode !== "sentinel-architect"
 
 				if (shouldRouteToArchitect && type === "tool") {
-					// Route to Architect for approval
-					const { approved, feedback } = await askArchitectForApproval(
-						cline,
-						partialMessage || toolDescription(),
-					)
-					if (!approved) {
-						if (feedback) {
-							pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(feedback)))
-						} else {
-							pushToolResult(formatResponse.toolDenied())
-						}
-						cline.didRejectTool = true
-						return false
-					}
+					// Auto-approve MCP tool calls - they are essential for Designer workflow
+					// and don't need additional Architect approval
+					console.log(`[ArchitectApproval] Auto-approved MCP tool: ${mcpBlock.serverName}/${mcpBlock.toolName}`)
 					return true
 				}
 
@@ -666,7 +655,26 @@ export async function presentAssistantMessage(cline: Task) {
 				const shouldRouteToArchitect = isSentinelAgent(currentMode) && currentMode !== "sentinel-architect"
 
 				if (shouldRouteToArchitect && type === "tool") {
-					// Route to Architect for approval
+					// Auto-approve safe tools without routing to Architect
+					// This prevents unnecessary slowdowns and enables parallel UI creation
+					const autoApproveTools = [
+						"use_mcp_tool",
+						"adjust_layout",
+						"read_file",
+						"list_files",
+						"search_files",
+						"codebase_search",
+						"update_todo_list",
+						"handoff_context",
+						"attempt_completion",
+					]
+					
+					if (autoApproveTools.includes(block.name)) {
+						console.log(`[ArchitectApproval] Auto-approved safe tool: ${block.name}`)
+						return true
+					}
+					
+					// Route to Architect for approval (for potentially dangerous tools)
 					const toolDesc = partialMessage || `[tool: ${block.name}]`
 					const { approved, feedback } = await askArchitectForApproval(cline, toolDesc)
 					if (!approved) {

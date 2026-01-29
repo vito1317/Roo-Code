@@ -30,7 +30,8 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 	const cwd = provider.cwd
 
 	const mode = message.mode ?? defaultModeSlug
-	const customModes = await provider.customModesManager.getCustomModes()
+	// Pass mcpHub to get dynamic MCP connection status for context-aware modes like Designer
+	const customModes = await provider.customModesManager.getCustomModes(mcpEnabled ? provider.getMcpHub() : undefined)
 
 	const rooIgnoreInstructions = provider.getCurrentTask()?.rooIgnoreController?.getInstructions()
 
