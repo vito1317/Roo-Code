@@ -55,6 +55,10 @@ interface ColorInfo {
 interface LayoutContext {
 	containerWidth: number
 	containerHeight: number
+	/** Frame's X position on canvas - must be added to all element positions */
+	offsetX: number
+	/** Frame's Y position on canvas - must be added to all element positions */
+	offsetY: number
 	totalElements: number
 	displayElements: number
 	buttonElements: number
@@ -99,12 +103,13 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 			const gapX = parseInt(params.gapX || String(gap), 10)
 			const gapY = parseInt(params.gapY || String(gap), 10)
 			const startX = parseInt(params.startX || "20", 10)
-			const startY = parseInt(params.startY || "80", 10)
+			const startY = parseInt(params.startY || "20", 10)
 			const sortBy = params.sortBy || "name"
-			// AI mode is now the default (use useAI="false" to disable)
-			const useAI = params.useAI !== "false"
+			// Algorithm mode is now the default (AI mode often makes bad decisions)
+			// Use useAI="true" to enable AI-based layout
+			const useAI = params.useAI === "true"
 			const adjustColors = params.adjustColors === "true"
-			// adjustLayers defaults to true in AI mode for better text visibility
+			// adjustLayers defaults to true for better text visibility
 			const adjustLayers = params.adjustLayers !== "false"
 
 			// Validate layout type
@@ -190,7 +195,9 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 
 			// Get nodes to arrange
 			let nodes: NodeInfo[] = []
-			let containerInfo: { width: number; height: number } = { width: 400, height: 600 }
+			let containerInfo: { width: number; height: number; offsetX: number; offsetY: number } = {
+				width: 400, height: 600, offsetX: 0, offsetY: 0
+			}
 
 			// Parse nodeIds if provided
 			let nodeIds: string[] = []
@@ -223,7 +230,12 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 				if (serverName === "TalkToFigma") {
 					const result = await callFigmaTool("get_node_info", { nodeId: params.within })
 					const containerData = this.parseContainerInfo(result)
-					containerInfo = { width: containerData.width, height: containerData.height }
+					containerInfo = {
+						width: containerData.width,
+						height: containerData.height,
+						offsetX: containerData.offsetX,
+						offsetY: containerData.offsetY,
+					}
 
 					const { nodes: parsedNodes, duplicateIds } = this.parseChildrenFromNodeInfo(result, params.within)
 					nodes = parsedNodes
@@ -286,6 +298,8 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 			const layoutContext: LayoutContext = {
 				containerWidth: containerInfo.width,
 				containerHeight: containerInfo.height,
+				offsetX: containerInfo.offsetX,
+				offsetY: containerInfo.offsetY,
 				totalElements: nodes.length,
 				displayElements: display.length,
 				buttonElements: paired.length,
@@ -388,9 +402,9 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 		adjustLayers: boolean,
 		pushToolResult: (result: string) => void,
 	): Promise<void> {
-		await task.say("text", `🤖 AI 正在分析佈局並決定最佳位置...`)
+		await task.say("text", `🤖 正在分析佈局...`)
 
-		// Build element descriptions for AI
+		// Build element descriptions
 		const allElements: Array<{
 			id: string
 			name: string
@@ -454,6 +468,10 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 				currentY: node.y,
 			})
 		}
+
+		// Detect UI type for logging
+		const uiType = this.detectUIType(allElements)
+		await task.say("text", `🤖 AI 正在分析 ${uiType} UI 並決定最佳佈局...`)
 
 		// Ask AI to decide positions
 		const aiPrompt = this.buildLayoutAIPrompt(allElements, context)
@@ -530,13 +548,16 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 			await task.say("text", `🚀 開始執行佈局調整...`)
 
 			// Execute all position changes
+			// NOTE: move_node uses coordinates RELATIVE to parent frame, not absolute canvas coordinates
+			console.log(`[AdjustLayout] Positions are relative to frame (no offset needed)`)
+
 			const calls: Array<{ server: string; tool: string; args: Record<string, unknown> }> = []
 
 			for (const pos of aiPositions) {
 				const element = allElements.find((e) => e.id === pos.id)
 				if (!element) continue
 
-				// Move rectangle
+				// Move rectangle - positions are relative to parent frame
 				calls.push({
 					server: serverName,
 					tool: serverName === "TalkToFigma" ? "move_node" : "set_position",
@@ -700,6 +721,7 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 
 	/**
 	 * Build prompt for AI to decide layout positions
+	 * Dynamically generates layout hints based on detected elements
 	 */
 	private buildLayoutAIPrompt(
 		elements: Array<{ id: string; name: string; type: string; width: number; height: number; text?: string }>,
@@ -707,76 +729,261 @@ export class AdjustLayoutTool extends BaseTool<"adjust_layout"> {
 	): string {
 		const buttonElements = elements.filter((e) => e.type === "button")
 		const displayElements = elements.filter((e) => e.type === "display")
-
-		// Identify button types based on text content (handle variations)
-		const isNumber = (t: string) => /^[0-9]$/.test(t)
-		const isOperator = (t: string) => /^[+\-×÷=*\/xX]$/.test(t)
-		const isFunction = (t: string) =>
-			/^[C%±.\u232b]$/i.test(t) || ["AC", "CE", "CLR", "⌫", "DEL", "+/-"].includes(t)
-
-		const buttonsByType = {
-			numbers: buttonElements.filter((e) => isNumber(e.text || "")),
-			operators: buttonElements.filter((e) => isOperator(e.text || "")),
-			functions: buttonElements.filter((e) => isFunction(e.text || "")),
-			other: buttonElements.filter((e) => {
-				const t = e.text || ""
-				return !isNumber(t) && !isOperator(t) && !isFunction(t)
-			}),
-		}
+		const standaloneElements = elements.filter((e) => e.type === "standalone")
 
 		// Build element list with IDs and text content for AI reference
 		const elementDetails = elements.map((e) => ({
 			id: e.id,
 			type: e.type,
-			text: e.text || "?",
-			size: `${e.width}×${e.height}`,
+			text: e.text || "(無文字)",
+			width: e.width,
+			height: e.height,
 		}))
 
-		return `你是一個 UI 佈局專家。請為計算器界面安排以下元素的位置。
+		// Calculate available space and grid coordinates
+		const buttonWidth = buttonElements[0]?.width || 60
+		const buttonHeight = buttonElements[0]?.height || 60
+		const gap = context.gapX
+		const startX = context.startX
+		const startY = context.startY
+
+		// Pre-calculate display position
+		const displayHeight = displayElements[0]?.height || 80
+		const buttonsStartY = displayElements.length > 0 ? startY + displayHeight + gap : startY
+
+		// Dynamically generate position mapping based on detected elements
+		const dynamicPositionMapping = this.generateDynamicPositionMapping(
+			buttonElements,
+			displayElements,
+			{
+				startX,
+				startY,
+				buttonsStartY,
+				buttonWidth,
+				buttonHeight,
+				gap,
+				containerWidth: context.containerWidth,
+				containerHeight: context.containerHeight,
+			}
+		)
+
+		return `你是一個智能 UI 佈局專家。你的任務是根據下方的「元素位置對照表」為每個元素指定座標。
 
 ## 容器資訊
-- 寬度: ${context.containerWidth}px
-- 高度: ${context.containerHeight}px
-- 建議起始位置: (${context.startX}, ${context.startY})
-- 建議間距: ${context.gapX}px
+- 容器尺寸: ${context.containerWidth}px × ${context.containerHeight}px
+- 起始位置: (${startX}, ${startY})
+- 間距: ${gap}px
 
 ## 元素列表 (共 ${elements.length} 個)
+\`\`\`json
 ${JSON.stringify(elementDetails, null, 2)}
+\`\`\`
 
 ## 元素統計
-- 顯示器: ${displayElements.length} 個
-- 數字按鈕 (0-9): ${buttonsByType.numbers.map((b) => b.text).join(", ") || "無"}
-- 運算符 (+, -, ×, ÷, =): ${buttonsByType.operators.map((b) => b.text).join(", ") || "無"}
-- 功能按鈕 (C, %, ±, ., ⌫): ${buttonsByType.functions.map((b) => b.text).join(", ") || "無"}
-- 其他按鈕: ${buttonsByType.other.map((b) => b.text).join(", ") || "無"}
+- 顯示區域 (display): ${displayElements.length} 個
+- 按鈕 (button): ${buttonElements.length} 個 - [${buttonElements.map((b) => b.text || "?").join(", ")}]
+- 獨立元素 (standalone): ${standaloneElements.length} 個
 
-## 按鈕尺寸
-- 寬度: ${buttonElements[0]?.width || 60}px
-- 高度: ${buttonElements[0]?.height || 60}px
+${dynamicPositionMapping}
 
-## 標準計算器佈局規則 (必須遵守！)
-1. **顯示器 (display)**: 放在最上方，寬度佔滿 (約 ${context.containerWidth - context.startX * 2}px)
-2. **第一行 (功能按鈕)**: C/AC, ⌫, %, ÷  (或 C, ±, %, ÷)
-3. **第二行**: 7, 8, 9, ×
-4. **第三行**: 4, 5, 6, -
-5. **第四行**: 1, 2, 3, +
-6. **第五行**: 0 (佔兩格寬), ., =
+## 輸出要求
 
-## 位置計算公式
-- 列 X 位置: startX + col * (buttonWidth + gap) = ${context.startX} + col * (${buttonElements[0]?.width || 60} + ${context.gapX})
-- 行 Y 位置: displayY + displayHeight + gap + row * (buttonHeight + gap)
+**直接使用上面「元素位置對照表」中的座標！**
 
-## 輸出格式
-返回 JSON 陣列，為每個元素指定 x, y 位置：
+輸出格式：
 \`\`\`json
 [
-  {"id": "display-0", "x": ${context.startX}, "y": ${context.startY}},
-  {"id": "button-0", "x": ${context.startX}, "y": ${context.startY + 80}},
+  {"id": "元素ID", "x": 對照表中的X, "y": 對照表中的Y},
   ...
 ]
 \`\`\`
 
-⚠️ 只返回 JSON 陣列，不要其他文字！`
+⚠️ 只返回 JSON 陣列，不要任何解釋文字！`
+	}
+
+	/**
+	 * Dynamically generate position mapping based on detected elements
+	 * Analyzes button texts to determine UI type and generates appropriate grid
+	 */
+	private generateDynamicPositionMapping(
+		buttons: Array<{ id: string; text?: string; width: number; height: number }>,
+		displays: Array<{ id: string; width: number; height: number }>,
+		grid: {
+			startX: number
+			startY: number
+			buttonsStartY: number
+			buttonWidth: number
+			buttonHeight: number
+			gap: number
+			containerWidth: number
+			containerHeight: number
+		}
+	): string {
+		const { startX, startY, buttonsStartY, buttonWidth, buttonHeight, gap } = grid
+
+		// Helper to calculate grid position
+		const col = (c: number) => startX + c * (buttonWidth + gap)
+		const row = (r: number) => buttonsStartY + r * (buttonHeight + gap)
+
+		// Analyze button texts to detect UI type
+		const buttonTexts = buttons.map(b => b.text || "").filter(t => t.length > 0)
+		const hasNumbers = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"].some(n => buttonTexts.includes(n))
+		const hasOperators = ["+", "-", "×", "÷", "*", "/", "="].some(op => buttonTexts.some(t => t === op))
+		const hasClear = ["C", "AC", "CE"].some(c => buttonTexts.some(t => t === c || t.toUpperCase() === c))
+
+		// Detect form-type UI (has action buttons like submit, cancel, add, etc.)
+		const formKeywords = ["submit", "cancel", "ok", "確認", "取消", "送出", "save", "reset", "add", "添加", "新增", "delete", "刪除", "清除"]
+		const isFormUI = formKeywords.some(k => buttonTexts.some(t => t.toLowerCase().includes(k.toLowerCase())))
+		const isCalculator = hasNumbers && (hasOperators || hasClear) && buttons.length >= 10
+
+		let mapping = "## 元素位置對照表\n\n"
+
+		// For form UI: stack all elements vertically
+		if (isFormUI || (!isCalculator && displays.length > 0)) {
+			mapping += "### 表單佈局 (垂直堆疊)\n"
+			mapping += "| ID | 類型 | X | Y |\n|-----|-----|-----|-----|\n"
+
+			let currentY = startY
+
+			// Display elements first (full width, stacked)
+			displays.forEach((d, i) => {
+				mapping += `| display-${i} | display | ${startX} | ${currentY} |\n`
+				currentY += d.height + gap
+			})
+
+			// Then buttons (stacked or side by side for action buttons)
+			if (buttons.length <= 3) {
+				// Few buttons - arrange horizontally at bottom
+				const totalBtnWidth = buttons.reduce((sum, b) => sum + b.width, 0) + (buttons.length - 1) * gap
+				let btnX = startX + Math.max(0, (grid.containerWidth - 2 * startX - totalBtnWidth) / 2)
+				buttons.forEach((btn, i) => {
+					mapping += `| button-${i} | ${btn.text || "button"} | ${btnX} | ${currentY} |\n`
+					btnX += btn.width + gap
+				})
+			} else {
+				// More buttons - stack vertically
+				buttons.forEach((btn, i) => {
+					mapping += `| button-${i} | ${btn.text || "button"} | ${startX} | ${currentY} |\n`
+					currentY += btn.height + gap
+				})
+			}
+
+			return mapping
+		}
+
+		// Add display positions for calculator
+		if (displays.length > 0) {
+			mapping += "### 顯示區域\n"
+			mapping += "| ID | X | Y |\n|-----|-----|-----|\n"
+			displays.forEach((d, i) => {
+				mapping += `| display-${i} | ${startX} | ${startY} |\n`
+			})
+			mapping += "\n"
+		}
+
+		// Detect calculator and generate specific mapping
+		if (isCalculator) {
+			mapping += "### 按鈕 (計算機佈局 - 4列)\n"
+			mapping += "| ID | 文字 | X | Y |\n|-----|-----|-----|-----|\n"
+
+			// Track used positions to avoid conflicts
+			const usedPositions = new Set<string>()
+			const getPositionKey = (c: number, r: number) => `${c},${r}`
+
+			// Standard calculator layout - priority order for each position
+			// Each position has a list of possible button texts, first match wins
+			const calcPositions: Array<{ col: number; row: number; texts: string[] }> = [
+				// Row 0: Function keys
+				{ col: 0, row: 0, texts: ["C", "AC", "CE", "CLR"] },
+				{ col: 1, row: 0, texts: ["±", "⌫", "+/-", "DEL", "←"] },
+				{ col: 2, row: 0, texts: ["%"] },
+				{ col: 3, row: 0, texts: ["÷", "/"] },
+				// Row 1: 7, 8, 9, ×
+				{ col: 0, row: 1, texts: ["7"] },
+				{ col: 1, row: 1, texts: ["8"] },
+				{ col: 2, row: 1, texts: ["9"] },
+				{ col: 3, row: 1, texts: ["×", "*", "x", "X"] },
+				// Row 2: 4, 5, 6, -
+				{ col: 0, row: 2, texts: ["4"] },
+				{ col: 1, row: 2, texts: ["5"] },
+				{ col: 2, row: 2, texts: ["6"] },
+				{ col: 3, row: 2, texts: ["-"] },
+				// Row 3: 1, 2, 3, +
+				{ col: 0, row: 3, texts: ["1"] },
+				{ col: 1, row: 3, texts: ["2"] },
+				{ col: 2, row: 3, texts: ["3"] },
+				{ col: 3, row: 3, texts: ["+"] },
+				// Row 4: 0, ., =
+				{ col: 0, row: 4, texts: ["0"] },
+				{ col: 1, row: 4, texts: ["00"] }, // Some calculators have 00
+				{ col: 2, row: 4, texts: [".", ","] },
+				{ col: 3, row: 4, texts: ["="] },
+			]
+
+			// Build button text to position map (first match only)
+			const buttonPositions = new Map<number, { col: number; row: number }>()
+			const assignedTexts = new Set<string>()
+
+			// First pass: assign buttons to their standard positions
+			for (const pos of calcPositions) {
+				for (const text of pos.texts) {
+					if (assignedTexts.has(text)) continue
+
+					const btnIndex = buttons.findIndex(b => b.text === text && !buttonPositions.has(buttons.indexOf(b)))
+					if (btnIndex !== -1) {
+						const posKey = getPositionKey(pos.col, pos.row)
+						if (!usedPositions.has(posKey)) {
+							buttonPositions.set(btnIndex, { col: pos.col, row: pos.row })
+							usedPositions.add(posKey)
+							assignedTexts.add(text)
+							break // Only assign one button per position
+						}
+					}
+				}
+			}
+
+			// Second pass: assign remaining buttons to unused positions
+			let nextRow = 5 // Start from row 5 for overflow
+			let nextCol = 0
+			buttons.forEach((btn, i) => {
+				if (!buttonPositions.has(i)) {
+					// Find next available position
+					while (usedPositions.has(getPositionKey(nextCol, nextRow))) {
+						nextCol++
+						if (nextCol >= 4) {
+							nextCol = 0
+							nextRow++
+						}
+					}
+					buttonPositions.set(i, { col: nextCol, row: nextRow })
+					usedPositions.add(getPositionKey(nextCol, nextRow))
+					nextCol++
+					if (nextCol >= 4) {
+						nextCol = 0
+						nextRow++
+					}
+				}
+			})
+
+			// Output mapping table
+			buttons.forEach((btn, i) => {
+				const pos = buttonPositions.get(i)!
+				mapping += `| button-${i} | ${btn.text || "?"} | ${col(pos.col)} | ${row(pos.row)} |\n`
+			})
+		} else {
+			// Generic grid layout
+			const columns = Math.min(4, buttons.length)
+			mapping += `### 按鈕 (網格佈局 - ${columns}列)\n`
+			mapping += "| ID | 文字 | X | Y |\n|-----|-----|-----|-----|\n"
+
+			buttons.forEach((btn, i) => {
+				const c = i % columns
+				const r = Math.floor(i / columns)
+				mapping += `| button-${i} | ${btn.text || "?"} | ${col(c)} | ${row(r)} |\n`
+			})
+		}
+
+		return mapping
 	}
 
 	/**
@@ -794,7 +1001,15 @@ ${JSON.stringify(elementDetails, null, 2)}
 			// Use task's API to get AI response
 			const messages = [{ role: "user" as const, content: prompt }]
 
-			const stream = task.api.createMessage("你是 UI 佈局專家，專門為計算器等應用安排按鈕位置。", messages, {
+			const systemPrompt = `你是智能 UI 佈局專家。你能夠：
+1. 自動識別 UI 類型（計算機、表單、菜單、儀表板等）
+2. 根據 UI 類型選擇最佳的佈局策略
+3. 精確計算每個元素的位置座標
+4. 確保佈局美觀、對齊、不重疊
+
+你只輸出 JSON 陣列，不輸出任何解釋文字。`
+
+			const stream = task.api.createMessage(systemPrompt, messages, {
 				taskId: `adjust-layout-ai-${Date.now()}`,
 			})
 
@@ -930,10 +1145,91 @@ ${JSON.stringify(elementDetails, null, 2)}
 	}
 
 	/**
-	 * Calculate fallback positions using standard calculator layout
-	 * Handles various button text representations (×/*, ÷//, etc.)
+	 * Detect UI type based on element text content
+	 * Returns: "calculator" | "form" | "menu" | "dashboard" | "generic"
+	 */
+	private detectUIType(elements: Array<{ text?: string; type: string }>): string {
+		const buttonTexts = elements
+			.filter((e) => e.type === "button" && e.text)
+			.map((e) => e.text!.trim())
+
+		// Calculator detection: has numbers 0-9 and operators
+		const hasNumbers = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"].some((n) =>
+			buttonTexts.some((t) => t === n),
+		)
+		const hasOperators = ["+", "-", "×", "÷", "*", "/", "="].some((op) =>
+			buttonTexts.some((t) => t === op || t.includes(op)),
+		)
+		const hasClear = ["C", "AC", "CE", "CLR"].some((c) => buttonTexts.some((t) => t === c))
+
+		if (hasNumbers && (hasOperators || hasClear)) {
+			console.log(`[AdjustLayout] Detected UI type: calculator`)
+			return "calculator"
+		}
+
+		// Form detection: has submit/cancel buttons or input-like elements
+		const formKeywords = ["submit", "cancel", "ok", "確認", "取消", "送出", "save", "reset"]
+		const hasFormButtons = formKeywords.some((k) =>
+			buttonTexts.some((t) => t.toLowerCase().includes(k)),
+		)
+		if (hasFormButtons) {
+			console.log(`[AdjustLayout] Detected UI type: form`)
+			return "form"
+		}
+
+		// Menu detection: mostly text-based options
+		const displays = elements.filter((e) => e.type === "display")
+		const buttons = elements.filter((e) => e.type === "button")
+		if (buttons.length > 3 && displays.length === 0) {
+			const avgTextLength =
+				buttonTexts.reduce((sum, t) => sum + t.length, 0) / buttonTexts.length
+			if (avgTextLength > 3) {
+				// Menu items usually have longer text
+				console.log(`[AdjustLayout] Detected UI type: menu`)
+				return "menu"
+			}
+		}
+
+		// Dashboard detection: multiple display areas
+		if (displays.length >= 2) {
+			console.log(`[AdjustLayout] Detected UI type: dashboard`)
+			return "dashboard"
+		}
+
+		console.log(`[AdjustLayout] Detected UI type: generic`)
+		return "generic"
+	}
+
+	/**
+	 * Calculate fallback positions - dynamically detects UI type and applies appropriate layout
+	 * Handles various UI types: calculator, form, menu, dashboard, generic
 	 */
 	private calculateFallbackPositions(
+		elements: Array<{ id: string; width: number; height: number; type: string; text?: string }>,
+		context: LayoutContext,
+	): Array<{ id: string; x: number; y: number }> {
+		// Detect UI type from elements
+		const uiType = this.detectUIType(elements)
+
+		// Route to appropriate layout method based on UI type
+		switch (uiType) {
+			case "calculator":
+				return this.calculateCalculatorLayout(elements, context)
+			case "form":
+				return this.calculateFormLayout(elements, context)
+			case "menu":
+				return this.calculateMenuLayout(elements, context)
+			case "dashboard":
+				return this.calculateDashboardLayout(elements, context)
+			default:
+				return this.calculateGenericGridLayout(elements, context)
+		}
+	}
+
+	/**
+	 * Calculator layout - standard 4-column grid with display at top
+	 */
+	private calculateCalculatorLayout(
 		elements: Array<{ id: string; width: number; height: number; type: string; text?: string }>,
 		context: LayoutContext,
 	): Array<{ id: string; x: number; y: number }> {
@@ -956,11 +1252,9 @@ ${JSON.stringify(elementDetails, null, 2)}
 		}
 
 		// 2. Group buttons by their text content for calculator layout
-		// Normalize button text to handle variations (×/* , ÷// , etc.)
 		const buttonMap = new Map<string, (typeof elements)[0]>()
 		const normalizeText = (text: string): string => {
 			const normalized = text.trim()
-			// Map common variations to standard keys
 			const mappings: Record<string, string> = {
 				"*": "×",
 				x: "×",
@@ -982,23 +1276,21 @@ ${JSON.stringify(elementDetails, null, 2)}
 			if (btn.text) {
 				const normalizedText = normalizeText(btn.text)
 				buttonMap.set(normalizedText, btn)
-				// Also store original text as key for better matching
 				if (normalizedText !== btn.text) {
 					buttonMap.set(btn.text, btn)
 				}
 			}
 		}
 
-		console.log(`[AdjustLayout] Button map keys: ${Array.from(buttonMap.keys()).join(", ")}`)
+		console.log(`[AdjustLayout] Calculator button map: ${Array.from(buttonMap.keys()).join(", ")}`)
 
-		// Standard calculator layout rows - include many variations for flexibility
-		// The algorithm will try to match buttons in each row
+		// Standard calculator layout rows
 		const calcLayout = [
-			["C", "AC", "CE", "⌫", "±", "%", "÷", "/"], // Function row (many variations)
-			["7", "8", "9", "×", "*", "x", "X"], // Numbers row 1 (include multiply variations)
-			["4", "5", "6", "-"], // Numbers row 2
-			["1", "2", "3", "+"], // Numbers row 3
-			["0", ".", "="], // Bottom row (0 should span 2 columns)
+			["C", "AC", "CE", "⌫", "±", "%", "÷", "/"],
+			["7", "8", "9", "×", "*", "x", "X"],
+			["4", "5", "6", "-"],
+			["1", "2", "3", "+"],
+			["0", ".", "="],
 		]
 
 		const placedIds = new Set<string>()
@@ -1010,15 +1302,13 @@ ${JSON.stringify(elementDetails, null, 2)}
 			for (const key of row) {
 				const btn = buttonMap.get(key)
 				if (btn && !placedIds.has(btn.id)) {
-					// Special case: 0 button is wider (spans 2 columns)
-					const isWideZero = key === "0" && btnWidth < 100 // Only make wider if not already wide
+					const isWideZero = key === "0" && btnWidth < 100
 					const effectiveWidth = isWideZero ? btnWidth * 2 + gap : btnWidth
 					positions.push({ id: btn.id, x: colX, y: currentY })
 					placedIds.add(btn.id)
 					foundInRow = true
 					colX += effectiveWidth + gap
 				} else {
-					// Skip space for missing button
 					colX += btnWidth + gap
 				}
 			}
@@ -1028,28 +1318,21 @@ ${JSON.stringify(elementDetails, null, 2)}
 			}
 		}
 
-		// 3. Position remaining buttons that weren't in standard layout (arrange in grid)
+		// 3. Position remaining buttons in grid
 		const remainingButtons = buttons.filter((b) => !placedIds.has(b.id))
 		if (remainingButtons.length > 0) {
-			console.log(
-				`[AdjustLayout] Remaining buttons not in standard layout: ${remainingButtons.map((b) => b.text || b.id).join(", ")}`,
-			)
-
 			let col = 0
 			for (const btn of remainingButtons) {
 				const x = startX + col * (btnWidth + gap)
 				positions.push({ id: btn.id, x, y: currentY })
 				placedIds.add(btn.id)
 				col++
-				if (col >= context.columns) {
+				if (col >= 4) {
 					col = 0
 					currentY += btnHeight + gap
 				}
 			}
-			// Move to next row if we placed any buttons
-			if (col > 0) {
-				currentY += btnHeight + gap
-			}
+			if (col > 0) currentY += btnHeight + gap
 		}
 
 		// 4. Position standalone elements
@@ -1065,7 +1348,208 @@ ${JSON.stringify(elementDetails, null, 2)}
 			}
 		}
 
-		console.log(`[AdjustLayout] Calculated ${positions.length} positions`)
+		console.log(`[AdjustLayout] Calculator layout: ${positions.length} positions`)
+		return positions
+	}
+
+	/**
+	 * Form layout - labels and inputs stacked vertically, buttons at bottom
+	 */
+	private calculateFormLayout(
+		elements: Array<{ id: string; width: number; height: number; type: string; text?: string }>,
+		context: LayoutContext,
+	): Array<{ id: string; x: number; y: number }> {
+		const positions: Array<{ id: string; x: number; y: number }> = []
+
+		const startX = context.startX
+		let currentY = context.startY
+		const gap = context.gapY
+
+		// Separate displays, buttons, and standalones
+		const displays = elements.filter((e) => e.type === "display")
+		const buttons = elements.filter((e) => e.type === "button")
+		const standalones = elements.filter((e) => e.type === "standalone")
+
+		// 1. Position displays/inputs vertically
+		for (const disp of displays) {
+			positions.push({ id: disp.id, x: startX, y: currentY })
+			currentY += disp.height + gap
+		}
+
+		// 2. Position standalone elements (labels, etc.)
+		for (const node of standalones) {
+			positions.push({ id: node.id, x: startX, y: currentY })
+			currentY += node.height + gap
+		}
+
+		// 3. Position buttons at bottom (horizontally centered)
+		if (buttons.length > 0) {
+			currentY += gap // Extra spacing before buttons
+			const totalBtnWidth = buttons.reduce((sum, b) => sum + b.width, 0) + (buttons.length - 1) * context.gapX
+			let btnX = startX + Math.max(0, (context.containerWidth - 2 * startX - totalBtnWidth) / 2)
+
+			for (const btn of buttons) {
+				positions.push({ id: btn.id, x: btnX, y: currentY })
+				btnX += btn.width + context.gapX
+			}
+		}
+
+		console.log(`[AdjustLayout] Form layout: ${positions.length} positions`)
+		return positions
+	}
+
+	/**
+	 * Menu layout - items arranged vertically or in columns
+	 */
+	private calculateMenuLayout(
+		elements: Array<{ id: string; width: number; height: number; type: string; text?: string }>,
+		context: LayoutContext,
+	): Array<{ id: string; x: number; y: number }> {
+		const positions: Array<{ id: string; x: number; y: number }> = []
+
+		const startX = context.startX
+		let currentY = context.startY
+		const gap = context.gapY
+
+		// Sort elements by their text for consistent ordering
+		const sortedElements = [...elements].sort((a, b) => {
+			const textA = a.text || a.id
+			const textB = b.text || b.id
+			return textA.localeCompare(textB)
+		})
+
+		// Calculate if we should use single column or multiple columns
+		const maxItemsPerColumn = Math.ceil(context.containerHeight / (60 + gap))
+		const useMultiColumn = sortedElements.length > maxItemsPerColumn
+
+		if (useMultiColumn) {
+			// Multi-column menu layout
+			const columns = Math.min(3, Math.ceil(sortedElements.length / maxItemsPerColumn))
+			const itemsPerColumn = Math.ceil(sortedElements.length / columns)
+			const colWidth = (context.containerWidth - 2 * startX - (columns - 1) * context.gapX) / columns
+
+			let col = 0
+			let rowInCol = 0
+
+			for (const elem of sortedElements) {
+				const x = startX + col * (colWidth + context.gapX)
+				const y = context.startY + rowInCol * (elem.height + gap)
+				positions.push({ id: elem.id, x, y })
+
+				rowInCol++
+				if (rowInCol >= itemsPerColumn) {
+					rowInCol = 0
+					col++
+				}
+			}
+		} else {
+			// Single column menu
+			for (const elem of sortedElements) {
+				positions.push({ id: elem.id, x: startX, y: currentY })
+				currentY += elem.height + gap
+			}
+		}
+
+		console.log(`[AdjustLayout] Menu layout: ${positions.length} positions`)
+		return positions
+	}
+
+	/**
+	 * Dashboard layout - display areas arranged in a grid
+	 */
+	private calculateDashboardLayout(
+		elements: Array<{ id: string; width: number; height: number; type: string; text?: string }>,
+		context: LayoutContext,
+	): Array<{ id: string; x: number; y: number }> {
+		const positions: Array<{ id: string; x: number; y: number }> = []
+
+		const startX = context.startX
+		let currentY = context.startY
+		const gap = context.gapX
+
+		// Separate displays and controls
+		const displays = elements.filter((e) => e.type === "display")
+		const controls = elements.filter((e) => e.type !== "display")
+
+		// 1. Arrange displays in a 2-column grid
+		const displayCols = Math.min(2, displays.length)
+		const displayWidth = (context.containerWidth - 2 * startX - (displayCols - 1) * gap) / displayCols
+
+		let col = 0
+		let rowMaxHeight = 0
+
+		for (const disp of displays) {
+			const x = startX + col * (displayWidth + gap)
+			positions.push({ id: disp.id, x, y: currentY })
+			rowMaxHeight = Math.max(rowMaxHeight, disp.height)
+
+			col++
+			if (col >= displayCols) {
+				col = 0
+				currentY += rowMaxHeight + gap
+				rowMaxHeight = 0
+			}
+		}
+
+		if (col > 0) {
+			currentY += rowMaxHeight + gap
+		}
+
+		// 2. Arrange controls below displays in a row
+		if (controls.length > 0) {
+			currentY += gap
+			let controlX = startX
+
+			for (const ctrl of controls) {
+				positions.push({ id: ctrl.id, x: controlX, y: currentY })
+				controlX += ctrl.width + gap
+			}
+		}
+
+		console.log(`[AdjustLayout] Dashboard layout: ${positions.length} positions`)
+		return positions
+	}
+
+	/**
+	 * Generic grid layout - simple grid arrangement
+	 */
+	private calculateGenericGridLayout(
+		elements: Array<{ id: string; width: number; height: number; type: string; text?: string }>,
+		context: LayoutContext,
+	): Array<{ id: string; x: number; y: number }> {
+		const positions: Array<{ id: string; x: number; y: number }> = []
+
+		const startX = context.startX
+		let currentY = context.startY
+		const gapX = context.gapX
+		const gapY = context.gapY
+		const columns = context.columns
+
+		// Sort: displays first, then buttons, then standalones
+		const sortedElements = [...elements].sort((a, b) => {
+			const typeOrder = { display: 0, button: 1, standalone: 2 }
+			const orderA = typeOrder[a.type as keyof typeof typeOrder] ?? 3
+			const orderB = typeOrder[b.type as keyof typeof typeOrder] ?? 3
+			return orderA - orderB
+		})
+
+		let col = 0
+		let rowMaxHeight = 0
+
+		for (const elem of sortedElements) {
+			const x = startX + col * (elem.width + gapX)
+			positions.push({ id: elem.id, x, y: currentY })
+			rowMaxHeight = Math.max(rowMaxHeight, elem.height)
+
+			col++
+			if (col >= columns) {
+				col = 0
+				currentY += rowMaxHeight + gapY
+				rowMaxHeight = 0
+			}
+		}
+
+		console.log(`[AdjustLayout] Generic grid layout: ${positions.length} positions`)
 		return positions
 	}
 
@@ -1127,6 +1611,9 @@ ${JSON.stringify(elementDetails, null, 2)}
 		// If buttons still exceed bounds, the clampPositionsToContainer will keep them inside.
 
 		// Execute position changes in batches
+		// NOTE: move_node uses coordinates RELATIVE to parent frame, not absolute canvas coordinates
+		console.log(`[AdjustLayout Algorithm] Positions are relative to frame`)
+
 		let successCount = 0
 		let failedCount = 0
 		const errors: string[] = []
@@ -1145,6 +1632,7 @@ ${JSON.stringify(elementDetails, null, 2)}
 			const batchResults = await Promise.all(
 				batch.map(async (pos) => {
 					try {
+						// Positions are relative to parent frame
 						await callFigmaTool("set_position", {
 							nodeId: pos.nodeId,
 							x: pos.x,
@@ -1202,8 +1690,9 @@ ${JSON.stringify(elementDetails, null, 2)}
 	/**
 	 * Parse container info from get_node_info result
 	 * Handles absoluteBoundingBox format from TalkToFigma
+	 * Returns both dimensions AND the absolute position of the frame on canvas
 	 */
-	private parseContainerInfo(result: unknown): { width: number; height: number } {
+	private parseContainerInfo(result: unknown): { width: number; height: number; offsetX: number; offsetY: number } {
 		try {
 			let content: string | undefined
 
@@ -1217,17 +1706,34 @@ ${JSON.stringify(elementDetails, null, 2)}
 				}
 			}
 
-			if (!content) return { width: 400, height: 600 }
+			if (!content) {
+				console.warn("[AdjustLayout] No content in container info, using defaults")
+				return { width: 400, height: 600, offsetX: 0, offsetY: 0 }
+			}
 
 			const parsed = JSON.parse(content)
-			// TalkToFigma uses absoluteBoundingBox for dimensions
+			// TalkToFigma uses absoluteBoundingBox for dimensions AND position
 			const bbox = parsed.absoluteBoundingBox
-			return {
-				width: bbox?.width || parsed.width || 400,
-				height: bbox?.height || parsed.height || 600,
+			const width = bbox?.width || parsed.width || 400
+			const height = bbox?.height || parsed.height || 600
+			// CRITICAL: Get the frame's absolute position on the canvas
+			// This offset must be added to all child element positions
+			const offsetX = bbox?.x ?? parsed.x ?? 0
+			const offsetY = bbox?.y ?? parsed.y ?? 0
+
+			console.log(`[AdjustLayout] Container info: ${width}x${height} at (${offsetX}, ${offsetY})` +
+				(bbox ? ` (from absoluteBoundingBox)` : ` (from direct properties)`))
+
+			// Sanity check - if dimensions seem too small, log a warning
+			if (width < 100 || height < 100) {
+				console.warn(`[AdjustLayout] ⚠️ Container dimensions seem small: ${width}x${height}. ` +
+					`This might cause layout issues.`)
 			}
-		} catch {
-			return { width: 400, height: 600 }
+
+			return { width, height, offsetX, offsetY }
+		} catch (e) {
+			console.error("[AdjustLayout] Failed to parse container info:", e)
+			return { width: 400, height: 600, offsetX: 0, offsetY: 0 }
 		}
 	}
 
@@ -1524,14 +2030,18 @@ ${JSON.stringify(elementDetails, null, 2)}
 		const usedTextIds = new Set<string>()
 
 		// Helper function to find text that overlaps with a rectangle
+		// Uses a multi-pass approach: exact match -> expanded tolerance -> closest text
 		const findOverlappingText = (rect: NodeInfo, textList: NodeInfo[]): NodeInfo | undefined => {
-			// First, try to find text whose center is within the rectangle bounds
+			const rectCenterX = rect.x + rect.width / 2
+			const rectCenterY = rect.y + rect.height / 2
+
+			// Pass 1: Find text whose center is within rectangle bounds (tight tolerance)
 			for (const text of textList) {
 				if (usedTextIds.has(text.id)) continue
 				const textCenterX = text.x + text.width / 2
 				const textCenterY = text.y + text.height / 2
-				// Check if text center is within rectangle bounds (with some tolerance)
-				const tolerance = 10
+				// Tight tolerance for exact overlap
+				const tolerance = 15
 				if (
 					textCenterX >= rect.x - tolerance &&
 					textCenterX <= rect.x + rect.width + tolerance &&
@@ -1542,11 +2052,28 @@ ${JSON.stringify(elementDetails, null, 2)}
 				}
 			}
 
-			// If no overlapping text found, find the closest text by distance
+			// Pass 2: Expanded tolerance - text may be offset due to centering calculation differences
+			// Use larger tolerance based on rect dimensions (up to 50% of rect size)
+			const expandedToleranceX = Math.max(30, rect.width * 0.5)
+			const expandedToleranceY = Math.max(30, rect.height * 0.5)
+			for (const text of textList) {
+				if (usedTextIds.has(text.id)) continue
+				const textCenterX = text.x + text.width / 2
+				const textCenterY = text.y + text.height / 2
+				if (
+					textCenterX >= rect.x - expandedToleranceX &&
+					textCenterX <= rect.x + rect.width + expandedToleranceX &&
+					textCenterY >= rect.y - expandedToleranceY &&
+					textCenterY <= rect.y + rect.height + expandedToleranceY
+				) {
+					console.log(`[AdjustLayout] Matched text "${text.characters || text.name}" to rect "${rect.name}" using expanded tolerance`)
+					return text
+				}
+			}
+
+			// Pass 3: Find the closest text by distance (for cases where text is further away)
 			let closestText: NodeInfo | undefined
 			let minDistance = Infinity
-			const rectCenterX = rect.x + rect.width / 2
-			const rectCenterY = rect.y + rect.height / 2
 
 			for (const text of textList) {
 				if (usedTextIds.has(text.id)) continue
@@ -1555,12 +2082,16 @@ ${JSON.stringify(elementDetails, null, 2)}
 				const distance = Math.sqrt(
 					Math.pow(textCenterX - rectCenterX, 2) + Math.pow(textCenterY - rectCenterY, 2),
 				)
-				// Only consider texts that are reasonably close (within 2x the rect dimension)
-				const maxDistance = Math.max(rect.width, rect.height) * 2
+				// Only consider texts that are reasonably close (within 3x the rect dimension)
+				const maxDistance = Math.max(rect.width, rect.height) * 3
 				if (distance < minDistance && distance < maxDistance) {
 					minDistance = distance
 					closestText = text
 				}
+			}
+
+			if (closestText) {
+				console.log(`[AdjustLayout] Matched text "${closestText.characters || closestText.name}" to rect "${rect.name}" using closest distance (${minDistance.toFixed(1)}px)`)
 			}
 
 			return closestText
@@ -1718,20 +2249,38 @@ ${JSON.stringify(elementDetails, null, 2)}
 
 		console.log(`[AdjustLayout] Button map keys for positioning: ${Array.from(buttonMap.keys()).join(", ")}`)
 
-		// Standard calculator layout rows
-		const calcLayout = [
-			["C", "⌫", "%", "÷"], // Function row
-			["7", "8", "9", "×"], // Numbers row 1
-			["4", "5", "6", "-"], // Numbers row 2
-			["1", "2", "3", "+"], // Numbers row 3
-			["0", ".", "="], // Bottom row (0 is usually wider)
+		// Standard calculator layout - each position can accept multiple button variations
+		// The algorithm will try each variation in order until one matches
+		const calcLayout: string[][] = [
+			["C", "AC", "CE", "CLR"], // Position 0: Clear button (any variation)
+			["⌫", "DEL", "←", "±", "+/-"], // Position 1: Delete or plus/minus
+			["%"], // Position 2: Percent
+			["÷", "/"], // Position 3: Divide
+			["7"], ["8"], ["9"], ["×", "*", "x", "X"], // Row 2: 7, 8, 9, multiply
+			["4"], ["5"], ["6"], ["-"], // Row 3: 4, 5, 6, minus
+			["1"], ["2"], ["3"], ["+"], // Row 4: 1, 2, 3, plus
+			["0"], ["."], ["="], // Row 5: 0, dot, equals
 		]
 
-		// Alternative layouts to try for different calculator styles
-		const altLayouts = [
-			[["C", "±", "%", "÷"], ["7", "8", "9", "×"], ["4", "5", "6", "-"], ["1", "2", "3", "+"], ["0", ".", "="]],
-			[["AC", "⌫", "%", "÷"], ["7", "8", "9", "×"], ["4", "5", "6", "-"], ["1", "2", "3", "+"], ["0", ".", "="]],
+		// Define the grid structure: which positions go in which row
+		const rowStructure = [
+			[0, 1, 2, 3], // Row 1: positions 0-3 (C, ⌫, %, ÷)
+			[4, 5, 6, 7], // Row 2: positions 4-7 (7, 8, 9, ×)
+			[8, 9, 10, 11], // Row 3: positions 8-11 (4, 5, 6, -)
+			[12, 13, 14, 15], // Row 4: positions 12-15 (1, 2, 3, +)
+			[16, 17, 18], // Row 5: positions 16-18 (0, ., =) - 0 spans 2 columns
 		]
+
+		// Helper to find a button matching any of the variations
+		const findButtonForPosition = (variations: string[]): { rect: NodeInfo; text: NodeInfo } | undefined => {
+			for (const variant of variations) {
+				const pair = buttonMap.get(variant)
+				if (pair && !placedIds.has(pair.rect.id)) {
+					return pair
+				}
+			}
+			return undefined
+		}
 
 		const placedIds = new Set<string>()
 
@@ -1759,22 +2308,29 @@ ${JSON.stringify(elementDetails, null, 2)}
 			// Try to place buttons according to standard calculator layout
 			currentY = buttonStartY
 
-			for (const row of calcLayout) {
+			// Process each row in the grid structure
+			for (let rowIdx = 0; rowIdx < rowStructure.length; rowIdx++) {
+				const rowPositions = rowStructure[rowIdx]
 				let colX = startX
 				let foundInRow = false
 
-				for (let i = 0; i < row.length; i++) {
-					const key = row[i]
-					const pair = buttonMap.get(key)
+				for (let colIdx = 0; colIdx < rowPositions.length; colIdx++) {
+					const posIdx = rowPositions[colIdx]
+					const variations = calcLayout[posIdx]
+					const pair = findButtonForPosition(variations)
 
-					if (pair && !placedIds.has(pair.rect.id)) {
-						// Special case: 0 button spans 2 columns
-						const isWideZero = key === "0" && row.length === 3 && i === 0
+					if (pair) {
+						// Special case: 0 button spans 2 columns (last row, first position)
+						const isWideZero = rowIdx === rowStructure.length - 1 && colIdx === 0 && variations.includes("0")
 						const effectiveWidth = isWideZero ? btnWidth * 2 + gapX : btnWidth
 
 						placeButtonPair(pair, colX, currentY, effectiveWidth)
 						foundInRow = true
 						colX += effectiveWidth + gapX
+
+						// Log which variation was used
+						const usedVariant = this.extractButtonText(pair.text)
+						console.log(`[AdjustLayout] Placed "${usedVariant}" at row ${rowIdx + 1}, col ${colIdx + 1}`)
 					} else {
 						// Skip space for missing button (keep grid alignment)
 						colX += btnWidth + gapX

@@ -81,8 +81,12 @@ export class DeepInfraHandler extends RouterProvider implements SingleCompletion
 			requestOptions.temperature = this.options.modelTemperature ?? 0
 		}
 
-		if (this.options.includeMaxTokens === true && info.maxTokens) {
-			;(requestOptions as any).max_completion_tokens = this.options.modelMaxTokens || info.maxTokens
+		if (this.options.includeMaxTokens === true) {
+			const userMaxTokens = this.options.modelMaxTokens
+			const maxTokens = (userMaxTokens && userMaxTokens > 0) ? userMaxTokens : info.maxTokens
+			if (maxTokens && maxTokens > 0) {
+				;(requestOptions as any).max_completion_tokens = maxTokens
+			}
 		}
 
 		const { data: stream } = await this.client.chat.completions.create(requestOptions).withResponse()
@@ -133,8 +137,12 @@ export class DeepInfraHandler extends RouterProvider implements SingleCompletion
 		if (this.supportsTemperature(modelId)) {
 			requestOptions.temperature = this.options.modelTemperature ?? 0
 		}
-		if (this.options.includeMaxTokens === true && info.maxTokens) {
-			;(requestOptions as any).max_completion_tokens = this.options.modelMaxTokens || info.maxTokens
+		if (this.options.includeMaxTokens === true) {
+			const userMaxTokens = this.options.modelMaxTokens
+			const maxTokens = (userMaxTokens && userMaxTokens > 0) ? userMaxTokens : info.maxTokens
+			if (maxTokens && maxTokens > 0) {
+				;(requestOptions as any).max_completion_tokens = maxTokens
+			}
 		}
 
 		const resp = await this.client.chat.completions.create(requestOptions)

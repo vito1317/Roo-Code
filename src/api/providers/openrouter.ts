@@ -579,7 +579,8 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 		const completionParams: OpenRouterChatCompletionParams = {
 			model: modelId,
-			max_tokens: maxTokens,
+			// Only include max_tokens if it's a valid positive number
+			...(maxTokens && maxTokens > 0 && { max_tokens: maxTokens }),
 			temperature,
 			messages: [{ role: "user", content: prompt }],
 			stream: false,

@@ -16,6 +16,7 @@ import {
 } from "./HandoffContext"
 import { SENTINEL_AGENTS, getAgentPersona, getNextAgent, isSentinelAgent } from "./personas"
 import { FigmaPreviewPanel } from "../../services/figma/FigmaPreviewPanel"
+import { UIDesignCanvasPanel } from "../../services/ui-design/UIDesignCanvasPanel"
 
 /**
  * Agent states in the FSM
@@ -92,6 +93,7 @@ export interface FSMEvent {
 export interface StateMachineConfig {
 	maxQARetries: number
 	maxSecurityRetries: number
+	maxDesignReviewRetries: number
 	autoTransition: boolean
 	onHumanInterventionRequired: (reason: string, context: HandoffContext) => Promise<boolean>
 }
@@ -99,6 +101,7 @@ export interface StateMachineConfig {
 const DEFAULT_CONFIG: StateMachineConfig = {
 	maxQARetries: 3,
 	maxSecurityRetries: 2,
+	maxDesignReviewRetries: 3, // Max times Design Review can reject before auto-approving
 	autoTransition: true,
 	onHumanInterventionRequired: async () => false,
 }
@@ -114,6 +117,7 @@ export class SentinelStateMachine {
 	private currentContext: HandoffContext | null = null
 	private qaRejectionCount: number = 0
 	private securityRejectionCount: number = 0
+	private designReviewRejectionCount: number = 0
 	private config: StateMachineConfig
 	private listeners: FSMEventListener[] = []
 	private taskRef: WeakRef<Task>
@@ -146,9 +150,11 @@ export class SentinelStateMachine {
 				if (isTruthy(plan?.needsDesign) || isTruthy(plan?.needs_design)) return true
 				if (isTruthy(plan?.hasUI) || isTruthy(plan?.has_ui) || isTruthy(plan?.hasUi)) return true
 				if (isTruthy(plan?.useFigma) || isTruthy(plan?.use_figma)) return true
+				if (isTruthy(plan?.usePenpot) || isTruthy(plan?.use_penpot)) return true
+				if (isTruthy(plan?.useUIDesignCanvas) || isTruthy(plan?.use_ui_design_canvas)) return true
 				// Check notes for keywords
 				const notes = ctx.previousAgentNotes?.toLowerCase() || ""
-				if (notes.includes("figma") || notes.includes("designer") || notes.includes("ui design")) return true
+				if (notes.includes("figma") || notes.includes("penpot") || notes.includes("designer") || notes.includes("ui design") || notes.includes("ui canvas")) return true
 				return false
 			},
 			label: "Plan completed with UI design, handoff to Designer",
@@ -333,6 +339,7 @@ export class SentinelStateMachine {
 		this.currentContext = null
 		this.qaRejectionCount = 0
 		this.securityRejectionCount = 0
+		this.designReviewRejectionCount = 0
 		this.emit({
 			type: "transition",
 			fromState: AgentState.BLOCKED,
@@ -384,7 +391,30 @@ export class SentinelStateMachine {
 			}
 		}
 
+		// Check for Design Review → Designer loop prevention
+		if (nextState === AgentState.DESIGNER && fromState === AgentState.DESIGN_REVIEW) {
+			this.designReviewRejectionCount++
+			console.log(`[SentinelFSM] Design Review rejection count: ${this.designReviewRejectionCount}/${this.config.maxDesignReviewRetries}`)
+
+			if (this.designReviewRejectionCount >= this.config.maxDesignReviewRetries) {
+				console.log(`[SentinelFSM] Max Design Review retries reached. Auto-approving and proceeding to Builder.`)
+				// Auto-approve and proceed to Builder instead of looping forever
+				if (this.currentContext) {
+					this.currentContext.designReviewPassed = true
+					this.currentContext.previousAgentNotes =
+						(this.currentContext.previousAgentNotes || "") +
+						`\n\n⚠️ Auto-approved after ${this.designReviewRejectionCount} Design Review attempts.`
+				}
+				return this.transition(AgentState.BUILDER)
+			}
+		}
+
 		// Reset counters on successful forward progress
+		if (nextState === AgentState.BUILDER && fromState === AgentState.DESIGN_REVIEW) {
+			// Successfully passed Design Review - reset counter
+			this.designReviewRejectionCount = 0
+			console.log("[SentinelFSM] Design Review passed, reset rejection counter")
+		}
 		if (nextState === AgentState.SENTINEL) {
 			this.qaRejectionCount = 0
 		}
@@ -425,10 +455,12 @@ export class SentinelStateMachine {
 					const needsDesign = isTruthy(plan.needsDesign) || isTruthy(plan.needs_design)
 					const hasUI = isTruthy(plan.hasUI) || isTruthy(plan.has_ui) || isTruthy(plan.hasUi)
 					const useFigma = isTruthy(plan.useFigma) || isTruthy(plan.use_figma)
+					const usePenpot = isTruthy(plan.usePenpot) || isTruthy(plan.use_penpot)
+					const useUIDesignCanvas = isTruthy(plan.useUIDesignCanvas) || isTruthy(plan.use_ui_design_canvas)
 
-					console.log("[SentinelFSM] Design flags - needsDesign:", needsDesign, "hasUI:", hasUI, "useFigma:", useFigma)
+					console.log("[SentinelFSM] Design flags - needsDesign:", needsDesign, "hasUI:", hasUI, "useFigma:", useFigma, "usePenpot:", usePenpot, "useUIDesignCanvas:", useUIDesignCanvas)
 
-					if (needsDesign || hasUI || useFigma) {
+					if (needsDesign || hasUI || useFigma || usePenpot || useUIDesignCanvas) {
 						console.log("[SentinelFSM] UI design requested - routing to Designer for mockup generation")
 						return AgentState.DESIGNER
 					}
@@ -436,9 +468,50 @@ export class SentinelStateMachine {
 
 				// Also check notes for Figma/UI keywords as fallback
 				const notes = handoffData.previousAgentNotes?.toLowerCase() || ""
-				if (notes.includes("figma") || notes.includes("designer") || notes.includes("ui design") || notes.includes("ui 設計")) {
-					console.log("[SentinelFSM] Figma/UI keywords found in notes - routing to Designer")
+				if (notes.includes("figma") || notes.includes("penpot") || notes.includes("designer") || notes.includes("ui design") || notes.includes("ui 設計") || notes.includes("ui canvas")) {
+					console.log("[SentinelFSM] Design tool keywords found in notes - routing to Designer")
 					return AgentState.DESIGNER
+				}
+
+				// CRITICAL: Also check the original user request for Figma keywords
+				// This ensures we route to Designer even if Architect forgot to set the flags
+				const task = this.taskRef.deref()
+				if (task) {
+					// Find the first user feedback message which contains the original user request
+					const firstUserMessage = task.clineMessages?.find(m => m.type === "say" && m.say === "user_feedback")
+					if (firstUserMessage && firstUserMessage.text) {
+						const userRequest = firstUserMessage.text.toLowerCase()
+						const figmaKeywords = ["figma", "使用figma", "用figma", "請先使用figma", "先figma", "設計稿", "mockup", "ui設計"]
+						if (figmaKeywords.some(keyword => userRequest.includes(keyword))) {
+							console.log("[SentinelFSM] Figma keywords found in ORIGINAL USER REQUEST - routing to Designer")
+							return AgentState.DESIGNER
+						}
+						// Check for Penpot keywords
+						const penpotKeywords = ["penpot", "使用penpot", "用penpot", "請先使用penpot", "先penpot"]
+						if (penpotKeywords.some(keyword => userRequest.includes(keyword))) {
+							console.log("[SentinelFSM] Penpot keywords found in ORIGINAL USER REQUEST - routing to Designer")
+							return AgentState.DESIGNER
+						}
+						// Also check for UI/app/web keywords that imply design is needed
+						const uiKeywords = ["app", "應用", "網頁", "web", "介面", "interface", "畫面", "頁面", "dashboard", "儀表板"]
+						const hasUI = uiKeywords.some(keyword => userRequest.includes(keyword))
+						if (hasUI) {
+							console.log("[SentinelFSM] UI/app keywords found in user request, checking if design tools are connected...")
+							// Check if TalkToFigma or Penpot is available
+							const provider = this.providerRef.deref()
+							const mcpHub = provider?.getMcpHub?.()
+							if (mcpHub) {
+								if (mcpHub.isTalkToFigmaConnected()) {
+									console.log("[SentinelFSM] TalkToFigma is connected, routing to Designer for Figma design")
+									return AgentState.DESIGNER
+								}
+								if (mcpHub.isPenpotMcpConnected()) {
+									console.log("[SentinelFSM] Penpot MCP is connected, routing to Designer for Penpot design")
+									return AgentState.DESIGNER
+								}
+							}
+						}
+					}
 				}
 
 				console.log("[SentinelFSM] No UI design indicators found - routing to Builder")
@@ -450,12 +523,30 @@ export class SentinelStateMachine {
 				return AgentState.DESIGN_REVIEW
 
 			// Phase 1c: Design Review → Builder (if approved) or Designer (if rejected)
-			case AgentState.DESIGN_REVIEW:
-				if (handoffData.designReviewPassed === false) {
+			case AgentState.DESIGN_REVIEW: {
+				// Check for rejection - support multiple formats
+				// Default to rejected (designReviewPassed must be explicitly true to pass)
+				const isApproved = handoffData.designReviewPassed === true
+
+				const isRejected =
+					!isApproved || // Not explicitly approved = rejected
+					handoffData.designReviewStatus === "rejected" ||
+					(handoffData.completion_percentage && parseInt(handoffData.completion_percentage) < 80)
+
+				console.log("[SentinelFSM] Design Review check:", {
+					designReviewPassed: handoffData.designReviewPassed,
+					designReviewStatus: handoffData.designReviewStatus,
+					completion_percentage: handoffData.completion_percentage,
+					isApproved,
+					isRejected,
+				})
+
+				if (isRejected) {
 					console.log("[SentinelFSM] Design Review REJECTED - returning to Designer")
 					return AgentState.DESIGNER
 				}
 				return AgentState.BUILDER
+			}
 
 			// Phase 2: Builder → Architect reviews code
 			case AgentState.BUILDER:
@@ -516,10 +607,11 @@ export class SentinelStateMachine {
 			// BLOCKED state recovery - allow handoff to continue the workflow
 			case AgentState.BLOCKED: {
 				console.log("[SentinelFSM] BLOCKED state handoff - attempting recovery")
-				
+
 				// CRITICAL: Reset rejection counters on recovery to prevent immediate re-blocking
 				this.qaRejectionCount = 0
 				this.securityRejectionCount = 0
+				this.designReviewRejectionCount = 0
 				console.log("[SentinelFSM] BLOCKED recovery: Reset rejection counters")
 				
 				// If tests passed in the handoff, go to Architect Code Review for verification
@@ -613,9 +705,16 @@ export class SentinelStateMachine {
 			context: this.currentContext ?? undefined,
 		})
 
-		// Generate walkthrough on completion
+		// Generate walkthrough on completion and clear agent memory
 		if (targetState === AgentState.COMPLETED && this.currentContext) {
 			await this.generateWalkthrough()
+
+			// Clear per-agent conversation memory as workflow is complete
+			const task = this.taskRef.deref()
+			if (task) {
+				task.clearSentinelAgentMemory()
+				console.log("[SentinelFSM] Cleared agent memory on workflow completion")
+			}
 		}
 
 		return {
@@ -665,12 +764,42 @@ export class SentinelStateMachine {
 	}
 
 	/**
-	 * Open Figma preview panel when Designer starts working
+	 * Open design preview panel when Designer starts working
+	 * Supports both UIDesignCanvas and Figma based on handoff context
 	 */
 	private async openFigmaPreviewForDesigner(provider: ClineProvider): Promise<void> {
 		try {
-			// Get Figma settings from provider state
+			// Get settings from provider state
 			const state = await provider.getState()
+
+			// Check if we should use UIDesignCanvas (from handoff context, state, or as default)
+			const mcpHub = provider.getMcpHub()
+			const uiDesignCanvasConnected = mcpHub?.getServers()?.some(
+				(s) => s.name === "UIDesignCanvas" && s.status === "connected"
+			)
+			const uiDesignCanvasEnabled = state.uiDesignCanvasEnabled ?? true  // Default true for built-in tool
+			const useUIDesignCanvas = this.currentContext?.architectPlan?.useUIDesignCanvas ||
+				(uiDesignCanvasEnabled && uiDesignCanvasConnected)
+
+			console.log(`[SentinelFSM] Design preview check - useUIDesignCanvas: ${useUIDesignCanvas}, enabled: ${uiDesignCanvasEnabled}, connected: ${uiDesignCanvasConnected}`)
+
+			if (useUIDesignCanvas) {
+				// Open UIDesignCanvas preview panel
+				console.log("[SentinelFSM] Opening UIDesignCanvas preview panel for Designer")
+				const panel = UIDesignCanvasPanel.createOrShow(provider.context.extensionUri)
+
+				// Set the MCP server port for syncing edits back to server
+				if (mcpHub) {
+					const port = mcpHub.getUIDesignCanvasPort()
+					panel.setMcpServerPort(port)
+					console.log("[SentinelFSM] UIDesignCanvas panel configured with MCP port:", port)
+				}
+
+				console.log("[SentinelFSM] UIDesignCanvas preview panel opened for Designer")
+				return
+			}
+
+			// Otherwise, try to use Figma
 			const figmaEnabled = state.figmaEnabled
 			const webPreviewEnabled = state.figmaWebPreviewEnabled
 			const figmaFileUrl = state.figmaFileUrl
@@ -695,7 +824,7 @@ export class SentinelStateMachine {
 			await figmaPreview.show(figmaFileUrl)
 			console.log("[SentinelFSM] Figma preview panel opened for Designer")
 		} catch (error) {
-			console.error("[SentinelFSM] Failed to open Figma preview:", error)
+			console.error("[SentinelFSM] Failed to open design preview:", error)
 		}
 	}
 
@@ -1083,6 +1212,7 @@ export class SentinelStateMachine {
 			isActive: this.isActive(),
 			qaRejectionCount: this.qaRejectionCount,
 			securityRejectionCount: this.securityRejectionCount,
+			designReviewRejectionCount: this.designReviewRejectionCount,
 			hasContext: !!this.currentContext,
 			contextId: this.currentContext?.id,
 			attemptNumber: this.currentContext?.attemptNumber,

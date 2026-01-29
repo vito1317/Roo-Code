@@ -201,6 +201,47 @@ export const globalSettingsSchema = z.object({
 	 */
 	figmaWebPreviewEnabled: z.boolean().optional(),
 
+	// Penpot MCP settings
+	/**
+	 * Enable Penpot MCP server for Penpot design integration
+	 * Connects to locally running Penpot MCP server at http://localhost:4401/sse
+	 * User must run penpot-mcp server first: https://github.com/penpot/penpot-mcp
+	 * @default false
+	 */
+	penpotMcpEnabled: z.boolean().optional(),
+	/**
+	 * Penpot file/project URL for web preview
+	 * Format: https://design.penpot.app/#/workspace/xxx
+	 */
+	penpotFileUrl: z.string().nullish(),
+	/**
+	 * Enable Penpot web preview panel
+	 * @default false
+	 */
+	penpotWebPreviewEnabled: z.boolean().optional(),
+
+	// MCP-UI settings
+	/**
+	 * Enable MCP-UI server for rich interactive UI in tool responses
+	 * Connects to MCP-UI demo server by default
+	 * @default true
+	 */
+	mcpUiEnabled: z.boolean().optional(),
+	/**
+	 * MCP-UI server URL (SSE endpoint)
+	 * @default "https://remote-mcp-server-authless.idosalomon.workers.dev/sse"
+	 */
+	mcpUiServerUrl: z.string().nullish(),
+
+	// UI Design Canvas settings
+	/**
+	 * Enable UI Design Canvas MCP server for AI-powered UI design
+	 * A standalone design system that doesn't depend on Figma or Penpot
+	 * Runs locally at http://127.0.0.1:4420/sse
+	 * @default true
+	 */
+	uiDesignCanvasEnabled: z.boolean().optional(),
+
 	mode: z.string().optional(),
 	modeApiConfigs: z.record(z.string(), z.string()).optional(),
 	customModes: z.array(modeConfigSchema).optional(),

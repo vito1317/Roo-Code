@@ -68,10 +68,13 @@ import {
 	TerminalSquare,
 	MessageCircle,
 	Repeat2,
+	Volume2,
+	VolumeX,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PathTooltip } from "../ui/PathTooltip"
 import { OpenMarkdownPreviewButton } from "./OpenMarkdownPreviewButton"
+import { checkTtsStatus, getTtsPreview } from "@src/utils/ttsUtils"
 
 // Helper function to get previous todos before a specific message
 function getPreviousTodos(messages: ClineMessage[], currentMessageTs: number): any[] {
@@ -1211,9 +1214,41 @@ export const ChatRowContent = ({
 				}
 				case "api_req_finished":
 					return null // we should never see this message type
-				case "text":
+				case "text": {
+					const ttsStatus = checkTtsStatus(message.text, !!message.agentName)
 					return (
-						<div className="group">
+						<div
+							className={cn(
+								"group relative",
+								ttsStatus.willSpeak &&
+									"rounded-lg bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent",
+							)}
+							style={
+								ttsStatus.willSpeak
+									? {
+											borderLeft: "3px solid",
+											borderImage: "linear-gradient(to bottom, #10b981, #06b6d4) 1",
+											paddingLeft: "12px",
+										}
+									: undefined
+							}>
+							{/* Elegant speaking indicator */}
+							{ttsStatus.willSpeak && (
+								<div
+									className="absolute -left-[3px] top-1/2 -translate-y-1/2 flex items-center"
+									title={getTtsPreview(ttsStatus.processedText, 200)}>
+									<div className="relative">
+										{/* Animated pulse rings */}
+										<div className="absolute inset-0 rounded-full bg-emerald-400/30 animate-ping" />
+										<div
+											className="absolute inset-0 rounded-full bg-emerald-400/20"
+											style={{ animation: "ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite 0.5s" }}
+										/>
+										{/* Center dot */}
+										<div className="relative w-2 h-2 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-400 shadow-lg shadow-emerald-500/50" />
+									</div>
+								</div>
+							)}
 							<div style={headerStyle}>
 								<MessageCircle className="w-4 shrink-0" aria-label="Speech bubble icon" />
 								<span style={{ fontWeight: "bold" }}>
@@ -1224,6 +1259,12 @@ export const ChatRowContent = ({
 											: t("chat:text.rooSaid")}
 								</span>
 								<div style={{ flexGrow: 1 }} />
+								{/* Small volume icon for TTS messages */}
+								{ttsStatus.willSpeak && (
+									<span title={getTtsPreview(ttsStatus.processedText, 200)}>
+										<Volume2 className="w-4 h-4 text-emerald-500 opacity-60" />
+									</span>
+								)}
 								<OpenMarkdownPreviewButton markdown={message.text} />
 							</div>
 							<div className="pl-6">
@@ -1238,6 +1279,7 @@ export const ChatRowContent = ({
 							</div>
 						</div>
 					)
+				}
 				case "user_feedback":
 					return (
 						<div className="group">

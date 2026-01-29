@@ -424,6 +424,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	sentinelStateMachine?: import("../sentinel/StateMachine").SentinelStateMachine
 
 	/**
+	 * Sentinel Edition: Per-agent conversation history storage.
+	 * When an agent hands off, its history is saved here.
+	 * When an agent is returned to (e.g., Builder after QA rejection),
+	 * its previous history is restored for continuity.
+	 */
+	sentinelAgentHistories: Map<string, ApiMessage[]> = new Map()
+
+	/**
+	 * Sentinel Edition: Per-agent UI message storage.
+	 * Preserves clineMessages per agent for context continuity.
+	 */
+	sentinelAgentClineMessages: Map<string, ClineMessage[]> = new Map()
+
+	/**
 	 * Background services spawned by the task (e.g., dev servers for QA testing).
 	 * Maps port number to service info including PID for cleanup.
 	 */
@@ -1726,6 +1740,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		progressStatus?: ToolProgressStatus,
 		options: {
 			isNonInteractive?: boolean
+			agentName?: string // Override the default agent name for this message
 		} = {},
 		contextCondense?: ContextCondense,
 		contextTruncation?: ContextTruncation,
@@ -1765,6 +1780,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						partial,
 						contextCondense,
 						contextTruncation,
+						agentName: options.agentName,
 					})
 				}
 			} else {
@@ -1803,6 +1819,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						images,
 						contextCondense,
 						contextTruncation,
+						agentName: options.agentName,
 					})
 				}
 			}
@@ -1827,6 +1844,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				checkpoint,
 				contextCondense,
 				contextTruncation,
+				agentName: options.agentName,
 			})
 		}
 
@@ -1952,6 +1970,191 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 			throw error
 		}
+	}
+
+	/**
+	 * Sentinel Edition: Reset conversation context for agent handoff with MEMORY
+	 *
+	 * This method manages per-agent conversation history:
+	 * - Saves the outgoing agent's history for later restoration
+	 * - Restores the incoming agent's history if they're returning (e.g., Builder after QA rejection)
+	 * - Starts fresh if this is the agent's first time
+	 *
+	 * @param handoffSummary - Summary of the previous agent's work to inject as context
+	 * @param fromAgent - Name/slug of the agent handing off
+	 * @param toAgent - Name/slug of the agent receiving the handoff
+	 */
+	public async resetForSentinelHandoff(
+		handoffSummary: string,
+		fromAgent: string,
+		toAgent: string,
+	): Promise<void> {
+		console.log(`[Task] Sentinel Handoff: ${fromAgent} → ${toAgent}`)
+		console.log(`[Task] Current apiConversationHistory length: ${this.apiConversationHistory.length}`)
+
+		// Normalize agent names to slugs for consistent map keys
+		const fromAgentSlug = this.normalizeAgentSlug(fromAgent)
+		const toAgentSlug = this.normalizeAgentSlug(toAgent)
+
+		// ============================================
+		// STEP 1: Save outgoing agent's context
+		// ============================================
+		if (fromAgentSlug && this.apiConversationHistory.length > 0) {
+			// Deep copy the current history to avoid reference issues
+			const historyCopy = JSON.parse(JSON.stringify(this.apiConversationHistory)) as ApiMessage[]
+			this.sentinelAgentHistories.set(fromAgentSlug, historyCopy)
+			console.log(`[Task] 💾 Saved ${historyCopy.length} API messages for ${fromAgentSlug}`)
+
+			// Also save clineMessages for this agent
+			const clineMessagesCopy = JSON.parse(JSON.stringify(this.clineMessages)) as ClineMessage[]
+			this.sentinelAgentClineMessages.set(fromAgentSlug, clineMessagesCopy)
+			console.log(`[Task] 💾 Saved ${clineMessagesCopy.length} UI messages for ${fromAgentSlug}`)
+		}
+
+		// ============================================
+		// STEP 2: Check if incoming agent has saved context
+		// ============================================
+		const savedHistory = toAgentSlug ? this.sentinelAgentHistories.get(toAgentSlug) : undefined
+		const savedClineMessages = toAgentSlug ? this.sentinelAgentClineMessages.get(toAgentSlug) : undefined
+		const isReturningAgent = savedHistory && savedHistory.length > 0
+
+		if (isReturningAgent) {
+			// ============================================
+			// CASE A: Agent is returning - RESTORE their context
+			// ============================================
+			console.log(`[Task] 🔄 ${toAgent} is returning! Restoring previous context...`)
+
+			// Restore API conversation history
+			this.apiConversationHistory = savedHistory!
+			console.log(`[Task] ✅ Restored ${this.apiConversationHistory.length} API messages for ${toAgent}`)
+
+			// Restore UI messages if available
+			if (savedClineMessages && savedClineMessages.length > 0) {
+				this.clineMessages = savedClineMessages
+				console.log(`[Task] ✅ Restored ${this.clineMessages.length} UI messages for ${toAgent}`)
+			}
+
+			// Add a continuation message to inform the agent about what happened
+			await this.say(
+				"text",
+				`🔄 **歡迎回來，${toAgent}！**\n\n` +
+				`你之前的上下文已恢復。\n\n` +
+				`---\n\n` +
+				`**發生了什麼：**\n` +
+				`${handoffSummary.substring(0, 800)}${handoffSummary.length > 800 ? "..." : ""}\n\n` +
+				`---\n\n` +
+				`**請根據上述反饋繼續你的工作。**`,
+			)
+		} else {
+			// ============================================
+			// CASE B: Agent is new - START FRESH
+			// ============================================
+			console.log(`[Task] 🆕 ${toAgent} is starting fresh (no previous context)`)
+
+			// Clear API conversation history
+			this.apiConversationHistory = []
+
+			// Keep minimal UI messages for context
+			const minimalClineMessages = this.clineMessages.filter((msg) => {
+				// Keep the original user task message
+				if (msg.type === "say" && msg.say === "text" && this.clineMessages.indexOf(msg) === 0) {
+					return true
+				}
+				// Keep handoff notifications
+				if (msg.type === "say" && msg.text?.includes("Sentinel Handoff")) {
+					return true
+				}
+				// Keep completion results
+				if (msg.type === "say" && msg.say === "completion_result") {
+					return true
+				}
+				// Keep error messages
+				if (msg.type === "say" && msg.say === "error") {
+					return true
+				}
+				return false
+			})
+			this.clineMessages = minimalClineMessages.slice(-10)
+
+			// Log the fresh start
+			await this.say(
+				"text",
+				`🔄 **Context Reset for ${toAgent}**\n\n` +
+				`Previous agent (${fromAgent}) context has been saved.\n` +
+				`${toAgent} starts with fresh context.\n\n` +
+				`---\n\n` +
+				`**Handoff Summary:**\n${handoffSummary.substring(0, 500)}${handoffSummary.length > 500 ? "..." : ""}`,
+			)
+		}
+
+		// ============================================
+		// STEP 3: Reset streaming state (always)
+		// ============================================
+		this.assistantMessageContent = []
+		this.userMessageContent = []
+		this.userMessageContentReady = false
+		this.isStreaming = false
+		this.currentStreamingContentIndex = 0
+
+		// Reset consecutive mistake counters for fresh start
+		this.consecutiveMistakeCount = 0
+		this.consecutiveNoToolUseCount = 0
+		this.consecutiveNoAssistantMessagesCount = 0
+
+		// Log summary
+		console.log(`[Task] Sentinel Handoff complete:`)
+		console.log(`  - Mode: ${isReturningAgent ? "RESTORED" : "FRESH START"}`)
+		console.log(`  - API history: ${this.apiConversationHistory.length} messages`)
+		console.log(`  - UI messages: ${this.clineMessages.length} messages`)
+		console.log(`  - Saved contexts: ${this.sentinelAgentHistories.size} agents`)
+
+		// Notify webview of the context change
+		await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+	}
+
+	/**
+	 * Normalize agent name to slug format for consistent map keys
+	 * e.g., "BUILDER" → "sentinel-builder", "🟩 Builder" → "sentinel-builder"
+	 */
+	private normalizeAgentSlug(agentName: string): string {
+		if (!agentName) return ""
+
+		// Remove emojis and special characters
+		let slug = agentName
+			.replace(/[\u{1F300}-\u{1F9FF}]/gu, "") // Remove emojis
+			.replace(/[^\w\s-]/g, "") // Remove special chars
+			.trim()
+			.toLowerCase()
+
+		// If already has sentinel- prefix, return as-is
+		if (slug.startsWith("sentinel-")) {
+			return slug
+		}
+
+		// Map common names to slugs
+		const nameToSlug: Record<string, string> = {
+			"architect": "sentinel-architect",
+			"designer": "sentinel-designer",
+			"design review": "sentinel-design-review",
+			"designreview": "sentinel-design-review",
+			"builder": "sentinel-builder",
+			"qa": "sentinel-qa",
+			"qa engineer": "sentinel-qa",
+			"qaengineer": "sentinel-qa",
+			"sentinel": "sentinel-security",
+			"security": "sentinel-security",
+		}
+
+		return nameToSlug[slug] || `sentinel-${slug}`
+	}
+
+	/**
+	 * Clear all saved agent contexts (e.g., when workflow completes)
+	 */
+	public clearSentinelAgentMemory(): void {
+		this.sentinelAgentHistories.clear()
+		this.sentinelAgentClineMessages.clear()
+		console.log("[Task] Cleared all Sentinel agent memory")
 	}
 
 	private async resumeTaskFromHistory() {

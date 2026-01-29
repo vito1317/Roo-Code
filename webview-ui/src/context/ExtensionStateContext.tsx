@@ -294,6 +294,15 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		talkToFigmaEnabled: true,
 		figmaFileUrl: undefined,
 		figmaWebPreviewEnabled: false,
+		// Penpot MCP settings (auto-enabled by default)
+		penpotMcpEnabled: true,
+		penpotFileUrl: undefined,
+		penpotWebPreviewEnabled: false,
+		// MCP-UI settings (auto-enabled by default with demo server)
+		mcpUiEnabled: true,
+		mcpUiServerUrl: "https://remote-mcp-server-authless.idosalomon.workers.dev/sse",
+		// UI Design Canvas settings (auto-enabled by default)
+		uiDesignCanvasEnabled: true,
 	})
 
 	const [didHydrateState, setDidHydrateState] = useState(false)

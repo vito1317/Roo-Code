@@ -155,16 +155,48 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 						// Create a handoff message that will be sent as a "user" message
 						// to continue the conversation with the next agent
+						// IMPORTANT: Strong identity injection to prevent context pollution
+						const previousAgentName = transitionResult.fromState?.replace("sentinel-", "").toUpperCase() || "Previous Agent"
+						const currentAgentName = nextPersona?.name || transitionResult.toState
+						const currentAgentSlug = nextAgentSlug || transitionResult.toState
+
 						const handoffMessage =
-							`# 🔄 Sentinel Handoff\n\n` +
-							`**Previous Agent:** ${transitionResult.fromState}\n` +
-							`**Current Agent:** ${nextPersona?.name || transitionResult.toState}\n\n` +
+							`# 🔄 Sentinel Agent Transition - IDENTITY RESET\n\n` +
+							`## ⚠️ CRITICAL: YOU ARE NOW ${currentAgentName}\n\n` +
+							`**你現在是 ${currentAgentName}**，不是其他任何角色！\n\n` +
+							`- ❌ 你不是 ${previousAgentName}\n` +
+							`- ❌ 上面對話中 ${previousAgentName} 完成的工作不是你做的\n` +
+							`- ✅ 你是 **${currentAgentName}**，你的工作現在才開始\n\n` +
 							`---\n\n` +
-							`## Handoff Context\n\n` +
+							`## 📋 來自 ${previousAgentName} 的交接內容\n\n` +
+							`以下是 **${previousAgentName}** 完成的工作摘要（這不是你的工作！）：\n\n` +
 							`${contextSummary || result}\n\n` +
 							`---\n\n` +
-							`**${nextPersona?.name || "Next Agent"}**: Please continue the workflow based on the context above. ` +
-							`Follow your role definition and complete your tasks. When done, use attempt_completion to hand off to the next agent.`
+							`## 🎯 ${currentAgentName} 的任務\n\n` +
+							`現在請你以 **${currentAgentName}** 的身份，根據上面的交接內容開始你自己的工作。\n` +
+							`按照你的角色定義（${currentAgentSlug}）執行任務。完成後使用 attempt_completion 交接給下一個代理。\n\n` +
+							`**重要提醒：對話歷史中之前代理的工作不屬於你，請專注於你自己的職責！**`
+
+						// CONTEXT SEPARATION: Clear conversation history BEFORE any UI updates
+						// This prevents context pollution between agents
+						console.log(`[Sentinel] Starting context separation: ${previousAgentName} → ${currentAgentName}`)
+
+						await task.resetForSentinelHandoff(
+							contextSummary || result,
+							previousAgentName,
+							currentAgentName,
+						)
+
+						// Wait a moment for the reset to fully complete
+						await new Promise((resolve) => setTimeout(resolve, 100))
+
+						// Force clear the API history again to be absolutely sure
+						// This is a safety measure in case any async operations added messages
+						const historyLengthBefore = task.apiConversationHistory.length
+						if (historyLengthBefore > 0) {
+							console.log(`[Sentinel] WARNING: API history not empty after reset (${historyLengthBefore} messages), forcing clear`)
+							task.apiConversationHistory = []
+						}
 
 						await task.say(
 							"text",
@@ -176,16 +208,21 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 						// Resume the conversation by sending the handoff as a follow-up message
 						// This triggers the next agent to start working immediately
+						// NOTE: The conversation history has been cleared, so the new agent
+						// starts with a clean slate and only sees the handoff message
 						const provider = task.providerRef.deref()
 						if (provider) {
 							// Queue the handoff message to continue the conversation
+							// Use a longer delay to ensure all state is properly cleared
 							setTimeout(async () => {
 								try {
+									// Final safety check before sending handoff
+									console.log(`[Sentinel] Sending handoff message. API history length: ${task.apiConversationHistory.length}`)
 									await task.handleWebviewAskResponse("messageResponse", handoffMessage)
 								} catch (err) {
 									console.error("[Sentinel] Failed to send handoff continuation:", err)
 								}
-							}, 500) // Small delay to ensure current execution completes
+							}, 800) // Longer delay for stability
 						}
 
 						return // Don't proceed with normal completion

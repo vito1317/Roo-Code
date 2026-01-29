@@ -78,7 +78,8 @@ import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
 import { fileExistsAtPath } from "../../utils/fs"
-import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
+import { setTtsEnabled, setTtsSpeed, setTtsVoice } from "../../utils/tts"
+import { getAgentTtsVoice } from "../sentinel/personas"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
@@ -488,6 +489,10 @@ export class ClineProvider
 				this.log(`[TalkToFigma] Already connected to channel, skipping prompt`)
 			}
 		}
+
+		// MCP-UI: No longer auto-restarting on new tasks
+		// The auto-restart was causing instability with other MCP connections (UIDesignCanvas, etc.)
+		// MCP-UI server is initialized once at extension startup and stays connected
 	}
 
 	// Removes and destroys the top Cline instance (the current finished task),
@@ -1356,6 +1361,10 @@ export class ClineProvider
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
 
+		// Update TTS voice for the new mode (Sentinel agents have different voices)
+		const agentVoice = getAgentTtsVoice(newMode)
+		setTtsVoice(agentVoice)
+
 		// Sentinel Edition: Initialize and start FSM for Sentinel modes
 		if (task && newMode.startsWith("sentinel-")) {
 			const { createSentinelFSM, AgentState } = await import("../sentinel/StateMachine")
@@ -2160,6 +2169,11 @@ export class ClineProvider
 			talkToFigmaEnabled,
 			figmaFileUrl,
 			figmaWebPreviewEnabled,
+			penpotMcpEnabled,
+			penpotFileUrl,
+			penpotWebPreviewEnabled,
+			mcpUiEnabled,
+			mcpUiServerUrl,
 		} = await this.getState()
 
 		let cloudOrganizations: CloudOrganizationMembership[] = []
@@ -2214,6 +2228,11 @@ export class ClineProvider
 			talkToFigmaEnabled: talkToFigmaEnabled ?? true,
 			figmaFileUrl: figmaFileUrl,
 			figmaWebPreviewEnabled: figmaWebPreviewEnabled ?? false,
+			penpotMcpEnabled: penpotMcpEnabled ?? true,
+			penpotFileUrl: penpotFileUrl,
+			penpotWebPreviewEnabled: penpotWebPreviewEnabled ?? false,
+			mcpUiEnabled: mcpUiEnabled ?? false,
+			mcpUiServerUrl: mcpUiServerUrl,
 			allowedMaxRequests,
 			allowedMaxCost,
 			autoCondenseContext: autoCondenseContext ?? true,
@@ -2636,6 +2655,11 @@ export class ClineProvider
 			talkToFigmaEnabled: stateValues.talkToFigmaEnabled ?? true,
 			figmaFileUrl: stateValues.figmaFileUrl,
 			figmaWebPreviewEnabled: stateValues.figmaWebPreviewEnabled ?? false,
+			penpotMcpEnabled: stateValues.penpotMcpEnabled ?? true,
+			penpotFileUrl: stateValues.penpotFileUrl,
+			penpotWebPreviewEnabled: stateValues.penpotWebPreviewEnabled ?? false,
+			mcpUiEnabled: stateValues.mcpUiEnabled ?? false,
+			mcpUiServerUrl: stateValues.mcpUiServerUrl,
 		}
 	}
 

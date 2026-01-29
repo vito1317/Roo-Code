@@ -35,5 +35,16 @@
 # Include .env file for telemetry
 !.env
 
-# Include tools (figma-write-bridge for built-in MCP server)
+# Include tools (built-in MCP servers)
 !tools/figma-write-bridge/**
+!tools/mcp-ui-server/**
+!tools/penpot-mcp/mcp-server/dist/**
+!tools/penpot-mcp/mcp-server/node_modules/**
+!tools/penpot-mcp/mcp-server/package.json
+!tools/penpot-mcp/mcp-server/data/**
+!tools/penpot-mcp/penpot-plugin/dist/**
+!tools/penpot-mcp/penpot-plugin/server.js
+!tools/ui-design-canvas/dist/**
+!tools/ui-design-canvas/node_modules/**
+!tools/ui-design-canvas/package.json
+!tools/ui-design-canvas/webview/**

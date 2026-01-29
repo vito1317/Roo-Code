@@ -63,9 +63,12 @@ export class HuggingFaceHandler extends BaseProvider implements SingleCompletion
 			stream_options: { include_usage: true },
 		}
 
-		// Add max_tokens if specified
-		if (this.options.includeMaxTokens && this.options.modelMaxTokens) {
-			params.max_tokens = this.options.modelMaxTokens
+		// Add max_tokens if specified and positive (not -1 which means "let server decide")
+		if (this.options.includeMaxTokens) {
+			const userMaxTokens = this.options.modelMaxTokens
+			if (userMaxTokens && userMaxTokens > 0) {
+				params.max_tokens = userMaxTokens
+			}
 		}
 
 		let stream

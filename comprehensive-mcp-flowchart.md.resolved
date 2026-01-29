@@ -1,0 +1,524 @@
+# Roo Code 完整系統架構流程圖
+
+> **專案版本**: Sentinel Edition v7.50+  
+> **文檔更新日期**: 2026-01-29
+
+---
+
+## 📊 完整系統架構流程圖 (All-in-One)
+
+```mermaid
+flowchart TB
+    %% ================ 使用者輸入層 ================
+    subgraph USER_LAYER["👤 使用者輸入層"]
+        direction LR
+        USER_INPUT[("使用者需求")]
+        SLASH_CMD["/architect /code /test"]
+    end
+
+    %% ================ VS Code Extension 層 ================
+    subgraph VSCODE_LAYER["💻 VS Code Extension"]
+        direction TB
+        ACTIVATE["Extension Activation"]
+        PROVIDER["ClineProvider"]
+        CHAT_UI["Chat Interface"]
+        ACTIVATE --> PROVIDER
+        PROVIDER <--> CHAT_UI
+    end
+
+    %% ================ 核心編排層 ================
+    subgraph ORCHESTRATION["🎛️ 編排層"]
+        direction TB
+        FSM[("StateMachine")]
+        HANDOFF["HandoffContext"]
+        ACM["AgentContextManager"]
+        TASK["Task.ts"]
+        FSM <--> HANDOFF
+        FSM <--> ACM
+        FSM <--> TASK
+    end
+
+    %% ================ Multi-Agent 工作流層 ================
+    subgraph AGENTS["🤖 Multi-Agent 工作流"]
+        direction TB
+        
+        subgraph PHASE1["Phase 1: 規劃設計"]
+            IDLE((IDLE))
+            ARCHITECT["🟦 Architect"]
+            DESIGNER["🎨 Designer"]
+            DESIGN_REVIEW["Design Review"]
+        end
+        
+        subgraph PHASE2["Phase 2: 實作"]
+            BUILDER["🟩 Builder"]
+            ARCH_REVIEW_CODE["Code Review"]
+        end
+        
+        subgraph PHASE3["Phase 3: 測試"]
+            QA["🟨 QA Engineer"]
+            TEST_REVIEW["Test Review"]
+        end
+        
+        subgraph PHASE4["Phase 4: 安全"]
+            SENTINEL["🟥 Sentinel"]
+            FINAL_REVIEW["Final Review"]
+        end
+        
+        COMPLETED((✅ DONE))
+        BLOCKED(("🚫 BLOCKED"))
+    end
+
+    %% ================ 自訂義工具層 ================
+    subgraph CUSTOM_TOOLS["🛠️ 自訂義工具 26+"]
+        direction TB
+        
+        subgraph FILE_TOOLS["檔案操作"]
+            READ_FILE["read_file"]
+            WRITE_FILE["write_to_file"]
+            EDIT_FILE["edit_file"]
+            LIST_FILES["list_files"]
+            SEARCH_FILES["search_files"]
+            CODEBASE_SEARCH["codebase_search"]
+        end
+        
+        subgraph EDIT_TOOLS["程式碼修改"]
+            APPLY_DIFF["apply_diff"]
+            APPLY_PATCH["apply_patch"]
+            SEARCH_REPLACE["search_replace"]
+            SAR["search_and_replace"]
+            ADJUST_LAYOUT["adjust_layout"]
+        end
+        
+        subgraph EXEC_TOOLS["執行工具"]
+            EXEC_CMD["execute_command"]
+            START_BG["background_service"]
+            BROWSER_ACTION["browser_action"]
+            GEN_IMAGE["generate_image"]
+        end
+        
+        subgraph MCP_TOOLS["MCP 調用"]
+            USE_MCP["use_mcp_tool"]
+            PARALLEL_MCP["parallel_mcp_calls"]
+            ACCESS_RESOURCE["access_mcp_resource"]
+            PARALLEL_UI["parallel_ui_tasks"]
+        end
+        
+        subgraph FLOW_TOOLS["流程控制"]
+            HANDOFF_TOOL["handoff_context"]
+            SWITCH_MODE["switch_mode"]
+            NEW_TASK["new_task"]
+            ATTEMPT_COMP["attempt_completion"]
+            ASK_QUESTION["ask_followup"]
+        end
+        
+        subgraph MISC_TOOLS["其他"]
+            RUN_SLASH["run_slash_command"]
+            FETCH_INST["fetch_instructions"]
+            TODO_LIST["update_todo_list"]
+        end
+    end
+
+    %% ================ MCP 協議層 ================
+    subgraph MCP_LAYER["🔌 MCP 協議層"]
+        direction TB
+        MCP_HUB["McpHub"]
+        MCP_SERVER_MGR["McpServerManager"]
+        PUI_SERVICE["ParallelUIService"]
+        AGENT_CTX["AgentContextManager"]
+        STDIO["stdio"]
+        SSE["SSE"]
+        MCP_HUB <--> MCP_SERVER_MGR
+        PUI_SERVICE <--> AGENT_CTX
+        MCP_HUB <--> STDIO
+        MCP_HUB <--> SSE
+    end
+
+    %% ================ MCP 伺服器層 ================
+    subgraph MCP_SERVERS["🌐 MCP 伺服器"]
+        direction TB
+        
+        subgraph FIGMA_MCP["Figma MCP"]
+            FW_BRIDGE["figma-write-bridge<br/>:3055"]
+            TTF["TalkToFigma"]
+        end
+        
+        subgraph OTHER_MCP["其他 MCP"]
+            PP_SERVER["penpot-mcp<br/>:4401/:4402"]
+            UI_SERVER["mcp-ui-server"]
+        end
+    end
+
+    %% ================ WebSocket Bridge ================
+    subgraph WS_BRIDGE["🌉 WebSocket Bridge"]
+        WSS["WebSocketServer :3055"]
+        PENDING_MAP["Pending Map"]
+        WSS <--> PENDING_MAP
+    end
+
+    %% ================ Figma Plugin ================
+    subgraph PLUGIN_LAYER["🧩 Figma Plugin"]
+        UI_HTML["ui.html"]
+        SANDBOX["plugin.js"]
+        UI_HTML <-->|"postMessage"| SANDBOX
+    end
+
+    %% ================ 平台層 ================
+    subgraph PLATFORM_LAYER["🎨 平台"]
+        FIGMA_CANVAS[("Figma")]
+        PENPOT_EDITOR[("Penpot")]
+        VSCODE_CHAT[("VS Code Chat")]
+    end
+
+    %% ================ 瀏覽器層 ================
+    subgraph BROWSER_LAYER["🌐 瀏覽器"]
+        BROWSER_SVC["BrowserService"]
+        SCREENSHOT["截圖"]
+        NAVIGATE["導航"]
+        INTERACT["互動"]
+        BROWSER_SVC --> SCREENSHOT
+        BROWSER_SVC --> NAVIGATE
+        BROWSER_SVC --> INTERACT
+    end
+
+    %% ================ 連接線 ================
+    USER_INPUT --> ACTIVATE
+    SLASH_CMD --> ACTIVATE
+    PROVIDER --> FSM
+    PROVIDER --> TASK
+    
+    FSM -->|"start()"| IDLE
+    IDLE --> ARCHITECT
+    ARCHITECT -->|"needsDesign"| DESIGNER
+    ARCHITECT -->|"noDesign"| BUILDER
+    DESIGNER --> DESIGN_REVIEW
+    DESIGN_REVIEW -->|"reject"| DESIGNER
+    DESIGN_REVIEW -->|"approve"| BUILDER
+    DESIGN_REVIEW -->|"max retry"| BLOCKED
+    BUILDER --> ARCH_REVIEW_CODE
+    ARCH_REVIEW_CODE -->|"reject"| BUILDER
+    ARCH_REVIEW_CODE -->|"approve"| QA
+    QA --> TEST_REVIEW
+    TEST_REVIEW -->|"fail"| BUILDER
+    TEST_REVIEW -->|"pass"| SENTINEL
+    TEST_REVIEW -->|"max retry"| BLOCKED
+    SENTINEL --> FINAL_REVIEW
+    FINAL_REVIEW -->|"vuln"| BUILDER
+    FINAL_REVIEW -->|"max retry"| BLOCKED
+    FINAL_REVIEW -->|"approve"| COMPLETED
+
+    TASK --> FILE_TOOLS
+    TASK --> EDIT_TOOLS
+    TASK --> EXEC_TOOLS
+    TASK --> MCP_TOOLS
+    TASK --> FLOW_TOOLS
+    
+    DESIGNER <--> USE_MCP
+    DESIGNER <--> PARALLEL_UI
+    
+    USE_MCP --> MCP_HUB
+    PARALLEL_MCP --> MCP_HUB
+    PARALLEL_UI --> PUI_SERVICE
+    ACCESS_RESOURCE --> MCP_HUB
+    
+    MCP_HUB --> FW_BRIDGE
+    MCP_HUB --> TTF
+    MCP_HUB --> PP_SERVER
+    MCP_HUB --> UI_SERVER
+    
+    FW_BRIDGE <--> WSS
+    WSS <--> UI_HTML
+    SANDBOX --> FIGMA_CANVAS
+    
+    TTF --> FIGMA_CANVAS
+    PP_SERVER --> PENPOT_EDITOR
+    UI_SERVER --> VSCODE_CHAT
+    
+    BROWSER_ACTION --> BROWSER_SVC
+    QA --> BROWSER_SVC
+
+    %% ================ 樣式 ================
+    style USER_INPUT fill:#6366F1,stroke:#4F46E5,color:#fff
+    style SLASH_CMD fill:#818CF8,stroke:#6366F1,color:#fff
+    style FSM fill:#8B5CF6,stroke:#7C3AED,color:#fff
+    style HANDOFF fill:#A78BFA,stroke:#8B5CF6,color:#fff
+    style ACM fill:#A78BFA,stroke:#8B5CF6,color:#fff
+    style TASK fill:#7C3AED,stroke:#6D28D9,color:#fff
+    style IDLE fill:#6B7280,stroke:#4B5563,color:#fff
+    style ARCHITECT fill:#3B82F6,stroke:#1D4ED8,color:#fff
+    style DESIGNER fill:#EC4899,stroke:#BE185D,color:#fff
+    style DESIGN_REVIEW fill:#F472B6,stroke:#EC4899,color:#fff
+    style BUILDER fill:#10B981,stroke:#059669,color:#fff
+    style ARCH_REVIEW_CODE fill:#34D399,stroke:#10B981,color:#fff
+    style QA fill:#F59E0B,stroke:#D97706,color:#fff
+    style TEST_REVIEW fill:#FBBF24,stroke:#F59E0B,color:#fff
+    style SENTINEL fill:#EF4444,stroke:#DC2626,color:#fff
+    style FINAL_REVIEW fill:#F87171,stroke:#EF4444,color:#fff
+    style COMPLETED fill:#22C55E,stroke:#16A34A,color:#fff
+    style BLOCKED fill:#991B1B,stroke:#7F1D1D,color:#fff
+    style MCP_HUB fill:#4F46E5,stroke:#3730A3,color:#fff
+    style PUI_SERVICE fill:#6366F1,stroke:#4F46E5,color:#fff
+    style WSS fill:#7C3AED,stroke:#6D28D9,color:#fff
+    style FW_BRIDGE fill:#4F46E5,stroke:#3730A3,color:#fff
+    style TTF fill:#7C3AED,stroke:#6D28D9,color:#fff
+    style PP_SERVER fill:#EC4899,stroke:#BE185D,color:#fff
+    style UI_SERVER fill:#10B981,stroke:#059669,color:#fff
+    style FIGMA_CANVAS fill:#F59E0B,stroke:#D97706,color:#fff
+    style PENPOT_EDITOR fill:#EC4899,stroke:#BE185D,color:#fff
+    style VSCODE_CHAT fill:#10B981,stroke:#059669,color:#fff
+    style BROWSER_SVC fill:#06B6D4,stroke:#0891B2,color:#fff
+```
+
+---
+
+## 📋 工具分類清單
+
+### 🛠️ 自訂義工具 (26 個核心工具)
+
+| 分類           | 工具名稱                   | 描述            |
+| -------------- | -------------------------- | --------------- |
+| **檔案操作**   | `read_file`                | 讀取檔案內容    |
+|                | `write_to_file`            | 寫入檔案        |
+|                | `edit_file`                | 編輯現有檔案    |
+|                | `list_files`               | 列出目錄檔案    |
+|                | `search_files`             | 搜尋檔案        |
+|                | `codebase_search`          | 程式碼庫搜尋    |
+| **程式碼修改** | `apply_diff`               | 套用 diff 差異  |
+|                | `apply_patch`              | 套用補丁        |
+|                | `search_replace`           | 搜尋並替換      |
+|                | `search_and_replace`       | 搜尋替換 v2     |
+|                | `adjust_layout`            | 調整 UI 佈局    |
+| **執行**       | `execute_command`          | 執行終端命令    |
+|                | `start_background_service` | 啟動背景服務    |
+|                | `browser_action`           | 瀏覽器自動化    |
+|                | `generate_image`           | AI 生成圖片     |
+| **MCP 工具**   | `use_mcp_tool`             | 調用 MCP 工具   |
+|                | `parallel_mcp_calls`       | 並行 MCP 調用   |
+|                | `access_mcp_resource`      | 存取 MCP 資源   |
+|                | `parallel_ui_tasks`        | 並行 UI 任務    |
+| **流程控制**   | `handoff_context`          | 代理間交接      |
+|                | `switch_mode`              | 切換 Agent 模式 |
+|                | `new_task`                 | 創建新任務      |
+|                | `attempt_completion`       | 嘗試完成任務    |
+|                | `ask_followup_question`    | 追問問題        |
+| **其他**       | `run_slash_command`        | 執行斜線命令    |
+|                | `fetch_instructions`       | 取得指令        |
+|                | `update_todo_list`         | 更新待辦事項    |
+
+---
+
+### 🔌 MCP 伺服器工具
+
+#### Figma Write Bridge (40+ 工具)
+
+| 分類         | 工具                 | 描述             |
+| ------------ | -------------------- | ---------------- |
+| **創建**     | `create_frame`       | 建立 Frame       |
+|              | `create_rectangle`   | 建立矩形         |
+|              | `create_ellipse`     | 建立橢圓         |
+|              | `create_line`        | 建立線條         |
+|              | `create_polygon`     | 建立多邊形       |
+|              | `create_star`        | 建立星形         |
+|              | `add_text`           | 建立文字         |
+|              | `place_image_base64` | 放置 Base64 圖片 |
+| **選擇**     | `find_nodes`         | 搜尋節點         |
+|              | `select_nodes`       | 選擇節點         |
+|              | `get_selection`      | 取得目前選擇     |
+|              | `create_page`        | 建立頁面         |
+|              | `set_current_page`   | 切換頁面         |
+| **節點管理** | `rename_node`        | 重新命名         |
+|              | `delete_node`        | 刪除節點         |
+|              | `duplicate_node`     | 複製節點         |
+|              | `resize_node`        | 調整大小         |
+|              | `rotate_node`        | 旋轉             |
+|              | `set_position`       | 設定位置         |
+|              | `group_nodes`        | 群組             |
+|              | `ungroup`            | 解散群組         |
+| **樣式**     | `set_fill`           | 設定填色         |
+|              | `set_stroke`         | 設定邊框         |
+|              | `set_corner_radius`  | 設定圓角         |
+|              | `set_opacity`        | 設定透明度       |
+|              | `set_blend_mode`     | 設定混合模式     |
+|              | `add_effect`         | 新增效果         |
+|              | `clear_effects`      | 清除效果         |
+|              | `layout_grid_add`    | 新增佈局格線     |
+|              | `layout_grid_clear`  | 清除佈局格線     |
+| **佈局**     | `set_auto_layout`    | 設定 Auto Layout |
+|              | `set_constraints`    | 設定約束         |
+| **文字**     | `set_text_content`   | 設定文字內容     |
+|              | `set_text_style`     | 設定文字樣式     |
+|              | `set_text_color`     | 設定文字顏色     |
+| **元件**     | `create_component`   | 建立元件         |
+|              | `create_instance`    | 建立實例         |
+|              | `detach_instance`    | 分離實例         |
+|              | `boolean_op`         | 布林運算         |
+| **匯出**     | `export_node`        | 匯出節點         |
+|              | `set_plugin_data`    | 設定插件資料     |
+|              | `get_plugin_data`    | 取得插件資料     |
+|              | `set_properties`     | 批次設定屬性     |
+
+#### MCP-UI Server (10 工具)
+
+| 工具                | 描述           |
+| ------------------- | -------------- |
+| `render_button`     | 渲染按鈕       |
+| `render_card`       | 渲染卡片       |
+| `render_table`      | 渲染表格       |
+| `render_progress`   | 渲染進度條     |
+| `render_alert`      | 渲染警告訊息   |
+| `render_code_block` | 渲染程式碼區塊 |
+| `render_list`       | 渲染清單       |
+| `render_badge`      | 渲染標籤       |
+| `render_divider`    | 渲染分隔線     |
+| `render_stats`      | 渲染統計數據   |
+
+#### Penpot MCP
+
+| 連接埠           | 用途                    |
+| ---------------- | ----------------------- |
+| `localhost:4401` | HTTP/SSE MCP 客戶端連線 |
+| `localhost:4402` | WebSocket Plugin 連線   |
+| `localhost:4403` | REPL 開發除錯           |
+
+#### TalkToFigma (外部)
+
+| 分類         | 工具                                                                |
+| ------------ | ------------------------------------------------------------------- |
+| **文件操作** | `get_document_info`, `get_selection`, `get_node_info`               |
+| **創建**     | `create_frame`, `create_rectangle`, `create_text`, `create_ellipse` |
+| **樣式**     | `set_fill_color`, `set_corner_radius`, `set_stroke`                 |
+| **佈局**     | `move_node`, `resize_node`, `set_auto_layout`                       |
+| **元件**     | `get_local_components`, `create_component_instance`                 |
+| **匯出**     | `export_node_as_image`, `get_styles`                                |
+
+---
+
+## 🔄 狀態機轉換詳圖
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE: 初始化
+
+    IDLE --> ARCHITECT: start()
+
+    state "Phase 1: 規劃設計" as P1 {
+        ARCHITECT --> DESIGNER: needsDesign=true<br/>useFigma=true
+        ARCHITECT --> BUILDER: needsDesign=false
+
+        DESIGNER --> DESIGN_REVIEW: designSpecs 完成
+        DESIGN_REVIEW --> DESIGNER: 設計被拒 (重試 ≤3)
+        DESIGN_REVIEW --> BUILDER: 設計通過
+        DESIGN_REVIEW --> BLOCKED: 重試 > 3
+    }
+
+    state "Phase 2: 實作" as P2 {
+        BUILDER --> ARCHITECT_REVIEW_CODE: builderTestContext 完成
+        ARCHITECT_REVIEW_CODE --> BUILDER: 程式碼被拒
+        ARCHITECT_REVIEW_CODE --> QA: 程式碼通過
+    }
+
+    state "Phase 3: 測試" as P3 {
+        QA --> ARCHITECT_REVIEW_TESTS: qaAuditContext 完成
+        ARCHITECT_REVIEW_TESTS --> BUILDER: 測試失敗 (重試 ≤3)
+        ARCHITECT_REVIEW_TESTS --> SENTINEL: 測試通過
+        ARCHITECT_REVIEW_TESTS --> BLOCKED: 重試 > 3
+    }
+
+    state "Phase 4: 安全" as P4 {
+        SENTINEL --> ARCHITECT_REVIEW_FINAL: sentinelResult 完成
+        ARCHITECT_REVIEW_FINAL --> BUILDER: 有漏洞 (重試 ≤2)
+        ARCHITECT_REVIEW_FINAL --> COMPLETED: 安全通過
+        ARCHITECT_REVIEW_FINAL --> BLOCKED: 重試 > 2
+    }
+
+    COMPLETED --> [*]: 任務完成
+    BLOCKED --> [*]: 需人工介入
+```
+
+---
+
+## 🔗 MCP 請求-回應完整序列
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent as 🤖 Agent (Designer/Builder/QA)
+    participant Task as 📋 Task
+    participant UseMcp as 🔧 UseMcpToolTool
+    participant McpHub as 🎛️ McpHub
+    participant Transport as 📡 Transport (stdio/SSE)
+    participant MCP as 🔌 MCP Server
+    participant WS as 🌉 WebSocket Bridge
+    participant Plugin as 🧩 Figma Plugin
+    participant Canvas as 🎨 Figma Canvas
+
+    rect rgb(240, 240, 255)
+        Note over Agent,Canvas: === Phase 1: 工具調用發起 ===
+        Agent->>Task: 執行工具 use_mcp_tool
+        Task->>UseMcp: execute(params)
+        UseMcp->>UseMcp: validateParams()<br/>validateToolExists()
+    end
+
+    rect rgb(240, 255, 240)
+        Note over Agent,Canvas: === Phase 2: MCP 協議處理 ===
+        UseMcp->>McpHub: callTool(serverName, toolName, args)
+        McpHub->>McpHub: getConnection(serverName)
+        McpHub->>Transport: send(request)
+        Transport->>MCP: JSON-RPC Request
+    end
+
+    rect rgb(255, 240, 240)
+        Note over Agent,Canvas: === Phase 3: Figma 操作執行 ===
+        MCP->>MCP: Zod schema validation
+        MCP->>WS: sendToPlugin(action, args)
+        WS->>WS: generateId()<br/>pending.set(id, {resolve, reject})
+        WS->>Plugin: ws.send({id, action, args})
+        Plugin->>Plugin: handleAction(action)
+        Plugin->>Canvas: figma.createFrame() etc.
+        Canvas-->>Plugin: Node created
+    end
+
+    rect rgb(255, 255, 240)
+        Note over Agent,Canvas: === Phase 4: 回應返回 ===
+        Plugin->>Plugin: 準備回應 {ok:true, nodeId}
+        Plugin->>WS: figma.ui.postMessage({replyTo:id, result})
+        WS->>WS: pending.get(id).resolve(result)
+        WS-->>MCP: Promise resolved
+        MCP-->>Transport: JSON-RPC Response
+        Transport-->>McpHub: Result
+        McpHub-->>UseMcp: toolResult
+        UseMcp->>UseMcp: processToolContent()
+        UseMcp-->>Task: 工具結果
+        Task-->>Agent: 繼續執行
+    end
+```
+
+---
+
+## 📊 工具映射表 (ParallelUIService)
+
+ParallelUIService 處理 `figma-write` 與 `TalkToFigma` 之間的工具名稱和參數差異：
+
+| figma-write         | TalkToFigma         | 參數差異                 |
+| ------------------- | ------------------- | ------------------------ |
+| `add_text`          | `create_text`       | -                        |
+| `set_text_color`    | `set_fill_color`    | -                        |
+| `set_fill`          | `set_fill_color`    | `hex` → `color: {r,g,b}` |
+| `set_position`      | `move_node`         | -                        |
+| `resize_node`       | `resize_node`       | 相同                     |
+| `set_corner_radius` | `set_corner_radius` | 相同                     |
+
+---
+
+## 📁 核心檔案索引
+
+| 檔案                                             | 行數   | 職責                   |
+| ------------------------------------------------ | ------ | ---------------------- |
+| [src/services/mcp/McpHub.ts](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/src/services/mcp/McpHub.ts)                     | 3,700+ | MCP 伺服器生命週期管理 |
+| [src/core/sentinel/StateMachine.ts](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/src/core/sentinel/StateMachine.ts)              | 1,200+ | Multi-Agent 狀態機     |
+| [src/services/figma/ParallelUIService.ts](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/src/services/figma/ParallelUIService.ts)        | 2,600+ | 並行 UI 任務協調       |
+| [src/services/figma/AgentContextManager.ts](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/src/services/figma/AgentContextManager.ts)      | 330+   | Agent 上下文隔離       |
+| [src/core/sentinel/HandoffContext.ts](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/src/core/sentinel/HandoffContext.ts)            | 210+   | 代理間資料交接         |
+| [tools/figma-write-bridge/figma-write-bridge.ts](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/tools/figma-write-bridge/figma-write-bridge.ts) | 318    | Figma MCP 伺服器       |
+| [tools/figma-write-bridge/plugin/plugin.js](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/tools/figma-write-bridge/plugin/plugin.js)      | 400+   | Figma Plugin 沙盒      |
+| [src/core/tools/UseMcpToolTool.ts](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/src/core/tools/UseMcpToolTool.ts)               | 690+   | MCP 工具調用           |
+| [src/core/tools/ParallelUITasksTool.ts](file:///Users/vito/Documents/GitHub/agentic%20AI%20agent/src/core/tools/ParallelUITasksTool.ts)          | 1,200+ | 並行 UI 任務工具       |

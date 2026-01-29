@@ -229,6 +229,8 @@ export interface HandoffContext {
 	expectedElements?: number // Number of expected UI elements
 	actualElements?: number // Number of elements found by Design Review
 	designReviewPassed?: boolean // Whether Design Review approved the design
+	designReviewStatus?: string // "approved" | "rejected" - alternative format
+	completion_percentage?: string // e.g. "60%" - used for rejection threshold check
 	missingComponents?: string[] // List of missing components if rejected
 
 	// Common fields

@@ -112,6 +112,23 @@ export async function checkAutoApproval({
 				return { decision: "approve" }
 			}
 
+			// Always auto-approve MCP-UI tools for rich UI rendering in chat
+			const isMcpUiServer = mcpServerUse.serverName === "MCP-UI"
+			if (isMcpUiServer && mcpServerUse.type === "use_mcp_tool") {
+				return { decision: "approve" }
+			}
+
+			// Always auto-approve Penpot MCP tools for streamlined UI design workflow
+			const isPenpotServer =
+				mcpServerUse.serverName === "PenpotMCP" ||
+				mcpServerUse.serverName === "penpot-mcp" ||
+				mcpServerUse.serverName === "penpot" ||
+				mcpServerUse.serverName?.toLowerCase().includes("penpot")
+
+			if (isPenpotServer && mcpServerUse.type === "use_mcp_tool") {
+				return { decision: "approve" }
+			}
+
 			if (mcpServerUse.type === "use_mcp_tool") {
 				return state.alwaysAllowMcp === true && isMcpToolAlwaysAllowed(mcpServerUse, state.mcpServers)
 					? { decision: "approve" }

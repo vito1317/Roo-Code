@@ -271,10 +271,10 @@ export function getFigmaWriteService(): FigmaWriteService | null {
 export const FIGMA_WRITE_TOOLS = [
 	{ name: "create_frame", description: "Create a frame with width/height and optional name/position" },
 	{ name: "add_text", description: "Add a text node (param: text, x, y, fontSize)" },
-	{ name: "create_rectangle", description: "Create a rectangle with optional fill (param: width, height, x, y, cornerRadius, hex)" },
+	{ name: "create_rectangle", description: "Create a rectangle (param: width, height, x, y, radius). NOTE: Use set_fill after to apply color!" },
 	{ name: "set_position", description: "Move a node to (x,y)" },
 	{ name: "group_nodes", description: "Group nodes together" },
-	{ name: "set_fill", description: "Apply a solid fill color (param: nodeId, hex)" },
+	{ name: "set_fill", description: "REQUIRED after create_rectangle! Apply fill color (param: nodeId, hex)" },
 	{ name: "find_nodes", description: "Find nodes by type/name" },
 	{ name: "set_text_color", description: "Set text color (param: nodeId, hex)" },
 	{ name: "delete_node", description: "Delete a node by ID" },

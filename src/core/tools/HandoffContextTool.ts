@@ -213,6 +213,24 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 					designSpecs: parsedContext.designSpecs as string || JSON.stringify(parsedContext),
 				}
 
+			case AgentState.DESIGN_REVIEW:
+				// Extract designReviewPassed and other review fields
+				// Note: designReviewPassed must be explicitly true to pass, default is rejected
+				console.log("[HandoffContextTool] Design Review context:", {
+					designReviewPassed: parsedContext.designReviewPassed,
+					status: parsedContext.status,
+					completion_percentage: parsedContext.completion_percentage,
+				})
+				return {
+					...base,
+					designReviewPassed: parsedContext.designReviewPassed as boolean | undefined,
+					designReviewStatus: parsedContext.status as string | undefined,
+					completion_percentage: parsedContext.completion_percentage as string | undefined,
+					expectedElements: parsedContext.expectedElements as number | undefined,
+					actualElements: parsedContext.actualElements as number | undefined,
+					missingComponents: parsedContext.missingComponents as string[] | undefined,
+				}
+
 			case AgentState.BUILDER:
 				return {
 					...base,
@@ -271,7 +289,43 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 		switch (toState) {
 			case AgentState.ARCHITECT:
 				return `[AUTO-CONTINUE] You are the Architect. Review the feedback and create/update the implementation plan.`
-			case AgentState.DESIGNER:
+			case AgentState.DESIGNER: {
+				// Check if this is a rejection from Design Review
+				const isRejection = context.designReviewPassed === false ||
+					context.designReviewStatus === "rejected" ||
+					context.missingComponents !== undefined ||
+					context.feedback !== undefined
+
+				if (isRejection) {
+					// Designer is being sent back to fix issues
+					const missingComponents = context.missingComponents as string[] | undefined
+					const feedback = context.feedback as string | undefined
+					const expectedElements = context.expectedElements as number | undefined
+					const actualElements = context.actualElements as number | undefined
+
+					let rejectionDetails = ""
+					if (feedback) {
+						rejectionDetails += `**Design Review 的反饋：**\n${feedback}\n\n`
+					}
+					if (missingComponents && missingComponents.length > 0) {
+						rejectionDetails += `**缺少的元素：**\n${missingComponents.map(c => `- ${c}`).join("\n")}\n\n`
+					}
+					if (expectedElements !== undefined && actualElements !== undefined) {
+						rejectionDetails += `**元素數量：** 預期 ${expectedElements} 個，實際 ${actualElements} 個\n\n`
+					}
+
+					return `[AUTO-CONTINUE] 你是 Designer，**設計被 Design Review 退回了！**\n\n` +
+						`## ❌ 退回原因\n\n${rejectionDetails}` +
+						`## 🔧 你需要做的事\n\n` +
+						`1. **閱讀上面的反饋**，了解哪些地方需要修正\n` +
+						`2. **使用 get_node_info** 檢查現有設計\n` +
+						`3. **修正缺失的元素** - 使用 parallel_ui_tasks 或 parallel_mcp_calls 創建缺少的元素\n` +
+						`4. **再次 handoff** 給 Design Review\n\n` +
+						`⚠️ **不要從頭開始！** 只需要修正被指出的問題！\n\n` +
+						`⚠️ **修正後記得設定正確的 position！** 不要讓新元素與現有元素重疊！`
+				}
+
+				// First time going to Designer (not a rejection)
 				if (context.figmaUrl) {
 					return `[AUTO-CONTINUE] You are the Designer.\n\n` +
 						`**YOUR MISSION:** Analyze the Figma design and create design-specs.md\n\n` +
@@ -285,7 +339,7 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 						`⚠️ DO NOT handoff until design-specs.md is created!`
 				} else {
 					return `[AUTO-CONTINUE] You are the Designer.\n\n` +
-						`**YOUR MISSION:** Create design-specs.md for the UI\n\n` + 
+						`**YOUR MISSION:** Create design-specs.md for the UI\n\n` +
 						`**OPTION A:** Use generate_image (if available) to create mockup\n\n` +
 						`**OPTION B (FALLBACK):** Create text-only design-specs.md with:\n` +
 						`- ASCII layout diagram\n` +
@@ -296,6 +350,7 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 						`**STEP FINAL:** Use handoff_context ONLY AFTER design-specs.md exists\n\n` +
 						`⚠️ DO NOT handoff until design-specs.md is created!`
 				}
+			}
 			case AgentState.BUILDER:
 				return `[AUTO-CONTINUE] You are the Builder. Implement according to the plan and design specs: ${JSON.stringify(context).slice(0, 500)}`
 			case AgentState.QA_ENGINEER: {

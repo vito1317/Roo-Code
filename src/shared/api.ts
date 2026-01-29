@@ -113,8 +113,15 @@ export const getModelMaxOutputTokens = ({
 	settings?: ProviderSettings
 	format?: "anthropic" | "openai" | "gemini" | "openrouter"
 }): number | undefined => {
+	// Helper to check if a value is a valid positive number
+	const isValidMaxTokens = (val: number | undefined): val is number => {
+		return val !== undefined && val > 0
+	}
+
 	if (shouldUseReasoningBudget({ model, settings })) {
-		return settings?.modelMaxTokens || DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS
+		// Only use user's modelMaxTokens if it's positive (not -1 which means "let server decide")
+		const userMaxTokens = settings?.modelMaxTokens
+		return isValidMaxTokens(userMaxTokens) ? userMaxTokens : DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS
 	}
 
 	const isAnthropicContext =
@@ -128,13 +135,14 @@ export const getModelMaxOutputTokens = ({
 	}
 
 	// For Anthropic contexts, always ensure a maxTokens value is set
-	if (isAnthropicContext && (!model.maxTokens || model.maxTokens === 0)) {
+	// Also handle negative values (like -1 which means "let server decide")
+	if (isAnthropicContext && (!model.maxTokens || model.maxTokens <= 0)) {
 		return ANTHROPIC_DEFAULT_MAX_TOKENS
 	}
 
-	// If model has explicit maxTokens, clamp it to 20% of the context window
+	// If model has explicit positive maxTokens, clamp it to 20% of the context window
 	// Exception: GPT-5 models should use their exact configured max output tokens
-	if (model.maxTokens) {
+	if (model.maxTokens && model.maxTokens > 0) {
 		// Check if this is a GPT-5 model (case-insensitive)
 		const isGpt5Model = modelId.toLowerCase().includes("gpt-5")
 

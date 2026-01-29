@@ -260,8 +260,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		[soundEnabled, playNotification, playCelebration, playProgressLoop],
 	)
 
-	function playTts(text: string) {
-		vscode.postMessage({ type: "playTts", text })
+	function playTts(text: string, agentSlug?: string) {
+		vscode.postMessage({ type: "playTts", text, agentSlug })
 	}
 
 	useDeepCompareEffect(() => {
@@ -1079,40 +1079,186 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			) {
 				let text = lastMessage?.text || ""
 
+				// Check if this is an AI-to-AI conversation (has agentName)
+				// These messages should always be read for TTS (e.g., Architect answering another agent)
+				const isAgentMessage = !!(lastMessage as any).agentName
+
 				// Filter out tool-related and technical content for TTS
 				// Skip messages that are primarily about tool operations
+				// IMPORTANT: Most patterns should match at START of message (^) to avoid false positives
+				// NOTE: Agent messages bypass this filter to ensure AI-to-AI conversations are read
 				const toolPatterns = [
-					// Tool action indicators
+					// Tool action indicators (at start)
 					/^(Let me|I'll|I'm going to|I will|Now I|First,? I|Next,? I).{0,30}(read|write|search|execute|run|check|look|find|create|edit|modify|delete|update|open|close|list|get|fetch|call|use)/i,
-					// Progress indicators (English)
-					/^(Processing|Loading|Searching|Reading|Writing|Executing|Running|Checking|Looking|Finding|Creating|Editing|Modifying|Deleting|Updating|Fetching|Calling|Submitting|Connecting|Disconnecting|Initializing|Starting|Stopping)/i,
-					// Chinese progress indicators
-					/^(正在|開始|準備|執行|讀取|寫入|搜尋|搜索|檢查|查找|建立|創建|編輯|修改|刪除|更新|獲取|調用|提交|連接|斷開|初始化|啟動|停止)/,
-					// Status messages
-					/^(Done|Completed|Finished|Success|Failed|Error|Warning)/i,
-					// File path mentions (likely tool output)
+					// Progress indicators at start (English)
+					/^(Processing|Loading|Searching|Reading|Writing|Executing|Running|Checking|Looking|Finding|Creating|Editing|Modifying|Deleting|Updating|Fetching|Calling|Submitting|Connecting|Disconnecting|Initializing|Starting|Stopping)\b/i,
+					// Chinese progress indicators at start
+					/^(正在|開始|準備|執行中|讀取中|寫入中|搜尋中|搜索中|檢查中|查找中)/,
+					// Status messages at start
+					/^(Done|Completed|Finished|Success|Failed|Error|Warning)\b/i,
+					// File path mentions at start (likely tool output)
 					/^(File|Path|Directory|Folder|Found|Located|Created|Modified|Deleted):/i,
-					// Command execution
+					// Command execution at start
 					/^(Running|Executing|Command|Terminal|Output|Result):/i,
-					// Emoji-prefixed status/progress messages (any length, common status emojis)
-					/^[🔍🔄✅❌⚠️📁📄💾🔧⏳✨🎨🚀💡📝🔗🎯📊🔥💫🌟⭐📌🏷️🎉👍👎💪🤖🧠📋📦🔒🔓🛠️⚙️🔌📡🌐💻🖥️📱]/,
-					// MCP/API related
-					/^(MCP|API|Tool|Request|Response|Calling|Invoking)/i,
-					// Agent handoff/context/mode switching messages
-					/(handoff|context from|sentinel|architect|designer|coder|switching to|mode switch|transferring to|handing off)/i,
-					// Parallel tasks/batch operations
-					/(parallel|batch|concurrent|executing \d+|processing \d+|completed \d+\/\d+|tasks? (in|completed|failed))/i,
-					// Figma-specific messages
-					/(figma|MCP calls|creating ui|creating button|creating frame|creating rectangle|node created)/i,
+					// Emoji-prefixed status/progress messages (common status emojis at START)
+					/^[🔍🔄✅❌⚠️📁📄💾🔧⏳✨🎨🚀💡📝🔗🎯📊🔥💫🌟⭐📌🏷️🎉👍👎💪🤖🧠📋📦🔒🔓🛠️⚙️🔌📡🌐💻🖥️📱⚡☑️✔️☐]/,
+					// MCP/API related at start
+					/^(MCP|API|Tool|Request|Response|Calling|Invoking)\b/i,
+					// Agent handoff messages - SPECIFIC patterns only (not just "designer" anywhere)
+					/^(Submitting|Transferring|Handing off) .*(context|handoff)/i,
+					/handoff context from \w+-\w+/i,
+					/switching (to|from) (sentinel|architect|designer|coder) mode/i,
+					// Parallel tasks/batch operations - SPECIFIC patterns
+					/^(Executing|Processing|Completed) \d+ (MCP|parallel|batch)/i,
+					// Figma technical output - SPECIFIC patterns (not just "figma" anywhere)
+					/^(Figma|MCP):/i,
+					/\d+ MCP calls/i,
+					/node (created|deleted|moved) with ID/i,
 					// Code-like content
 					/^```[\s\S]*```$/,
 					/^`[^`]+`$/,
 				]
 
 				// Check if the message matches any tool pattern
-				const isToolMessage = toolPatterns.some((pattern) => pattern.test(text.trim()))
+				// Agent messages (AI-to-AI conversations) bypass this filter
+				const isToolMessage = !isAgentMessage && toolPatterns.some((pattern) => pattern.test(text.trim()))
 				if (isToolMessage) {
 					return // Skip TTS for tool-related messages
+				}
+
+				// Additional handoff/system message patterns that should ALSO be filtered for agent messages
+				// These are workflow/system notifications that shouldn't be read by TTS
+				const handoffPatterns = [
+					// Handoff completion messages
+					/✅\s*\*?\*?Sentinel Handoff/i,
+					/Sentinel Handoff Complete/i,
+					// Context reset messages
+					/🔄\s*Context Reset/i,
+					/Context Reset for/i,
+					// Handoff details
+					/Handoff Summary/i,
+					/Handoff Context/i,
+					/\*?\*?From:?\*?\*?\s*(sentinel-|🟦|🎨|🟩|💬|🔒)/i,
+					/\*?\*?To:?\*?\*?\s*(sentinel-|🟦|🎨|🟩|💬|🔒)/i,
+					// Workflow continuation
+					/workflow continues with/i,
+					/starts with fresh context/i,
+					/context has been saved/i,
+					// Plan creation
+					/📝\s*\*?\*?Plan created/i,
+					/Preview is now open/i,
+					// Attempt markers
+					/Attempt #\d+/i,
+					/\(Attempt #\d+\)/i,
+					// Agent emoji indicators in workflow messages
+					/🟦\s*(Architect|Builder|Designer)/i,
+					/🎨\s*(Architect|Builder|Designer)/i,
+					/🟩\s*(Architect|Builder|Designer)/i,
+					/💬\s*(Architect|Builder|Designer|Review)/i,
+					/🔒\s*(Sentinel|Security)/i,
+					// Browser/DOM extraction output
+					/🔍\s*\*?\*?DOM STRUCTURE EXTRACTED/i,
+					/DOM extraction failed/i,
+					/Use this to verify UI layout/i,
+					// Architect approval messages
+					/🟦\s*\*?\*?Architect 審批通過/i,
+					/Architect 自動批准/i,
+					/工具請求已被.*批准/i,
+					/Tool request.*approved/i,
+					// Mode switch messages
+					/Auto-approved mode switch/i,
+					/sentinel-\w+\s*→\s*sentinel-\w+/i,
+					// Auto-approved command messages - multiple patterns for robustness
+					/⚡\s*\*{0,2}Auto-approved command/i,
+					/Auto-approved command:/i,
+					/Auto-approved command/i,
+					/⚡.*Auto-approved/i,
+					// Auto-Background and background service messages
+					/☑️\s*Auto-Background/i,
+					/Auto-Background:/i,
+					/🚀\s*Auto-approved/i,
+					/🚀\s*Starting background service/i,
+					/Starting background service:/i,
+					/Detected server command/i,
+					/running in background/i,
+					/on port \d+/i,
+					// Sentinel mode interception messages
+					/🔄\s*\*?\*?Sentinel Mode/i,
+					/Sentinel Mode:.*Intercepting/i,
+					/Intercepting completion from/i,
+					/Initiating handoff/i,
+					// Parallel AI tasks messages
+					/🚀\s*Launching.*parallel.*agents?/i,
+					/Launching \d+ parallel AI/i,
+					/parallel (AI )?agents? for/i,
+					/inside frame \d+:\d+/i,
+					// Task completion summaries
+					/✅\s*All \d+ parallel.*completed/i,
+					/parallel.*tasks? completed/i,
+					/📊\s*Summary/i,
+					/Total duration.*ms/i,
+					/nodes? created/i,
+					/📋\s*Task Results/i,
+					/\[[\w-]+\]\s*[✓✔]\s*-?\s*\d+\s*nodes?/i,
+					// Parallel UI drawing tasks
+					/🎨\s*Starting \d+ parallel/i,
+					/Starting \d+ parallel UI drawing/i,
+					/parallel UI drawing tasks/i,
+					// UI element creation list items with [component-name] patterns
+					/^\d+\.\s*\[[\w-]+\]/m,
+					/\[title\].*@\s*\(\d+/i,
+					/\[[\w-]+-input\].*@\s*\(\d+/i,
+					/\[[\w-]+-btn\].*@\s*\(\d+/i,
+					/\[[\w-]+-link\].*@\s*\(\d+/i,
+					/\[[\w-]+-text\].*@\s*\(\d+/i,
+					// Grid layout messages
+					/📍\s*Grid layout/i,
+					/Grid layout:\s*\d+\s*columns?/i,
+					// Color codes and position info
+					/🎨\s*#[A-Fa-f0-9]{6}\s*@\s*\(\d+,\s*\d+\)/,
+					/#[A-Fa-f0-9]{6}\s*@\s*\(\d+,\s*\d+\)/,
+				]
+				const isHandoffMessage = handoffPatterns.some((pattern) => pattern.test(text.trim()))
+				if (isHandoffMessage) {
+					return // Skip TTS for handoff/system messages
+				}
+
+				// Direct string check for common system messages that should ALWAYS be filtered
+				// This is a fallback in case regex patterns fail due to encoding issues
+				const textLower = text.toLowerCase()
+				const alwaysFilterPhrases = [
+					"auto-approved command",
+					"auto-approved mode",
+					"auto-approved:",
+					"auto-background",
+					"sentinel handoff",
+					"context reset",
+					"handoff context",
+					"intercepting completion",
+					"initiating handoff",
+					"parallel ai agents",
+					"parallel ui tasks",
+					"dom structure extracted",
+					"starting background service",
+					"detected server command",
+					"running in background",
+					"background service",
+					"on port 3000",
+					"on port 8080",
+					"on port 5000",
+				]
+				if (alwaysFilterPhrases.some((phrase) => textLower.includes(phrase))) {
+					return // Skip TTS for system messages
+				}
+
+				// For agent messages, extract just the response content for cleaner TTS
+				if (isAgentMessage) {
+					// Remove the header (e.g., "🟦 **Architect 回答了 Agent 的問題：**")
+					// and quote blocks (the original question)
+					text = text.replace(/^.*回答了.*的問題[：:]\s*/i, "")
+					text = text.replace(/^>.*$/gm, "") // Remove quote blocks
+					text = text.replace(/^\*\*回答[：:]\*\*\s*/im, "") // Remove "回答：" header
+					text = text.replace(/^\*\*問題[：:]\*\*\s*.*$/im, "") // Remove "問題：" line
 				}
 
 				// Remove code blocks
@@ -1135,7 +1281,22 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				// ensure message is not a duplicate of last read message
 				if (text !== lastTtsRef.current) {
 					try {
-						playTts(text)
+						// Pass agent slug for voice selection
+						// Agent messages use the agent's voice, other messages use current mode's voice
+						const agentSlug = isAgentMessage
+							? (lastMessage as any).agentName?.toLowerCase().includes("architect")
+								? "sentinel-architect"
+								: (lastMessage as any).agentName?.toLowerCase().includes("designer")
+									? "sentinel-designer"
+									: (lastMessage as any).agentName?.toLowerCase().includes("builder")
+										? "sentinel-builder"
+										: (lastMessage as any).agentName?.toLowerCase().includes("qa")
+											? "sentinel-qa"
+											: (lastMessage as any).agentName?.toLowerCase().includes("review")
+												? "sentinel-design-review"
+												: undefined
+							: undefined
+						playTts(text, agentSlug)
 						lastTtsRef.current = text
 					} catch (error) {
 						console.error("Failed to execute text-to-speech:", error)

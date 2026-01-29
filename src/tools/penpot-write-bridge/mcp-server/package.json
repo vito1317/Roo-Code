@@ -1,0 +1,22 @@
+{
+  "name": "penpot-write-bridge",
+  "version": "1.0.0",
+  "description": "MCP server for Penpot UI creation",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ws": "^8.18.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
+    "@types/express": "^4.17.21",
+    "typescript": "^5.0.0"
+  }
+}

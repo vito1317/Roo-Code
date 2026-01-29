@@ -1,5 +1,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
+import { exec, spawn, ChildProcess } from "child_process"
+import { promisify } from "util"
 
 import * as vscode from "vscode"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
@@ -39,6 +41,75 @@ import { arePathsEqual, getWorkspacePath } from "../../utils/path"
 import { injectVariables } from "../../utils/config"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { sanitizeMcpName } from "../../utils/mcp-name"
+
+const execAsync = promisify(exec)
+
+/**
+ * Kill any process using a specific port.
+ * This is useful for cleaning up orphaned WebSocket servers that might
+ * still be holding the port when the MCP server process was killed abruptly.
+ *
+ * @param port - The port number to free
+ * @returns Promise<boolean> - True if port was freed or already free, false on error
+ */
+async function killProcessOnPort(port: number): Promise<boolean> {
+	const platform = process.platform
+
+	try {
+		if (platform === "darwin" || platform === "linux") {
+			// Find PIDs using the port
+			const { stdout } = await execAsync(`lsof -ti :${port} 2>/dev/null || true`)
+			const pids = stdout
+				.trim()
+				.split("\n")
+				.filter((pid) => pid)
+			if (pids.length > 0) {
+				console.log(`[McpHub] Found processes using port ${port}: ${pids.join(", ")}`)
+				for (const pid of pids) {
+					try {
+						await execAsync(`kill -9 ${pid}`)
+						console.log(`[McpHub] Killed process ${pid}`)
+					} catch (killError) {
+						console.log(`[McpHub] Could not kill process ${pid}:`, killError)
+					}
+				}
+				// Wait a bit for the port to be released
+				await new Promise((resolve) => setTimeout(resolve, 500))
+			}
+			return true
+		} else if (platform === "win32") {
+			// Windows: find and kill processes using the port
+			try {
+				const { stdout } = await execAsync(`netstat -ano | findstr :${port}`)
+				const lines = stdout.trim().split("\n")
+				const pids = new Set<string>()
+				for (const line of lines) {
+					const parts = line.trim().split(/\s+/)
+					const pid = parts[parts.length - 1]
+					if (pid && /^\d+$/.test(pid)) {
+						pids.add(pid)
+					}
+				}
+				for (const pid of pids) {
+					try {
+						await execAsync(`taskkill /F /PID ${pid}`)
+						console.log(`[McpHub] Killed process ${pid}`)
+					} catch {
+						// Process might have already exited
+					}
+				}
+				await new Promise((resolve) => setTimeout(resolve, 500))
+			} catch {
+				// No process found on port - that's OK
+			}
+			return true
+		}
+		return true
+	} catch (error) {
+		console.error(`[McpHub] Error killing process on port ${port}:`, error)
+		return false
+	}
+}
 
 // Discriminated union for connection states
 export type ConnectedMcpConnection = {
@@ -178,6 +249,9 @@ export class McpHub {
 		this.initializeProjectMcpServers()
 		this.initializeBuiltInFigmaWriteServer(provider)
 		this.initializeBuiltInTalkToFigmaServer()
+		this.initializeBuiltInPenpotServer()
+		this.initializeBuiltInUIDesignCanvasServer()
+		this.initializeBuiltInMcpUiServer()
 	}
 	/**
 	 * Registers a client (e.g., ClineProvider) using this hub.
@@ -789,6 +863,539 @@ export class McpHub {
 		} finally {
 			this.talkToFigmaInitializing = false
 		}
+	}
+
+	// Track if Penpot initialization is in progress
+	private penpotInitializing: boolean = false
+	private penpotServerProcess: ChildProcess | null = null
+	private penpotPluginServerProcess: ChildProcess | null = null
+	private penpotServerPort: number = 4401
+	private penpotPluginServerPort: number = 4400
+
+	// UI Design Canvas server tracking
+	private uiDesignCanvasInitializing: boolean = false
+	private uiDesignCanvasServerProcess: ChildProcess | null = null
+	private uiDesignCanvasServerPort: number = 4420
+
+	/**
+	 * Initialize the built-in Penpot MCP server for Penpot design integration
+	 * This starts the bundled Penpot MCP server and connects via SSE
+	 * Auto-enabled by default - will silently fail if Penpot MCP server cannot start
+	 */
+	private async initializeBuiltInPenpotServer(): Promise<void> {
+		try {
+			// Check if Penpot MCP is enabled in settings (default: true, like TalkToFigma)
+			const provider = this.providerRef.deref()
+			if (provider) {
+				const state = await provider.getState()
+				const penpotEnabled = state?.penpotMcpEnabled ?? true // Default to true - auto-enabled
+				if (!penpotEnabled) {
+					console.log("[McpHub] Penpot MCP is disabled in settings, skipping initialization")
+					return
+				}
+			}
+
+			// Prevent duplicate initializations
+			if (this.penpotInitializing) {
+				console.log("[McpHub] Penpot MCP initialization already in progress, skipping")
+				return
+			}
+
+			// Check if Penpot is already configured by user (don't override)
+			const existingConnection = this.connections.find((conn) => conn.server.name === "PenpotMCP")
+			if (existingConnection && existingConnection.server.status === "connected") {
+				console.log("[McpHub] Penpot MCP already configured and connected, skipping built-in server")
+				return
+			}
+
+			this.penpotInitializing = true
+
+			// Get the extension path to locate the bundled penpot-mcp server
+			const extensionPath = provider?.context?.extensionPath
+			if (!extensionPath) {
+				console.log("[McpHub] Extension path not available, skipping built-in Penpot server")
+				return
+			}
+
+			const serverPath = `${extensionPath}/tools/penpot-mcp/mcp-server/dist/index.js`
+
+			// Check if the bundled server file exists
+			try {
+				await fs.access(serverPath)
+			} catch {
+				console.log("[McpHub] Bundled penpot-mcp not found, skipping built-in server")
+				return
+			}
+
+			// Kill any existing process on the Penpot port to avoid conflicts
+			await killProcessOnPort(this.penpotServerPort)
+			await killProcessOnPort(4402) // WebSocket port
+			await killProcessOnPort(4403) // REPL port
+
+			// Start the bundled Penpot MCP server as a child process
+			const serverDir = `${extensionPath}/tools/penpot-mcp/mcp-server`
+			const nodeModulesPath = `${serverDir}/node_modules`
+
+			console.log("[McpHub] Starting bundled Penpot MCP server...")
+			this.penpotServerProcess = spawn("node", [serverPath], {
+				cwd: serverDir,
+				env: {
+					...process.env,
+					NODE_PATH: nodeModulesPath,
+					PENPOT_MCP_SERVER_PORT: String(this.penpotServerPort),
+					PENPOT_MCP_WEBSOCKET_PORT: "4402",
+					PENPOT_MCP_REPL_PORT: "4403",
+				},
+				stdio: ["pipe", "pipe", "pipe"],
+				detached: false,
+			})
+
+			// Log server output for debugging
+			this.penpotServerProcess.stdout?.on("data", (data) => {
+				console.log(`[PenpotMCP] ${data.toString().trim()}`)
+			})
+			this.penpotServerProcess.stderr?.on("data", (data) => {
+				console.error(`[PenpotMCP Error] ${data.toString().trim()}`)
+			})
+			this.penpotServerProcess.on("exit", (code) => {
+				console.log(`[McpHub] Penpot MCP server exited with code ${code}`)
+				this.penpotServerProcess = null
+			})
+
+			// Wait for the server to be ready (check SSE endpoint)
+			const maxAttempts = 10
+			const delayMs = 500
+			let serverReady = false
+
+			for (let i = 0; i < maxAttempts; i++) {
+				try {
+					const response = await fetch(`http://localhost:${this.penpotServerPort}/sse`, {
+						method: "GET",
+						headers: { Accept: "text/event-stream" },
+					})
+					if (response.ok || response.status === 200) {
+						serverReady = true
+						break
+					}
+				} catch {
+					// Server not ready yet, wait and retry
+				}
+				await new Promise((resolve) => setTimeout(resolve, delayMs))
+			}
+
+			if (!serverReady) {
+				console.log("[McpHub] Penpot MCP server failed to start within timeout")
+				if (this.penpotServerProcess) {
+					this.penpotServerProcess.kill()
+					this.penpotServerProcess = null
+				}
+				return
+			}
+
+			console.log("[McpHub] Penpot MCP server started, connecting via SSE...")
+
+			// Also start the Penpot Plugin server to serve the browser plugin
+			await killProcessOnPort(this.penpotPluginServerPort)
+			const pluginServerPath = `${extensionPath}/tools/penpot-mcp/penpot-plugin/server.js`
+			try {
+				await fs.access(pluginServerPath)
+				console.log("[McpHub] Starting Penpot Plugin server...")
+				this.penpotPluginServerProcess = spawn("node", [pluginServerPath], {
+					cwd: `${extensionPath}/tools/penpot-mcp/penpot-plugin`,
+					env: {
+						...process.env,
+						PENPOT_MCP_PLUGIN_PORT: String(this.penpotPluginServerPort),
+					},
+					stdio: ["pipe", "pipe", "pipe"],
+					detached: false,
+				})
+
+				this.penpotPluginServerProcess.stdout?.on("data", (data) => {
+					console.log(`[PenpotPlugin] ${data.toString().trim()}`)
+				})
+				this.penpotPluginServerProcess.stderr?.on("data", (data) => {
+					console.error(`[PenpotPlugin Error] ${data.toString().trim()}`)
+				})
+				this.penpotPluginServerProcess.on("exit", (code) => {
+					console.log(`[McpHub] Penpot Plugin server exited with code ${code}`)
+					this.penpotPluginServerProcess = null
+				})
+
+				// Wait for plugin server to be ready
+				await new Promise((resolve) => setTimeout(resolve, 1000))
+				console.log("[McpHub] Penpot Plugin server started at http://localhost:" + this.penpotPluginServerPort)
+			} catch {
+				console.log("[McpHub] Penpot Plugin server not found, skipping")
+			}
+
+			// Connect to the Penpot MCP server via SSE
+			const config = {
+				url: `http://localhost:${this.penpotServerPort}/sse`,
+				type: "sse" as const,
+				timeout: 60, // 60 seconds
+				alwaysAllow: [
+					// Penpot tools - auto-approve for seamless design integration
+					"execute_code",
+					"high_level_overview",
+					"penpot_api_info",
+					"export_shape",
+					"import_image",
+				] as string[],
+				disabledTools: [] as string[],
+			}
+
+			console.log("[McpHub] Connecting to built-in Penpot MCP server via SSE")
+			await this.connectToServer("PenpotMCP", config, "global")
+			console.log("[McpHub] Built-in Penpot MCP server initialized successfully")
+		} catch (error) {
+			// Silently fail if Penpot can't be initialized - it's optional and auto-enabled
+			console.log("[McpHub] Penpot MCP server not available:", error)
+			// Clean up the server process if it was started
+			if (this.penpotServerProcess) {
+				this.penpotServerProcess.kill()
+				this.penpotServerProcess = null
+			}
+		} finally {
+			this.penpotInitializing = false
+		}
+	}
+
+	/**
+	 * Stop the bundled Penpot MCP server and plugin server
+	 */
+	private async stopPenpotServer(): Promise<void> {
+		if (this.penpotServerProcess) {
+			console.log("[McpHub] Stopping bundled Penpot MCP server...")
+			this.penpotServerProcess.kill()
+			this.penpotServerProcess = null
+			// Kill any lingering processes on the ports
+			await killProcessOnPort(this.penpotServerPort)
+			await killProcessOnPort(4402)
+			await killProcessOnPort(4403)
+		}
+		if (this.penpotPluginServerProcess) {
+			console.log("[McpHub] Stopping Penpot Plugin server...")
+			this.penpotPluginServerProcess.kill()
+			this.penpotPluginServerProcess = null
+			await killProcessOnPort(this.penpotPluginServerPort)
+		}
+	}
+
+	/**
+	 * Check if Penpot MCP server is connected and available
+	 */
+	isPenpotMcpConnected(): boolean {
+		return this.connections.some((conn) => conn.server.name === "PenpotMCP" && conn.server.status === "connected")
+	}
+
+	/**
+	 * Initialize the built-in UI Design Canvas MCP server
+	 * This provides a custom UI design system that doesn't depend on external tools like Penpot or Figma
+	 * Auto-enabled by default
+	 */
+	private async initializeBuiltInUIDesignCanvasServer(): Promise<void> {
+		try {
+			// Check if UI Design Canvas is enabled in settings (default: true)
+			const provider = this.providerRef.deref()
+			if (provider) {
+				const state = await provider.getState()
+				const uiDesignCanvasEnabled = state?.uiDesignCanvasEnabled ?? true // Default to true
+				if (!uiDesignCanvasEnabled) {
+					console.log("[McpHub] UI Design Canvas is disabled in settings, skipping initialization")
+					return
+				}
+			}
+
+			// Prevent duplicate initializations
+			if (this.uiDesignCanvasInitializing) {
+				console.log("[McpHub] UI Design Canvas initialization already in progress, skipping")
+				return
+			}
+
+			// Check if already connected
+			const existingConnection = this.connections.find((conn) => conn.server.name === "UIDesignCanvas")
+			if (existingConnection && existingConnection.server.status === "connected") {
+				console.log("[McpHub] UI Design Canvas already connected, skipping")
+				return
+			}
+
+			this.uiDesignCanvasInitializing = true
+
+			// Get the extension path
+			const extensionPath = provider?.context?.extensionPath
+			if (!extensionPath) {
+				console.log("[McpHub] Extension path not available, skipping UI Design Canvas server")
+				return
+			}
+
+			const serverPath = `${extensionPath}/tools/ui-design-canvas/dist/McpServer.js`
+
+			// Check if the server file exists
+			try {
+				await fs.access(serverPath)
+			} catch {
+				console.log("[McpHub] UI Design Canvas server not found, skipping")
+				return
+			}
+
+			// Kill any existing process on the port
+			await killProcessOnPort(this.uiDesignCanvasServerPort)
+
+			// Start the UI Design Canvas MCP server
+			const serverDir = `${extensionPath}/tools/ui-design-canvas`
+			const nodeModulesPath = `${serverDir}/node_modules`
+
+			console.log("[McpHub] Starting UI Design Canvas MCP server...")
+			this.uiDesignCanvasServerProcess = spawn("node", [serverPath], {
+				cwd: serverDir,
+				env: {
+					...process.env,
+					NODE_PATH: nodeModulesPath,
+					UI_CANVAS_PORT: String(this.uiDesignCanvasServerPort),
+				},
+				stdio: ["pipe", "pipe", "pipe"],
+				detached: false,
+			})
+
+			// Log server output for debugging
+			this.uiDesignCanvasServerProcess.stdout?.on("data", (data) => {
+				console.log(`[UIDesignCanvas] ${data.toString().trim()}`)
+			})
+			this.uiDesignCanvasServerProcess.stderr?.on("data", (data) => {
+				console.error(`[UIDesignCanvas Error] ${data.toString().trim()}`)
+			})
+			this.uiDesignCanvasServerProcess.on("exit", (code) => {
+				console.log(`[McpHub] UI Design Canvas server exited with code ${code}`)
+				this.uiDesignCanvasServerProcess = null
+			})
+
+			// Wait for the server to be ready (check health endpoint, NOT SSE!)
+			// Using /sse for readiness check would create a dangling SSE connection
+			const maxAttempts = 10
+			const delayMs = 500
+			let serverReady = false
+
+			for (let i = 0; i < maxAttempts; i++) {
+				try {
+					const response = await fetch(`http://127.0.0.1:${this.uiDesignCanvasServerPort}/health`, {
+						method: "GET",
+					})
+					if (response.ok) {
+						serverReady = true
+						break
+					}
+				} catch {
+					// Server not ready yet, wait and retry
+				}
+				await new Promise((resolve) => setTimeout(resolve, delayMs))
+			}
+
+			if (!serverReady) {
+				console.log("[McpHub] UI Design Canvas server failed to start within timeout")
+				if (this.uiDesignCanvasServerProcess) {
+					this.uiDesignCanvasServerProcess.kill()
+					this.uiDesignCanvasServerProcess = null
+				}
+				return
+			}
+
+			console.log("[McpHub] UI Design Canvas server started, connecting via SSE...")
+
+			// Connect to the UI Design Canvas MCP server via SSE
+			const config = {
+				url: `http://127.0.0.1:${this.uiDesignCanvasServerPort}/sse`,
+				type: "sse" as const,
+				timeout: 60,
+				alwaysAllow: [
+					// UI Design Canvas tools - auto-approve for seamless design integration
+					"get_design",
+					"new_design",
+					"create_frame",
+					"create_rectangle",
+					"create_text",
+					"create_ellipse",
+					"create_image",
+					"update_element",
+					"move_element",
+					"resize_element",
+					"delete_element",
+					"set_style",
+					"set_layout",
+					"find_elements",
+					"get_element",
+					"export_html",
+					"export_json",
+					"get_screenshot",
+					"set_tokens",
+					"get_tokens",
+					"set_canvas",
+				] as string[],
+				disabledTools: [] as string[],
+			}
+
+			console.log("[McpHub] Connecting to UI Design Canvas MCP server via SSE")
+			await this.connectToServer("UIDesignCanvas", config, "global")
+			console.log("[McpHub] UI Design Canvas server initialized successfully")
+		} catch (error) {
+			console.log("[McpHub] UI Design Canvas server not available:", error)
+			if (this.uiDesignCanvasServerProcess) {
+				this.uiDesignCanvasServerProcess.kill()
+				this.uiDesignCanvasServerProcess = null
+			}
+		} finally {
+			this.uiDesignCanvasInitializing = false
+		}
+	}
+
+	/**
+	 * Stop the UI Design Canvas MCP server
+	 */
+	private async stopUIDesignCanvasServer(): Promise<void> {
+		if (this.uiDesignCanvasServerProcess) {
+			console.log("[McpHub] Stopping UI Design Canvas server...")
+			this.uiDesignCanvasServerProcess.kill()
+			this.uiDesignCanvasServerProcess = null
+			await killProcessOnPort(this.uiDesignCanvasServerPort)
+		}
+	}
+
+	/**
+	 * Check if UI Design Canvas server is connected and available
+	 */
+	isUIDesignCanvasConnected(): boolean {
+		return this.connections.some((conn) => conn.server.name === "UIDesignCanvas" && conn.server.status === "connected")
+	}
+
+	/**
+	 * Get the UI Design Canvas server port
+	 */
+	getUIDesignCanvasPort(): number {
+		return this.uiDesignCanvasServerPort
+	}
+
+	// Track if MCP-UI initialization is in progress
+	private mcpUiInitializing: boolean = false
+
+	/**
+	 * Initialize the built-in MCP-UI server for interactive UI capabilities
+	 * This server provides rich interactive tool responses with embedded UI
+	 * Connects to user-configured local server or default URL
+	 */
+	private async initializeBuiltInMcpUiServer(): Promise<void> {
+		try {
+			// Prevent duplicate initializations
+			if (this.mcpUiInitializing) {
+				console.log("[McpHub] MCP-UI server initialization already in progress, skipping")
+				return
+			}
+
+			// Check if MCP-UI is enabled in settings
+			let mcpUiEnabled = true // Default to true for built-in server
+
+			try {
+				const provider = this.providerRef.deref()
+				if (provider) {
+					const state = await provider.getState()
+					mcpUiEnabled = state?.mcpUiEnabled ?? true
+					console.log(`[McpHub] MCP-UI settings from state: enabled=${mcpUiEnabled}`)
+				} else {
+					console.log("[McpHub] MCP-UI: Provider not available, skipping initialization")
+					return
+				}
+			} catch (e) {
+				const errorMsg = e instanceof Error ? e.message : String(e)
+				console.log(`[McpHub] MCP-UI state not ready yet, skipping initialization. Error: ${errorMsg}`)
+				return
+			}
+
+			if (!mcpUiEnabled) {
+				console.log("[McpHub] MCP-UI is disabled in settings, skipping initialization")
+				return
+			}
+
+			// Check if MCP-UI is already configured by user (don't override)
+			const existingConnection = this.connections.find((conn) => conn.server.name === "MCP-UI")
+			if (existingConnection && existingConnection.server.status === "connected") {
+				console.log("[McpHub] MCP-UI already configured and connected, skipping built-in server")
+				return
+			}
+
+			// Get extension path for built-in server
+			const provider = this.providerRef.deref()
+			const extensionPath = provider?.context?.extensionPath
+			if (!extensionPath) {
+				console.log("[McpHub] Extension path not available, skipping built-in MCP-UI server")
+				return
+			}
+
+			const serverPath = `${extensionPath}/tools/mcp-ui-server/server.ts`
+
+			// Check if the server file exists
+			try {
+				await fs.access(serverPath)
+			} catch {
+				console.log("[McpHub] mcp-ui-server not found, skipping built-in server")
+				return
+			}
+
+			this.mcpUiInitializing = true
+
+			// Use node with tsx loader to run TypeScript directly
+			const nodeModulesPath = `${extensionPath}/tools/mcp-ui-server/node_modules`
+			const tsxPath = `${nodeModulesPath}/tsx/dist/esm/index.mjs`
+			const config = {
+				command: "node",
+				args: ["--import", tsxPath, serverPath],
+				type: "stdio" as const,
+				timeout: 60,
+				alwaysAllow: ["*"] as string[], // Allow all MCP-UI tools
+				disabledTools: [] as string[],
+				cwd: `${extensionPath}/tools/mcp-ui-server`,
+				env: {
+					...process.env,
+					NODE_PATH: nodeModulesPath,
+				},
+			}
+
+			console.log(`[McpHub] Initializing built-in MCP-UI server at ${serverPath}`)
+			await this.connectToServer("MCP-UI", config, "global")
+			console.log("[McpHub] MCP-UI server initialized successfully")
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error)
+			console.log(`[McpHub] MCP-UI server not available: ${errorMsg}`)
+		} finally {
+			this.mcpUiInitializing = false
+		}
+	}
+
+	/**
+	 * Reconnect to MCP-UI server (called when settings change)
+	 */
+	async reconnectMcpUiServer(): Promise<void> {
+		try {
+			// Disconnect existing MCP-UI connection if any
+			const existingConnection = this.connections.find((conn) => conn.server.name === "MCP-UI")
+			if (existingConnection) {
+				try {
+					await this.deleteConnection("MCP-UI")
+				} catch (deleteError) {
+					// Ignore errors during disconnection
+					console.log("[McpHub] Error disconnecting MCP-UI (ignoring):", deleteError)
+				}
+			}
+			// Re-initialize with new settings
+			await this.initializeBuiltInMcpUiServer()
+		} catch (error) {
+			// Silently fail - don't show errors to user if server is not available
+			console.log("[McpHub] MCP-UI reconnection failed (this is normal if server is not running)")
+		}
+	}
+
+	/**
+	 * Check if MCP-UI server is connected and available
+	 */
+	isMcpUiConnected(): boolean {
+		return this.connections.some((conn) => conn.server.name === "MCP-UI" && conn.server.status === "connected")
 	}
 
 	// Track if Figma channel has been connected in this session
@@ -1660,6 +2267,18 @@ export class McpHub {
 					alwaysAllowConfig = serverConfigData.mcpServers?.[serverName]?.alwaysAllow || []
 					disabledToolsList = serverConfigData.mcpServers?.[serverName]?.disabledTools || []
 				}
+
+				// For built-in TalkToFigma server, always disable connection tools
+				// These tools are handled automatically by the extension and should not be called by AI
+				if (serverName === "TalkToFigma") {
+					const builtInDisabledTools = ["join_channel", "get_channel"]
+					for (const tool of builtInDisabledTools) {
+						if (!disabledToolsList.includes(tool)) {
+							disabledToolsList.push(tool)
+						}
+					}
+					console.log(`[McpHub] TalkToFigma disabled tools: ${disabledToolsList.join(", ")}`)
+				}
 			} catch (error) {
 				console.error(`Failed to read tool configuration for ${serverName}:`, error)
 				// Continue with empty configs
@@ -1725,21 +2344,37 @@ export class McpHub {
 		for (const connection of connections) {
 			try {
 				if (connection.type === "connected") {
-					// For TalkToFigma, try to access the underlying process and kill it forcefully
-					if (name === "TalkToFigma") {
+					// For TalkToFigma or figma-write, try graceful shutdown first, then forceful kill
+					const isFigmaServer = name === "TalkToFigma" || name === "figma-write"
+					if (isFigmaServer) {
 						try {
-							// Try to kill the process more forcefully
 							const transport = connection.transport as any
-							if (transport._process) {
-								console.log(`[McpHub] Killing TalkToFigma process (pid: ${transport._process.pid})`)
-								transport._process.kill("SIGKILL")
-							} else if (transport.process) {
-								console.log(`[McpHub] Killing TalkToFigma process (pid: ${transport.process.pid})`)
-								transport.process.kill("SIGKILL")
+							const proc = transport._process || transport.process
+							if (proc) {
+								// First try SIGTERM for graceful shutdown
+								console.log(`[McpHub] Sending SIGTERM to ${name} process (pid: ${proc.pid})`)
+								proc.kill("SIGTERM")
+
+								// Wait a bit for graceful shutdown
+								await new Promise((resolve) => setTimeout(resolve, 1000))
+
+								// If process is still running, force kill
+								try {
+									// Check if process is still alive by sending signal 0
+									proc.kill(0)
+									console.log(`[McpHub] Process still running, sending SIGKILL to ${name} process (pid: ${proc.pid})`)
+									proc.kill("SIGKILL")
+								} catch {
+									// Process already exited - good
+									console.log(`[McpHub] ${name} process exited gracefully`)
+								}
 							}
 						} catch (killError) {
-							console.log(`[McpHub] Could not access TalkToFigma process for forceful kill:`, killError)
+							console.log(`[McpHub] Could not access ${name} process for kill:`, killError)
 						}
+						// Also clean up port 3055 which is used by the WebSocket server
+						// This handles orphaned child processes that might still hold the port
+						await killProcessOnPort(3055)
 					}
 					await connection.transport.close()
 					await connection.client.close()
@@ -1927,6 +2562,8 @@ export class McpHub {
 			await delay(500)
 			// Delete existing connection first
 			await this.deleteConnection(serverName, source)
+			// Ensure port 3055 is free before restarting
+			await killProcessOnPort(3055)
 			// Re-initialize the built-in server
 			const provider = this.providerRef.deref()
 			if (provider) {
@@ -1957,6 +2594,10 @@ export class McpHub {
 			let lastError: Error | undefined
 			for (let attempt = 1; attempt <= maxRetries; attempt++) {
 				try {
+					// Ensure port 3055 is free before each attempt
+					console.log(`[McpHub] Ensuring port 3055 is free before attempt ${attempt}/${maxRetries}`)
+					await killProcessOnPort(3055)
+
 					console.log(`[McpHub] Attempting to restart TalkToFigma (attempt ${attempt}/${maxRetries})`)
 					await this.initializeBuiltInTalkToFigmaServer()
 					await this.notifyWebviewOfServerChanges()
@@ -1975,6 +2616,74 @@ export class McpHub {
 			}
 			// All retries failed
 			vscode.window.showErrorMessage(`TalkToFigma 伺服器重啟失敗: ${lastError?.message || "Unknown error"}`)
+			this.isConnecting = false
+			return
+		}
+
+		// Special handling for built-in MCP-UI server
+		if (serverName === "MCP-UI") {
+			console.log("[McpHub] Manually restarting built-in MCP-UI server")
+			vscode.window.showInformationMessage("正在重新連接 MCP-UI 伺服器... (Reconnecting to MCP-UI server...)")
+
+			// Delete existing connection first
+			try {
+				await this.deleteConnection(serverName, source)
+			} catch (deleteError) {
+				console.log("[McpHub] Error disconnecting MCP-UI (ignoring):", deleteError)
+			}
+
+			// Get extension path for built-in server
+			const provider = this.providerRef.deref()
+			if (!provider) {
+				this.isConnecting = false
+				return
+			}
+
+			try {
+				const state = await provider.getState()
+				const mcpUiEnabled = state?.mcpUiEnabled ?? true
+
+				if (!mcpUiEnabled) {
+					vscode.window.showWarningMessage("MCP-UI 未啟用，請先在設定中啟用。(MCP-UI is not enabled)")
+					this.isConnecting = false
+					return
+				}
+
+				const extensionPath = provider.context?.extensionPath
+				if (!extensionPath) {
+					vscode.window.showErrorMessage("MCP-UI: Extension path not available")
+					this.isConnecting = false
+					return
+				}
+
+				const serverPath = `${extensionPath}/tools/mcp-ui-server/server.ts`
+				const nodeModulesPath = `${extensionPath}/tools/mcp-ui-server/node_modules`
+				const tsxPath = `${nodeModulesPath}/tsx/dist/esm/index.mjs`
+
+				const config = {
+					command: "node",
+					args: ["--import", tsxPath, serverPath],
+					type: "stdio" as const,
+					timeout: 60,
+					alwaysAllow: ["*"] as string[],
+					disabledTools: [] as string[],
+					cwd: `${extensionPath}/tools/mcp-ui-server`,
+					env: {
+						...process.env,
+						NODE_PATH: nodeModulesPath,
+					},
+				}
+
+				console.log(`[McpHub] Connecting to built-in MCP-UI server at ${serverPath}`)
+				await this.connectToServer("MCP-UI", config, "global")
+				vscode.window.showInformationMessage("MCP-UI 伺服器連接成功！(MCP-UI server connected!)")
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				console.error("[McpHub] MCP-UI connection failed:", errorMsg)
+				vscode.window.showErrorMessage(`MCP-UI 連接失敗: ${errorMsg}`)
+			}
+
+			await this.notifyWebviewOfServerChanges()
 			this.isConnecting = false
 			return
 		}
@@ -2465,13 +3174,52 @@ export class McpHub {
 		toolName: string,
 		toolArguments?: Record<string, unknown>,
 		source?: "global" | "project",
+		retryCount: number = 0,
 	): Promise<McpToolCallResponse> {
+		const maxRetries = 2 // Maximum number of retries for Figma tools
+		const isFigmaServer = serverName === "TalkToFigma" || serverName === "figma-write" || serverName.toLowerCase().includes("figma")
+
+		// For TalkToFigma, ensure Figma channel is connected before calling tools (except join_channel itself)
+		if (serverName === "TalkToFigma" && toolName !== "join_channel" && !this.figmaChannelConnected) {
+			console.log(`[McpHub] Figma channel not connected, prompting user to connect before calling ${toolName}...`)
+
+			// Show info message to user
+			vscode.window.showInformationMessage(
+				`正在等待 Figma 連接... (Waiting for Figma connection before ${toolName})`
+			)
+
+			// Prompt for channel connection and WAIT for result
+			const connected = await this.promptTalkToFigmaChannelConnection(false)
+
+			if (!connected) {
+				throw new Error(
+					`Figma 頻道未連接，無法執行 ${toolName}。請先連接到 Figma 頻道。\n` +
+					`(Figma channel not connected. Please connect to Figma channel first before using ${toolName}.)`
+				)
+			}
+
+			console.log(`[McpHub] Figma channel connected, proceeding with ${toolName}`)
+		}
+
 		const connection = this.findConnection(serverName, source)
 		if (!connection || connection.type !== "connected") {
 			// Check if this is a Figma server and trigger reconnection
-			if (serverName === "TalkToFigma" || serverName === "figma-write") {
-				console.log(`[McpHub] Figma server "${serverName}" not connected, triggering reconnection prompt`)
+			if (isFigmaServer) {
+				console.log(`[McpHub] Figma server "${serverName}" not connected, triggering reconnection...`)
 				await this.handleFigmaConnectionError(`Server ${serverName} not connected`)
+
+				// Wait for reconnection and retry if this is the first attempt
+				if (retryCount < maxRetries) {
+					console.log(`[McpHub] Waiting for Figma reconnection before retry (attempt ${retryCount + 1}/${maxRetries})...`)
+					await new Promise((resolve) => setTimeout(resolve, 2000)) // Wait 2 seconds for reconnection
+
+					// Check if now connected
+					const newConnection = this.findConnection(serverName, source)
+					if (newConnection && newConnection.type === "connected") {
+						console.log(`[McpHub] Figma reconnected, retrying tool call: ${toolName}`)
+						return this.callTool(serverName, toolName, toolArguments, source, retryCount + 1)
+					}
+				}
 			}
 			throw new Error(
 				`No connection found for server: ${serverName}${source ? ` with source ${source}` : ""}. Please make sure to use MCP servers available under 'Connected MCP Servers'.`,
@@ -2494,8 +3242,7 @@ export class McpHub {
 		// Coerce string numbers to actual numbers for Figma tools
 		// LLMs often send "400" instead of 400 for numeric fields
 		let processedArguments = toolArguments
-		const isFigmaServer =
-			serverName === "TalkToFigma" || serverName === "figma-write" || serverName.toLowerCase().includes("figma")
+		// isFigmaServer is already declared at the start of the function
 		if (isFigmaServer && toolArguments) {
 			processedArguments = this.coerceNumericArguments(toolArguments)
 			// For TalkToFigma, also map tool-specific parameters (like fillColor format)
@@ -2549,7 +3296,7 @@ export class McpHub {
 
 			// Check if the result indicates a Figma connection error
 			// Only trigger error handling for tool call failures, not for "please join" messages before connection
-			if ((serverName === "TalkToFigma" || serverName === "figma-write") && result.content) {
+			if (isFigmaServer && result.content) {
 				const textContent = result.content.find((c: { type: string }) => c.type === "text")
 				if (textContent && "text" in textContent) {
 					const text = (textContent.text as string).toLowerCase()
@@ -2577,38 +3324,60 @@ export class McpHub {
 
 					if (isRealError) {
 						console.log(`[McpHub] Figma connection error detected in response:`, textContent.text)
-						// Trigger reconnection prompt asynchronously
-						this.handleFigmaConnectionError(textContent.text as string).catch(console.error)
+						// Trigger reconnection and retry if possible
+						await this.handleFigmaConnectionError(textContent.text as string)
+
+						// Retry the tool call if we haven't exceeded max retries
+						if (retryCount < maxRetries) {
+							console.log(`[McpHub] Retrying tool call after connection error (attempt ${retryCount + 1}/${maxRetries})...`)
+							await new Promise((resolve) => setTimeout(resolve, 2000)) // Wait 2 seconds
+							return this.callTool(serverName, toolName, toolArguments, source, retryCount + 1)
+						}
 					}
 				}
 			}
 
 			// Also check if result has isError flag
-			if ((serverName === "TalkToFigma" || serverName === "figma-write") && result.isError) {
+			if (isFigmaServer && result.isError) {
 				const textContent = result.content?.find((c: { type: string }) => c.type === "text")
 				const errorText = textContent && "text" in textContent ? (textContent.text as string) : "Unknown error"
 				console.log(`[McpHub] Figma tool returned error:`, errorText)
-				this.handleFigmaConnectionError(errorText).catch(console.error)
+				await this.handleFigmaConnectionError(errorText)
+
+				// Retry the tool call if we haven't exceeded max retries
+				if (retryCount < maxRetries) {
+					console.log(`[McpHub] Retrying tool call after error (attempt ${retryCount + 1}/${maxRetries})...`)
+					await new Promise((resolve) => setTimeout(resolve, 2000)) // Wait 2 seconds
+					return this.callTool(serverName, toolName, toolArguments, source, retryCount + 1)
+				}
 			}
 
 			return result
 		} catch (error) {
 			// Check if this is a Figma server and the error looks like a connection issue
-			if (serverName === "TalkToFigma" || serverName === "figma-write") {
+			if (isFigmaServer) {
 				const errorMessage = error instanceof Error ? error.message : String(error)
 				console.log(`[McpHub] Figma tool call failed:`, errorMessage)
 
 				// Check for connection-related errors
-				if (
+				const isConnectionError =
 					errorMessage.toLowerCase().includes("timeout") ||
 					errorMessage.toLowerCase().includes("disconnect") ||
 					errorMessage.toLowerCase().includes("socket") ||
 					errorMessage.toLowerCase().includes("connection") ||
 					errorMessage.toLowerCase().includes("econnrefused") ||
 					errorMessage.toLowerCase().includes("not connected")
-				) {
-					// Trigger reconnection prompt asynchronously
-					this.handleFigmaConnectionError(errorMessage).catch(console.error)
+
+				if (isConnectionError) {
+					// Trigger reconnection and retry
+					await this.handleFigmaConnectionError(errorMessage)
+
+					// Retry the tool call if we haven't exceeded max retries
+					if (retryCount < maxRetries) {
+						console.log(`[McpHub] Retrying tool call after exception (attempt ${retryCount + 1}/${maxRetries})...`)
+						await new Promise((resolve) => setTimeout(resolve, 2000)) // Wait 2 seconds
+						return this.callTool(serverName, toolName, toolArguments, source, retryCount + 1)
+					}
 				}
 			}
 			throw error
@@ -2707,6 +3476,15 @@ export class McpHub {
 
 		// create_rectangle: TalkToFigma uses 'radius' instead of 'cornerRadius', 'color' instead of 'hex'
 		if (toolName === "create_rectangle") {
+			// IMPORTANT: Validate width and height to prevent TalkToFigma's 100x100 default
+			if (!result.width || typeof result.width !== "number" || result.width <= 0) {
+				console.warn(`[McpHub] create_rectangle: Invalid width (${result.width}), setting default 90`)
+				result.width = 90
+			}
+			if (!result.height || typeof result.height !== "number" || result.height <= 0) {
+				console.warn(`[McpHub] create_rectangle: Invalid height (${result.height}), setting default 60`)
+				result.height = 60
+			}
 			// Map cornerRadius to radius
 			if (result.cornerRadius !== undefined && result.radius === undefined) {
 				result.radius = result.cornerRadius
@@ -3087,6 +3865,12 @@ export class McpHub {
 
 		this.isProgrammaticUpdate = false
 		this.removeAllFileWatchers()
+
+		// Stop the bundled Penpot MCP server
+		await this.stopPenpotServer()
+
+		// Stop the UI Design Canvas MCP server
+		await this.stopUIDesignCanvasServer()
 
 		for (const connection of this.connections) {
 			try {

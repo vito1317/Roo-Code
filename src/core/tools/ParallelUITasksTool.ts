@@ -512,38 +512,47 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 				return
 			}
 
-			// Get McpHub for Figma tool calls
+			// Get McpHub for MCP tool calls
 			const mcpHub = provider.getMcpHub?.()
 
-			service.configure(state.apiConfiguration, provider.context?.extensionPath || "", mcpHub, {
-				talkToFigmaEnabled: state.talkToFigmaEnabled ?? true,
-				figmaWriteEnabled: state.figmaWriteEnabled ?? false,
-			})
-
-			// Determine which Figma server to use based on user settings
+			// Get design tool settings - UIDesignCanvas takes priority when enabled
+			const uiDesignCanvasEnabled = state.uiDesignCanvasEnabled ?? true  // Default true for built-in tool
 			const talkToFigmaEnabled = state.talkToFigmaEnabled ?? true  // Default true
 			const figmaWriteEnabled = state.figmaWriteEnabled ?? false   // Default false
 
-			let figmaServerName = "TalkToFigma"
+			service.configure(state.apiConfiguration, provider.context?.extensionPath || "", mcpHub, {
+				talkToFigmaEnabled,
+				figmaWriteEnabled,
+				uiDesignCanvasEnabled,
+			})
+
+			// Determine which design server to use based on user settings
+			let designServerName = "UIDesignCanvas"  // Default to UIDesignCanvas
 			if (mcpHub) {
 				const servers = mcpHub.getServers()
+				const uiDesignCanvasConnected = servers.find((s) => s.name === "UIDesignCanvas" && s.status === "connected")
 				const talkToFigmaConnected = servers.find((s) => s.name === "TalkToFigma" && s.status === "connected")
 				const figmaWriteConnected = servers.find((s) => s.name === "figma-write" && s.status === "connected")
 
-				// Use settings to determine preferred server
-				if (talkToFigmaEnabled && talkToFigmaConnected) {
-					figmaServerName = "TalkToFigma"
+				// Use settings to determine preferred server - UIDesignCanvas first when enabled
+				if (uiDesignCanvasEnabled && uiDesignCanvasConnected) {
+					designServerName = "UIDesignCanvas"
+				} else if (talkToFigmaEnabled && talkToFigmaConnected) {
+					designServerName = "TalkToFigma"
 				} else if (figmaWriteEnabled && figmaWriteConnected) {
-					figmaServerName = "figma-write"
+					designServerName = "figma-write"
+				} else if (uiDesignCanvasConnected) {
+					// Fallback: use UIDesignCanvas if connected
+					designServerName = "UIDesignCanvas"
 				} else if (talkToFigmaConnected) {
 					// Fallback: use TalkToFigma if connected
-					figmaServerName = "TalkToFigma"
+					designServerName = "TalkToFigma"
 				} else if (figmaWriteConnected) {
 					// Fallback: use figma-write if connected
-					figmaServerName = "figma-write"
+					designServerName = "figma-write"
 				}
 			}
-			console.log(`[ParallelUITasksTool] Using Figma server: ${figmaServerName} (settings: talkToFigma=${talkToFigmaEnabled}, figmaWrite=${figmaWriteEnabled})`)
+			console.log(`[ParallelUITasksTool] Using design server: ${designServerName} (settings: uiDesignCanvas=${uiDesignCanvasEnabled}, talkToFigma=${talkToFigmaEnabled}, figmaWrite=${figmaWriteEnabled})`)
 
 			// Coerce argument types to numbers where needed
 			const coerceArgumentTypes = (tool: string, args: Record<string, unknown>): Record<string, unknown> => {
@@ -665,7 +674,7 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 				let mappedName = toolName
 				let mappedArgs = { ...args }
 
-				if (figmaServerName === "TalkToFigma") {
+				if (designServerName === "TalkToFigma") {
 					// Map tool names for TalkToFigma
 					const toolMapping: Record<string, string> = {
 						get_file_url: "get_document_info",
@@ -782,10 +791,10 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 				mappedArgs = coerceArgumentTypes(mappedName, mappedArgs)
 
 				console.log(
-					`[ParallelUITasksTool] Calling ${figmaServerName}.${mappedName} with args:`,
+					`[ParallelUITasksTool] Calling ${designServerName}.${mappedName} with args:`,
 					JSON.stringify(mappedArgs),
 				)
-				return mcpHub.callTool(figmaServerName, mappedName, mappedArgs)
+				return mcpHub.callTool(designServerName, mappedName, mappedArgs)
 			}
 
 			// Open Figma for VS Code panel BEFORE starting - so user can see real-time updates
@@ -931,7 +940,7 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 										console.log(
 											`[ParallelUI] Setting corner radius ${cornerRadius} for display rectangle ${rectNodeId}`,
 										)
-										await mcpHub!.callTool(figmaServerName, "set_corner_radius", {
+										await mcpHub!.callTool(designServerName, "set_corner_radius", {
 											nodeId: rectNodeId,
 											radius: cornerRadius,
 											cornerRadius: cornerRadius,
@@ -1001,33 +1010,185 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 			// Calculate button start position (after display area)
 			const BUTTON_START_Y = FRAME_PADDING + displayAreaHeight
 
-			// Use smart calculator layout to determine positions
-			// This places buttons in standard calculator order: 7-8-9, 4-5-6, 1-2-3, 0-.-=
 			const buttonWidth = avgTaskWidth || 70
 			const buttonHeight = avgTaskHeight || 70
 			const buttonGap = 10
 
-			console.log(`[ParallelUI] Calculating smart calculator layout for ${buttonTasks.length} buttons`)
-			const calculatorPositions = calculateCalculatorLayout(
-				buttonTasks,
-				START_X,
-				BUTTON_START_Y,
-				buttonWidth,
-				buttonHeight,
-				buttonGap,
+			// Detect UI type based on task content
+			// Calculator: tasks with numbers (0-9) and operators (+, -, ×, ÷, =, C, AC)
+			const calculatorChars = [
+				"0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+				"+", "-", "×", "÷", "=", "*", "/", "C", "AC", ".", "%",
+			]
+			const taskTexts = buttonTasks.map((t) => extractButtonTextFromTask(t))
+			const calculatorMatches = taskTexts.filter((text) =>
+				calculatorChars.some((c) => text === c || text.toUpperCase() === c),
+			)
+			const isCalculatorUI = calculatorMatches.length >= 5 // At least 5 calculator-like buttons
+
+			// Form/List UI: tasks with keywords like input, button, item, list, title
+			const formKeywords = ["input", "button", "item", "list", "title", "container", "header", "submit", "add", "delete", "edit", "save", "cancel"]
+			const formMatches = buttonTasks.filter((t) =>
+				formKeywords.some((k) => t.id.toLowerCase().includes(k) || t.description.toLowerCase().includes(k)),
+			)
+			const isFormUI = formMatches.length >= 2 // At least 2 form-like elements
+
+			console.log(
+				`[ParallelUI] UI Type Detection: calculator=${isCalculatorUI} (${calculatorMatches.length} matches), form=${isFormUI} (${formMatches.length} matches)`,
 			)
 
+			// Calculate positions based on detected UI type
+			let positionMap: Map<string, { x: number; y: number; width?: number }>
+
+			if (isCalculatorUI) {
+				// Use calculator grid layout
+				console.log(`[ParallelUI] Using CALCULATOR layout for ${buttonTasks.length} buttons`)
+				positionMap = calculateCalculatorLayout(
+					buttonTasks,
+					START_X,
+					BUTTON_START_Y,
+					buttonWidth,
+					buttonHeight,
+					buttonGap,
+				)
+			} else if (isFormUI) {
+				// Smart form/list layout - groups related elements
+				console.log(`[ParallelUI] Using SMART FORM layout for ${buttonTasks.length} elements`)
+				positionMap = new Map()
+				let currentY = BUTTON_START_Y
+				const contentWidth = estimatedFrameWidth - 2 * FRAME_PADDING
+
+				// Group elements by type for intelligent layout
+				const filterElements: ParsedTask[] = []
+				const headerElements: ParsedTask[] = []
+				const inputElements: ParsedTask[] = []
+				const actionButtons: ParsedTask[] = []
+				const listItems: ParsedTask[] = []
+				const otherElements: ParsedTask[] = []
+
+				for (const t of buttonTasks) {
+					const idLower = t.id.toLowerCase()
+					const descLower = (t.description || "").toLowerCase()
+
+					if (idLower.includes("filter") || descLower.includes("filter") ||
+						idLower.includes("all") || idLower.includes("active") || idLower.includes("completed")) {
+						filterElements.push(t)
+					} else if (idLower.includes("header") || idLower.includes("title") || descLower.includes("header")) {
+						headerElements.push(t)
+					} else if (idLower.includes("input") || descLower.includes("input") || descLower.includes("輸入")) {
+						inputElements.push(t)
+					} else if (idLower.includes("add") || idLower.includes("submit") || idLower.includes("save") ||
+						idLower.includes("btn") || idLower.includes("button")) {
+						actionButtons.push(t)
+					} else if (idLower.includes("item") || idLower.includes("task") || idLower.includes("list")) {
+						listItems.push(t)
+					} else {
+						otherElements.push(t)
+					}
+				}
+
+				console.log(`[ParallelUI] Form elements: ${headerElements.length} headers, ${inputElements.length} inputs, ${filterElements.length} filters, ${actionButtons.length} actions, ${listItems.length} list items, ${otherElements.length} other`)
+
+				// Layout headers (full width)
+				for (const t of headerElements) {
+					const itemHeight = t.designSpec?.height || 56
+					positionMap.set(t.id, { x: START_X, y: currentY, width: contentWidth })
+					console.log(`[ParallelUI] Header "${t.id}" -> (${START_X}, ${currentY}), width=${contentWidth}`)
+					currentY += itemHeight + buttonGap
+				}
+
+				// Layout input + action button in same row
+				if (inputElements.length > 0) {
+					const inputTask = inputElements[0]
+					const inputHeight = inputTask.designSpec?.height || 48
+					const addBtn = actionButtons.find(b => b.id.toLowerCase().includes("add"))
+
+					if (addBtn) {
+						// Input takes most width, add button on right
+						const addBtnWidth = addBtn.designSpec?.width || 48
+						const inputWidth = contentWidth - addBtnWidth - buttonGap
+						positionMap.set(inputTask.id, { x: START_X, y: currentY, width: inputWidth })
+						positionMap.set(addBtn.id, { x: START_X + inputWidth + buttonGap, y: currentY, width: addBtnWidth })
+						console.log(`[ParallelUI] Input+Add row: input at (${START_X}, ${currentY}), add at (${START_X + inputWidth + buttonGap}, ${currentY})`)
+						// Remove add button from action buttons since we already placed it
+						const addBtnIndex = actionButtons.indexOf(addBtn)
+						if (addBtnIndex > -1) actionButtons.splice(addBtnIndex, 1)
+					} else {
+						positionMap.set(inputTask.id, { x: START_X, y: currentY, width: contentWidth })
+					}
+					currentY += inputHeight + buttonGap
+
+					// Handle remaining inputs
+					for (let i = 1; i < inputElements.length; i++) {
+						const t = inputElements[i]
+						const itemHeight = t.designSpec?.height || 48
+						positionMap.set(t.id, { x: START_X, y: currentY, width: contentWidth })
+						currentY += itemHeight + buttonGap
+					}
+				}
+
+				// Layout filters in a horizontal row
+				if (filterElements.length > 0) {
+					const filterWidth = Math.floor((contentWidth - (filterElements.length - 1) * buttonGap) / filterElements.length)
+					const filterHeight = filterElements[0].designSpec?.height || 36
+					for (let i = 0; i < filterElements.length; i++) {
+						const t = filterElements[i]
+						const x = START_X + i * (filterWidth + buttonGap)
+						positionMap.set(t.id, { x, y: currentY, width: filterWidth })
+						console.log(`[ParallelUI] Filter "${t.id}" -> (${x}, ${currentY}), width=${filterWidth}`)
+					}
+					currentY += filterHeight + buttonGap
+				}
+
+				// Layout remaining action buttons
+				for (const t of actionButtons) {
+					const itemHeight = t.designSpec?.height || 48
+					const itemWidth = t.designSpec?.width || contentWidth
+					positionMap.set(t.id, { x: START_X, y: currentY, width: itemWidth })
+					console.log(`[ParallelUI] Action "${t.id}" -> (${START_X}, ${currentY}), width=${itemWidth}`)
+					currentY += itemHeight + buttonGap
+				}
+
+				// Layout list items (full width, stacked)
+				for (const t of listItems) {
+					const itemHeight = t.designSpec?.height || 56
+					positionMap.set(t.id, { x: START_X, y: currentY, width: contentWidth })
+					console.log(`[ParallelUI] List item "${t.id}" -> (${START_X}, ${currentY}), width=${contentWidth}`)
+					currentY += itemHeight + buttonGap
+				}
+
+				// Layout other elements
+				for (const t of otherElements) {
+					const itemHeight = t.designSpec?.height || buttonHeight
+					const itemWidth = t.designSpec?.width || contentWidth
+					positionMap.set(t.id, { x: START_X, y: currentY, width: itemWidth })
+					console.log(`[ParallelUI] Other "${t.id}" -> (${START_X}, ${currentY}), width=${itemWidth}`)
+					currentY += itemHeight + buttonGap
+				}
+			} else {
+				// Use simple grid layout for other UI types
+				console.log(`[ParallelUI] Using GRID layout for ${buttonTasks.length} elements`)
+				positionMap = new Map()
+				for (let i = 0; i < buttonTasks.length; i++) {
+					const t = buttonTasks[i]
+					const x = START_X + (i % GRID_COLUMNS) * CELL_WIDTH
+					const y = BUTTON_START_Y + Math.floor(i / GRID_COLUMNS) * CELL_HEIGHT
+					positionMap.set(t.id, { x, y })
+					console.log(`[ParallelUI] Task "${t.id}" -> grid pos (${x}, ${y})`)
+				}
+			}
+
 			const uiTasks: UITaskDefinition[] = buttonTasks.map((t, index) => {
-				// Use calculator layout position if available, otherwise fall back to simple grid
-				const calcPos = calculatorPositions.get(t.id)
+				// Use calculated position from positionMap
+				const calcPos = positionMap.get(t.id)
 				let position: { x: number; y: number }
 				let overrideWidth: number | undefined
 
 				if (calcPos) {
 					position = { x: calcPos.x, y: calcPos.y }
-					overrideWidth = calcPos.width // For wide buttons like "0"
+					overrideWidth = calcPos.width
 					console.log(
-						`[ParallelUI] Task "${t.id}" using calculator layout: (${position.x}, ${position.y})${overrideWidth ? `, width: ${overrideWidth}` : ""}`,
+						`[ParallelUI] Task "${t.id}" using calculated layout: (${position.x}, ${position.y})${overrideWidth ? `, width: ${overrideWidth}` : ""}`,
 					)
 				} else if (t.position) {
 					position = t.position
@@ -1086,7 +1247,8 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 						width: finalWidth,
 						height: finalHeight,
 						style: designSpec.style,
-						colors: designSpec.colors || ["#3498db", "#FFFFFF"],
+						// Don't provide default colors - let AI decide if not specified
+						colors: designSpec.colors, // undefined means AI decides
 						cornerRadius: finalCornerRadius,
 						fontSize: designSpec.fontSize,
 						text: designSpec.text,

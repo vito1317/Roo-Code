@@ -476,6 +476,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					// Note: Use null instead of undefined since JSON.stringify omits undefined
 					figmaFileUrl: cachedState.figmaFileUrl ?? null,
 					figmaWebPreviewEnabled: cachedState.figmaWebPreviewEnabled ?? false,
+					// MCP-UI settings
+					mcpUiEnabled: cachedState.mcpUiEnabled ?? false,
+					mcpUiServerUrl: cachedState.mcpUiServerUrl ?? null,
 				},
 			})
 
@@ -877,6 +880,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								talkToFigmaEnabled={cachedState.talkToFigmaEnabled}
 								figmaFileUrl={cachedState.figmaFileUrl}
 								figmaWebPreviewEnabled={cachedState.figmaWebPreviewEnabled}
+								penpotMcpEnabled={cachedState.penpotMcpEnabled}
+								penpotFileUrl={cachedState.penpotFileUrl}
+								penpotWebPreviewEnabled={cachedState.penpotWebPreviewEnabled}
+								mcpUiEnabled={cachedState.mcpUiEnabled}
+								mcpUiServerUrl={cachedState.mcpUiServerUrl}
+								uiDesignCanvasEnabled={cachedState.uiDesignCanvasEnabled}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

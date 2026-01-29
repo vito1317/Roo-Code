@@ -47,7 +47,8 @@ import { getTheme } from "../../integrations/theme/getTheme"
 import { discoverChromeHostUrl, tryChromeHostUrl } from "../../services/browser/browserDiscovery"
 import { searchWorkspaceFiles } from "../../services/search/file-search"
 import { fileExistsAtPath } from "../../utils/fs"
-import { playTts, setTtsEnabled, setTtsSpeed, stopTts } from "../../utils/tts"
+import { playTts, setTtsEnabled, setTtsSpeed, setTtsVoice, stopTts } from "../../utils/tts"
+import { getAgentTtsVoice } from "../sentinel/personas"
 import { searchCommits } from "../../utils/git"
 import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
 import { getOpenAiModels } from "../../api/providers/openai"
@@ -651,6 +652,22 @@ export const webviewMessageHandler = async (
 						if (mcpHub) {
 							await mcpHub.handleMcpEnabledChange(newValue as boolean)
 						}
+					} else if (key === "mcpUiEnabled" || key === "mcpUiServerUrl") {
+						// Handle MCP-UI settings - reconnect server when settings change
+						newValue = value
+						console.log(`[MCP-UI Settings] Saving ${key}:`, value)
+						// Save the setting first
+						await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+						// Then trigger reconnection when enabled state changes
+						const mcpHub = provider.getMcpHub()
+						if (mcpHub && key === "mcpUiEnabled") {
+							try {
+								await mcpHub.reconnectMcpUiServer()
+							} catch (e) {
+								console.log("[MCP-UI] Server reconnection skipped (server may not be running)")
+							}
+						}
+						continue // Skip the default setValue below since we already saved
 					} else if (key === "experiments") {
 						if (!value) {
 							continue
@@ -758,6 +775,30 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				console.error("[Figma] Failed to open preview:", error)
 				vscode.window.showErrorMessage(`Failed to open Figma preview: ${error instanceof Error ? error.message : String(error)}`)
+			}
+			break
+
+		case "openPenpotPreview":
+			try {
+				const { PenpotPreviewPanel } = await import("../../services/penpot/PenpotPreviewPanel")
+				const penpotPreview = PenpotPreviewPanel.initialize(provider.context.extensionUri)
+				await penpotPreview.show(message.url)
+				console.log("[Penpot] Preview panel opened")
+			} catch (error) {
+				console.error("[Penpot] Failed to open preview:", error)
+				vscode.window.showErrorMessage(`Failed to open Penpot preview: ${error instanceof Error ? error.message : String(error)}`)
+			}
+			break
+
+		case "reconnectMcpUiServer":
+			try {
+				const mcpHub = provider.getMcpHub()
+				if (mcpHub) {
+					await mcpHub.reconnectMcpUiServer()
+					console.log("[MCP-UI] Server reconnected")
+				}
+			} catch (error) {
+				console.error("[MCP-UI] Failed to reconnect server:", error)
 			}
 			break
 
@@ -1208,9 +1249,15 @@ export const webviewMessageHandler = async (
 
 			break
 		case "requestVsCodeLmModels":
-			const vsCodeLmModels = await getVsCodeLmModels()
-			// TODO: Cache like we do for OpenRouter, etc?
-			provider.postMessageToWebview({ type: "vsCodeLmModels", vsCodeLmModels })
+			try {
+				const vsCodeLmModels = await getVsCodeLmModels()
+				// TODO: Cache like we do for OpenRouter, etc?
+				provider.postMessageToWebview({ type: "vsCodeLmModels", vsCodeLmModels })
+			} catch (error) {
+				console.error("[webviewMessageHandler] Failed to get VS Code LM models:", error)
+				// Send empty array so the UI can show the "no models" state
+				provider.postMessageToWebview({ type: "vsCodeLmModels", vsCodeLmModels: [] })
+			}
 			break
 		case "requestHuggingFaceModels":
 			// TODO: Why isn't this handled by `requestRouterModels` above?
@@ -1593,9 +1640,14 @@ export const webviewMessageHandler = async (
 			break
 		case "playTts":
 			if (message.text) {
+				// Get TTS voice - prefer explicit agent slug from message, otherwise use current mode
+				const agentSlugOrMode = message.agentSlug || getGlobalState("mode")
+				const agentVoice = agentSlugOrMode ? getAgentTtsVoice(agentSlugOrMode) : undefined
+
 				playTts(message.text, {
 					onStart: () => provider.postMessageToWebview({ type: "ttsStart", text: message.text }),
 					onStop: () => provider.postMessageToWebview({ type: "ttsStop", text: message.text }),
+					voice: agentVoice,
 				})
 			}
 

@@ -1,0 +1,1666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UI Design Canvas</title>
+    <style>
+        :root {
+            --bg-primary: #1e1e1e;
+            --bg-secondary: #252526;
+            --bg-tertiary: #2d2d30;
+            --text-primary: #cccccc;
+            --text-secondary: #858585;
+            --accent: #007acc;
+            --accent-light: #1a8cdb;
+            --border: #3c3c3c;
+            --success: #4caf50;
+            --warning: #ff9800;
+            --error: #f44336;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .container {
+            display: flex;
+            height: 100%;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .toolbar-title {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .toolbar-info {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .toolbar-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .btn:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .btn-icon {
+            padding: 4px 8px;
+            font-size: 14px;
+        }
+
+        /* Tool Buttons */
+        .tool-group {
+            display: flex;
+            gap: 4px;
+            padding: 0 8px;
+            border-left: 1px solid var(--border);
+        }
+
+        /* Canvas Area */
+        .canvas-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .canvas-container {
+            flex: 1;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            background:
+                linear-gradient(90deg, var(--bg-tertiary) 1px, transparent 1px),
+                linear-gradient(var(--bg-tertiary) 1px, transparent 1px);
+            background-size: 20px 20px;
+            cursor: default;
+        }
+
+        .canvas-container.panning {
+            cursor: grab;
+        }
+
+        .canvas-container.panning:active {
+            cursor: grabbing;
+        }
+
+        .canvas {
+            position: relative;
+            background: #ffffff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            overflow: visible;
+            transform-origin: center center;
+        }
+
+        /* Design Elements */
+        .design-element {
+            position: absolute;
+            transition: box-shadow 0.15s;
+            cursor: move;
+        }
+
+        .design-element:hover {
+            box-shadow: 0 0 0 2px var(--accent);
+        }
+
+        .design-element.selected {
+            box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px rgba(0, 122, 204, 0.3);
+        }
+
+        .design-element.dragging {
+            opacity: 0.8;
+            z-index: 1000;
+        }
+
+        .design-element-frame {
+            overflow: hidden;
+        }
+
+        .design-element-ellipse {
+            border-radius: 50%;
+        }
+
+        .design-element-text {
+            display: flex;
+            align-items: flex-start;
+            white-space: pre-wrap;
+            word-break: break-word;
+            cursor: text;
+        }
+
+        .design-element-text.editing {
+            cursor: text;
+        }
+
+        .design-element-text[contenteditable="true"] {
+            outline: none;
+            box-shadow: 0 0 0 2px var(--accent-light);
+        }
+
+        .design-element-image {
+            background-size: cover;
+            background-position: center;
+            background-color: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 12px;
+        }
+
+        /* Resize Handles */
+        .resize-handles {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+        }
+
+        .resize-handle {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: var(--accent);
+            border: 2px solid white;
+            border-radius: 2px;
+            pointer-events: auto;
+            z-index: 100;
+        }
+
+        .resize-handle-n { top: -5px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
+        .resize-handle-s { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
+        .resize-handle-e { right: -5px; top: 50%; transform: translateY(-50%); cursor: e-resize; }
+        .resize-handle-w { left: -5px; top: 50%; transform: translateY(-50%); cursor: w-resize; }
+        .resize-handle-nw { top: -5px; left: -5px; cursor: nw-resize; }
+        .resize-handle-ne { top: -5px; right: -5px; cursor: ne-resize; }
+        .resize-handle-sw { bottom: -5px; left: -5px; cursor: sw-resize; }
+        .resize-handle-se { bottom: -5px; right: -5px; cursor: se-resize; }
+
+        /* Sidebar */
+        .sidebar {
+            width: 300px;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            font-size: 12px;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+        }
+
+        .sidebar-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .sidebar-tab.active {
+            color: var(--text-primary);
+            border-bottom-color: var(--accent);
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow: auto;
+            padding: 12px;
+        }
+
+        .sidebar-panel {
+            display: none;
+        }
+
+        .sidebar-panel.active {
+            display: block;
+        }
+
+        /* Element Tree */
+        .element-tree {
+            font-size: 12px;
+        }
+
+        .tree-item {
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tree-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .tree-item.selected {
+            background: var(--accent);
+        }
+
+        .tree-item-icon {
+            width: 16px;
+            height: 16px;
+            opacity: 0.7;
+            text-align: center;
+        }
+
+        .tree-item-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .tree-item-type {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        .tree-children {
+            padding-left: 16px;
+        }
+
+        /* Properties Panel */
+        .properties-section {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .properties-section:last-child {
+            border-bottom: none;
+        }
+
+        .properties-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+
+        .property-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .property-label {
+            width: 70px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .property-input {
+            flex: 1;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: var(--text-primary);
+            font-size: 12px;
+            outline: none;
+        }
+
+        .property-input:focus {
+            border-color: var(--accent);
+        }
+
+        .property-input[type="color"] {
+            width: 40px;
+            height: 28px;
+            padding: 2px;
+            cursor: pointer;
+        }
+
+        .property-input[type="number"] {
+            width: 60px;
+        }
+
+        .property-row-half {
+            display: flex;
+            gap: 8px;
+        }
+
+        .property-row-half .property-input {
+            width: 50%;
+        }
+
+        .property-select {
+            flex: 1;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: var(--text-primary);
+            font-size: 12px;
+            outline: none;
+        }
+
+        .property-select:focus {
+            border-color: var(--accent);
+        }
+
+        /* Color Input with Preview */
+        .color-input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+
+        .color-preview {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+        }
+
+        /* Empty State */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-state-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .empty-state-desc {
+            font-size: 13px;
+            max-width: 300px;
+            line-height: 1.5;
+        }
+
+        /* No Selection State */
+        .no-selection {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 20px;
+            font-size: 13px;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border);
+            padding: 4px 16px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 16px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        .status-dot.disconnected {
+            background: var(--error);
+        }
+
+        .status-dot.syncing {
+            background: var(--warning);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Zoom Controls */
+        .zoom-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .zoom-level {
+            min-width: 50px;
+            text-align: center;
+        }
+
+        /* Undo/Redo indicator */
+        .undo-redo {
+            display: flex;
+            gap: 4px;
+        }
+
+        /* Context Menu */
+        .context-menu {
+            position: fixed;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            padding: 4px 0;
+            z-index: 2000;
+            min-width: 150px;
+            display: none;
+        }
+
+        .context-menu.visible {
+            display: block;
+        }
+
+        .context-menu-item {
+            padding: 8px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .context-menu-item:hover {
+            background: var(--accent);
+        }
+
+        .context-menu-item.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .context-menu-divider {
+            height: 1px;
+            background: var(--border);
+            margin: 4px 0;
+        }
+
+        .context-menu-shortcut {
+            margin-left: auto;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="canvas-wrapper">
+            <div class="toolbar">
+                <span class="toolbar-title" id="designName">Untitled Design</span>
+                <span class="toolbar-info" id="canvasSize">390 × 844</span>
+
+                <div class="tool-group undo-redo">
+                    <button class="btn btn-icon" id="undoBtn" title="Undo (Ctrl+Z)">↩</button>
+                    <button class="btn btn-icon" id="redoBtn" title="Redo (Ctrl+Y)">↪</button>
+                </div>
+
+                <div class="toolbar-actions">
+                    <div class="zoom-controls">
+                        <button class="btn btn-icon" id="zoomOut">−</button>
+                        <span class="zoom-level" id="zoomLevel">100%</span>
+                        <button class="btn btn-icon" id="zoomIn">+</button>
+                    </div>
+                    <button class="btn" id="fitCanvas">Fit</button>
+                    <button class="btn" id="exportBtn">Export</button>
+                    <button class="btn" id="screenshotBtn">Screenshot</button>
+                </div>
+            </div>
+
+            <div class="canvas-container" id="canvasContainer">
+                <div class="canvas" id="canvas">
+                    <div class="empty-state" id="emptyState">
+                        <div class="empty-state-icon">🎨</div>
+                        <div class="empty-state-title">No Elements Yet</div>
+                        <div class="empty-state-desc">
+                            Use the AI to create UI elements, or use the properties panel to add elements manually.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="status-bar">
+                <span class="status-item">
+                    <span class="status-dot" id="connectionDot"></span>
+                    <span id="connectionStatus">Connecting...</span>
+                </span>
+                <span id="elementCount">0 elements</span>
+                <span id="selectedInfo">No selection</span>
+                <span style="margin-left: auto;" id="syncStatus"></span>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" data-tab="elements">Elements</button>
+                <button class="sidebar-tab" data-tab="properties">Properties</button>
+            </div>
+
+            <div class="sidebar-content">
+                <!-- Elements Panel -->
+                <div class="sidebar-panel active" id="elementsPanel">
+                    <div class="element-tree" id="elementTree">
+                        <!-- Element tree will be rendered here -->
+                    </div>
+                </div>
+
+                <!-- Properties Panel -->
+                <div class="sidebar-panel" id="propertiesPanel">
+                    <div id="propertiesContent">
+                        <div class="no-selection">Select an element to edit its properties</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div class="context-menu" id="contextMenu">
+        <div class="context-menu-item" data-action="duplicate">
+            <span>Duplicate</span>
+            <span class="context-menu-shortcut">Ctrl+D</span>
+        </div>
+        <div class="context-menu-item" data-action="delete">
+            <span>Delete</span>
+            <span class="context-menu-shortcut">Del</span>
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item" data-action="bringToFront">Bring to Front</div>
+        <div class="context-menu-item" data-action="sendToBack">Send to Back</div>
+    </div>
+
+    <script>
+        // VS Code API
+        const vscode = acquireVsCodeApi();
+
+        // State
+        let design = null;
+        let selectedId = null;
+        let zoom = 1;
+        let isDragging = false;
+        let isResizing = false;
+        let dragStartPos = { x: 0, y: 0 };
+        let elementStartPos = { x: 0, y: 0, width: 0, height: 0 };
+        let resizeHandle = null;
+        let undoStack = [];
+        let redoStack = [];
+        let serverUrl = 'http://127.0.0.1:4420';
+
+        // Initialize
+        function init() {
+            setupEventListeners();
+            setupTabs();
+            connectToServer();
+            requestDesign();
+        }
+
+        function setupTabs() {
+            document.querySelectorAll('.sidebar-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.getElementById(tab.dataset.tab + 'Panel').classList.add('active');
+                });
+            });
+        }
+
+        function setupEventListeners() {
+            // Zoom controls
+            document.getElementById('zoomIn').addEventListener('click', () => setZoom(zoom + 0.1));
+            document.getElementById('zoomOut').addEventListener('click', () => setZoom(zoom - 0.1));
+            document.getElementById('fitCanvas').addEventListener('click', fitCanvasToView);
+            document.getElementById('exportBtn').addEventListener('click', exportDesign);
+            document.getElementById('screenshotBtn').addEventListener('click', takeScreenshot);
+
+            // Undo/Redo
+            document.getElementById('undoBtn').addEventListener('click', undo);
+            document.getElementById('redoBtn').addEventListener('click', redo);
+
+            // Receive messages from extension
+            window.addEventListener('message', event => {
+                const message = event.data;
+                switch (message.type) {
+                    case 'updateDesign':
+                        design = message.design;
+                        renderDesign();
+                        break;
+                    case 'selectElement':
+                        selectElement(message.id);
+                        break;
+                }
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Delete' && selectedId) {
+                    deleteSelected();
+                }
+                if (e.ctrlKey || e.metaKey) {
+                    if (e.key === 'z') {
+                        e.preventDefault();
+                        undo();
+                    }
+                    if (e.key === 'y') {
+                        e.preventDefault();
+                        redo();
+                    }
+                    if (e.key === 'd' && selectedId) {
+                        e.preventDefault();
+                        duplicateSelected();
+                    }
+                }
+            });
+
+            // Global mouse events for drag/resize
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+
+            // Context menu
+            document.addEventListener('contextmenu', handleContextMenu);
+            document.addEventListener('click', () => hideContextMenu());
+
+            // Context menu actions
+            document.querySelectorAll('.context-menu-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const action = item.dataset.action;
+                    handleContextMenuAction(action);
+                    hideContextMenu();
+                });
+            });
+
+            // Canvas click to deselect
+            document.getElementById('canvas').addEventListener('click', (e) => {
+                if (e.target === document.getElementById('canvas') || e.target === document.getElementById('emptyState')) {
+                    selectElement(null);
+                }
+            });
+        }
+
+        // Server communication
+        async function connectToServer() {
+            try {
+                const response = await fetch(`${serverUrl}/health`);
+                if (response.ok) {
+                    setConnectionStatus('connected');
+                } else {
+                    setConnectionStatus('disconnected');
+                }
+            } catch (e) {
+                setConnectionStatus('disconnected');
+            }
+        }
+
+        function setConnectionStatus(status) {
+            const dot = document.getElementById('connectionDot');
+            const text = document.getElementById('connectionStatus');
+
+            if (status === 'connected') {
+                dot.className = 'status-dot';
+                text.textContent = 'Connected';
+            } else if (status === 'syncing') {
+                dot.className = 'status-dot syncing';
+                text.textContent = 'Syncing...';
+            } else {
+                dot.className = 'status-dot disconnected';
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        async function syncToServer(toolName, args) {
+            setConnectionStatus('syncing');
+            try {
+                // Send update through VS Code extension which will call MCP
+                vscode.postMessage({
+                    type: 'mcpToolCall',
+                    tool: toolName,
+                    args: args
+                });
+
+                // Also try direct fetch to get updated design
+                setTimeout(async () => {
+                    try {
+                        const response = await fetch(`${serverUrl}/design`);
+                        if (response.ok) {
+                            const newDesign = await response.json();
+                            design = newDesign;
+                            renderDesign();
+                            setConnectionStatus('connected');
+                        }
+                    } catch (e) {
+                        console.error('Failed to fetch design:', e);
+                    }
+                }, 100);
+            } catch (e) {
+                console.error('Sync failed:', e);
+                setConnectionStatus('disconnected');
+            }
+        }
+
+        function requestDesign() {
+            vscode.postMessage({ type: 'requestDesign' });
+            // Also try direct fetch
+            fetch(`${serverUrl}/design`)
+                .then(r => r.json())
+                .then(d => {
+                    design = d;
+                    renderDesign();
+                    setConnectionStatus('connected');
+                })
+                .catch(e => console.log('Direct fetch failed, waiting for VS Code message'));
+        }
+
+        // Undo/Redo
+        function saveState() {
+            if (design) {
+                undoStack.push(JSON.stringify(design));
+                redoStack = [];
+                if (undoStack.length > 50) undoStack.shift();
+            }
+        }
+
+        function undo() {
+            if (undoStack.length > 0) {
+                redoStack.push(JSON.stringify(design));
+                design = JSON.parse(undoStack.pop());
+                renderDesign();
+                syncToServer('set_design', { design });
+            }
+        }
+
+        function redo() {
+            if (redoStack.length > 0) {
+                undoStack.push(JSON.stringify(design));
+                design = JSON.parse(redoStack.pop());
+                renderDesign();
+                syncToServer('set_design', { design });
+            }
+        }
+
+        // Zoom
+        function setZoom(newZoom) {
+            zoom = Math.max(0.25, Math.min(3, newZoom));
+            document.getElementById('canvas').style.transform = `scale(${zoom})`;
+            document.getElementById('zoomLevel').textContent = `${Math.round(zoom * 100)}%`;
+        }
+
+        function fitCanvasToView() {
+            if (!design) return;
+            const container = document.getElementById('canvasContainer');
+            const containerRect = container.getBoundingClientRect();
+            const padding = 80;
+            const scaleX = (containerRect.width - padding) / design.canvas.width;
+            const scaleY = (containerRect.height - padding) / design.canvas.height;
+            setZoom(Math.min(scaleX, scaleY, 1));
+        }
+
+        // Render
+        function renderDesign() {
+            if (!design) return;
+
+            // Update toolbar
+            document.getElementById('designName').textContent = design.name || 'Untitled Design';
+            document.getElementById('canvasSize').textContent = `${design.canvas.width} × ${design.canvas.height}`;
+
+            // Update canvas
+            const canvas = document.getElementById('canvas');
+            canvas.style.width = design.canvas.width + 'px';
+            canvas.style.height = design.canvas.height + 'px';
+            canvas.style.backgroundColor = design.canvas.backgroundColor || '#ffffff';
+
+            // Clear existing elements
+            canvas.querySelectorAll('.design-element').forEach(el => el.remove());
+
+            // Hide empty state if we have elements
+            const emptyState = document.getElementById('emptyState');
+            emptyState.style.display = design.elements.length === 0 ? 'flex' : 'none';
+
+            // Render elements
+            design.elements.forEach(el => renderElement(el, canvas));
+
+            // Update element tree
+            renderElementTree();
+
+            // Update properties panel
+            renderPropertiesPanel();
+
+            // Update status
+            const allElements = countElements(design.elements);
+            document.getElementById('elementCount').textContent = `${allElements} element${allElements !== 1 ? 's' : ''}`;
+        }
+
+        function countElements(elements) {
+            let count = elements.length;
+            elements.forEach(el => {
+                if (el.children) count += countElements(el.children);
+            });
+            return count;
+        }
+
+        function renderElement(element, parent) {
+            const el = document.createElement('div');
+            el.className = `design-element design-element-${element.type}`;
+            el.dataset.id = element.id;
+
+            // Position and size
+            el.style.left = element.bounds.x + 'px';
+            el.style.top = element.bounds.y + 'px';
+            el.style.width = element.bounds.width + 'px';
+            el.style.height = element.bounds.height + 'px';
+
+            // Style
+            if (element.style) {
+                if (element.style.fill) {
+                    const fill = resolveToken(element.style.fill);
+                    el.style.backgroundColor = fill;
+                }
+                if (element.style.stroke) {
+                    el.style.border = `${element.style.stroke.width || 1}px solid ${resolveToken(element.style.stroke.color)}`;
+                }
+                if (element.style.radius) {
+                    el.style.borderRadius = typeof element.style.radius === 'number'
+                        ? element.style.radius + 'px'
+                        : element.style.radius;
+                }
+                if (element.style.opacity !== undefined) {
+                    el.style.opacity = element.style.opacity;
+                }
+                if (element.style.shadow) {
+                    const s = element.style.shadow;
+                    el.style.boxShadow = `${s.offsetX || 0}px ${s.offsetY || 0}px ${s.blur || 0}px ${s.color || 'rgba(0,0,0,0.1)'}`;
+                }
+
+                // Text styles
+                if (element.style.text) {
+                    if (element.style.text.fontSize) el.style.fontSize = element.style.text.fontSize + 'px';
+                    if (element.style.text.fontWeight) el.style.fontWeight = element.style.text.fontWeight;
+                    if (element.style.text.textAlign) el.style.textAlign = element.style.text.textAlign;
+                }
+
+                // Layout
+                if (element.style.layout) {
+                    const layout = element.style.layout;
+                    if (layout.type === 'flex') {
+                        el.style.display = 'flex';
+                        el.style.flexDirection = layout.direction || 'column';
+                        if (layout.gap) el.style.gap = layout.gap + 'px';
+                        if (layout.padding) el.style.padding = layout.padding + 'px';
+                        if (layout.alignItems) el.style.alignItems = layout.alignItems;
+                        if (layout.justifyContent) el.style.justifyContent = layout.justifyContent;
+                    }
+                }
+            }
+
+            // Content
+            if (element.type === 'text' && element.content) {
+                el.textContent = element.content;
+            }
+
+            // Image
+            if (element.type === 'image') {
+                if (element.src) {
+                    el.style.backgroundImage = `url(${element.src})`;
+                } else {
+                    el.textContent = '🖼️';
+                }
+            }
+
+            // Selection
+            if (element.id === selectedId) {
+                el.classList.add('selected');
+                addResizeHandles(el);
+            }
+
+            // Event handlers
+            el.addEventListener('mousedown', (e) => handleElementMouseDown(e, element));
+            el.addEventListener('dblclick', (e) => handleElementDoubleClick(e, element));
+
+            parent.appendChild(el);
+
+            // Render children
+            if (element.children) {
+                element.children.forEach(child => renderElement(child, el));
+            }
+        }
+
+        function addResizeHandles(el) {
+            const handles = document.createElement('div');
+            handles.className = 'resize-handles';
+            handles.innerHTML = `
+                <div class="resize-handle resize-handle-n" data-handle="n"></div>
+                <div class="resize-handle resize-handle-s" data-handle="s"></div>
+                <div class="resize-handle resize-handle-e" data-handle="e"></div>
+                <div class="resize-handle resize-handle-w" data-handle="w"></div>
+                <div class="resize-handle resize-handle-nw" data-handle="nw"></div>
+                <div class="resize-handle resize-handle-ne" data-handle="ne"></div>
+                <div class="resize-handle resize-handle-sw" data-handle="sw"></div>
+                <div class="resize-handle resize-handle-se" data-handle="se"></div>
+            `;
+
+            handles.querySelectorAll('.resize-handle').forEach(handle => {
+                handle.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    startResize(e, handle.dataset.handle);
+                });
+            });
+
+            el.appendChild(handles);
+        }
+
+        // Mouse handlers
+        function handleElementMouseDown(e, element) {
+            e.stopPropagation();
+
+            if (e.target.classList.contains('resize-handle')) return;
+
+            selectElement(element.id);
+            startDrag(e, element);
+        }
+
+        function handleElementDoubleClick(e, element) {
+            if (element.type === 'text') {
+                const el = document.querySelector(`[data-id="${element.id}"]`);
+                if (el) {
+                    el.contentEditable = 'true';
+                    el.focus();
+                    el.classList.add('editing');
+
+                    el.addEventListener('blur', () => {
+                        el.contentEditable = 'false';
+                        el.classList.remove('editing');
+                        saveState();
+                        updateElementProperty(element.id, 'content', el.textContent);
+                    }, { once: true });
+                }
+            }
+        }
+
+        function startDrag(e, element) {
+            isDragging = true;
+            dragStartPos = { x: e.clientX, y: e.clientY };
+            elementStartPos = {
+                x: element.bounds.x,
+                y: element.bounds.y,
+                width: element.bounds.width,
+                height: element.bounds.height
+            };
+
+            const el = document.querySelector(`[data-id="${element.id}"]`);
+            if (el) el.classList.add('dragging');
+        }
+
+        function startResize(e, handle) {
+            const element = findElement(design.elements, selectedId);
+            if (!element) return;
+
+            isResizing = true;
+            resizeHandle = handle;
+            dragStartPos = { x: e.clientX, y: e.clientY };
+            elementStartPos = {
+                x: element.bounds.x,
+                y: element.bounds.y,
+                width: element.bounds.width,
+                height: element.bounds.height
+            };
+        }
+
+        function handleMouseMove(e) {
+            if (isDragging && selectedId) {
+                const dx = (e.clientX - dragStartPos.x) / zoom;
+                const dy = (e.clientY - dragStartPos.y) / zoom;
+
+                const element = findElement(design.elements, selectedId);
+                if (element) {
+                    element.bounds.x = Math.round(elementStartPos.x + dx);
+                    element.bounds.y = Math.round(elementStartPos.y + dy);
+                    renderDesign();
+                }
+            }
+
+            if (isResizing && selectedId) {
+                const dx = (e.clientX - dragStartPos.x) / zoom;
+                const dy = (e.clientY - dragStartPos.y) / zoom;
+
+                const element = findElement(design.elements, selectedId);
+                if (element) {
+                    const minSize = 10;
+
+                    if (resizeHandle.includes('e')) {
+                        element.bounds.width = Math.max(minSize, Math.round(elementStartPos.width + dx));
+                    }
+                    if (resizeHandle.includes('w')) {
+                        const newWidth = Math.max(minSize, Math.round(elementStartPos.width - dx));
+                        element.bounds.x = Math.round(elementStartPos.x + elementStartPos.width - newWidth);
+                        element.bounds.width = newWidth;
+                    }
+                    if (resizeHandle.includes('s')) {
+                        element.bounds.height = Math.max(minSize, Math.round(elementStartPos.height + dy));
+                    }
+                    if (resizeHandle.includes('n')) {
+                        const newHeight = Math.max(minSize, Math.round(elementStartPos.height - dy));
+                        element.bounds.y = Math.round(elementStartPos.y + elementStartPos.height - newHeight);
+                        element.bounds.height = newHeight;
+                    }
+
+                    renderDesign();
+                }
+            }
+        }
+
+        function handleMouseUp(e) {
+            if (isDragging || isResizing) {
+                const element = findElement(design.elements, selectedId);
+                if (element) {
+                    saveState();
+                    syncToServer('update_element', {
+                        id: selectedId,
+                        x: element.bounds.x,
+                        y: element.bounds.y,
+                        width: element.bounds.width,
+                        height: element.bounds.height
+                    });
+                }
+            }
+
+            isDragging = false;
+            isResizing = false;
+            resizeHandle = null;
+
+            document.querySelectorAll('.design-element.dragging').forEach(el => {
+                el.classList.remove('dragging');
+            });
+        }
+
+        // Context menu
+        function handleContextMenu(e) {
+            e.preventDefault();
+
+            const menu = document.getElementById('contextMenu');
+
+            // Position menu
+            menu.style.left = e.clientX + 'px';
+            menu.style.top = e.clientY + 'px';
+            menu.classList.add('visible');
+
+            // Update menu state based on selection
+            document.querySelectorAll('.context-menu-item').forEach(item => {
+                if (!selectedId) {
+                    item.classList.add('disabled');
+                } else {
+                    item.classList.remove('disabled');
+                }
+            });
+        }
+
+        function hideContextMenu() {
+            document.getElementById('contextMenu').classList.remove('visible');
+        }
+
+        function handleContextMenuAction(action) {
+            if (!selectedId) return;
+
+            switch (action) {
+                case 'duplicate':
+                    duplicateSelected();
+                    break;
+                case 'delete':
+                    deleteSelected();
+                    break;
+                case 'bringToFront':
+                    bringToFront();
+                    break;
+                case 'sendToBack':
+                    sendToBack();
+                    break;
+            }
+        }
+
+        // Token resolver
+        function resolveToken(value) {
+            if (!value || typeof value !== 'string') return value;
+            if (value.startsWith('$')) {
+                const path = value.slice(1).split('.');
+                let resolved = design.tokens;
+                for (const key of path) {
+                    resolved = resolved?.[key];
+                }
+                return resolved || value;
+            }
+            return value;
+        }
+
+        // Element tree
+        function renderElementTree() {
+            const container = document.getElementById('elementTree');
+            container.innerHTML = '';
+
+            if (!design || design.elements.length === 0) {
+                container.innerHTML = '<div class="no-selection">No elements</div>';
+                return;
+            }
+
+            design.elements.forEach(el => {
+                container.appendChild(createTreeItem(el));
+            });
+        }
+
+        function createTreeItem(element) {
+            const item = document.createElement('div');
+
+            const row = document.createElement('div');
+            row.className = 'tree-item' + (element.id === selectedId ? ' selected' : '');
+            row.innerHTML = `
+                <span class="tree-item-icon">${getTypeIcon(element.type)}</span>
+                <span class="tree-item-name">${element.name || element.semantic || element.id}</span>
+                <span class="tree-item-type">${element.type}</span>
+            `;
+            row.addEventListener('click', () => selectElement(element.id));
+            item.appendChild(row);
+
+            if (element.children && element.children.length > 0) {
+                const children = document.createElement('div');
+                children.className = 'tree-children';
+                element.children.forEach(child => {
+                    children.appendChild(createTreeItem(child));
+                });
+                item.appendChild(children);
+            }
+
+            return item;
+        }
+
+        function getTypeIcon(type) {
+            const icons = {
+                frame: '◻️',
+                rectangle: '▬',
+                ellipse: '◯',
+                text: 'T',
+                image: '🖼️',
+                group: '📁'
+            };
+            return icons[type] || '?';
+        }
+
+        // Properties panel
+        function renderPropertiesPanel() {
+            const container = document.getElementById('propertiesContent');
+
+            if (!selectedId) {
+                container.innerHTML = '<div class="no-selection">Select an element to edit its properties</div>';
+                return;
+            }
+
+            const element = findElement(design.elements, selectedId);
+            if (!element) {
+                container.innerHTML = '<div class="no-selection">Element not found</div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <!-- Basic Info -->
+                <div class="properties-section">
+                    <div class="properties-title">Element</div>
+                    <div class="property-row">
+                        <span class="property-label">Name</span>
+                        <input type="text" class="property-input" id="propName" value="${element.name || ''}" placeholder="Unnamed">
+                    </div>
+                    <div class="property-row">
+                        <span class="property-label">Type</span>
+                        <span class="property-input" style="background: transparent; border: none;">${element.type}</span>
+                    </div>
+                </div>
+
+                <!-- Position -->
+                <div class="properties-section">
+                    <div class="properties-title">Position</div>
+                    <div class="property-row">
+                        <span class="property-label">X</span>
+                        <input type="number" class="property-input" id="propX" value="${element.bounds.x}">
+                        <span class="property-label">Y</span>
+                        <input type="number" class="property-input" id="propY" value="${element.bounds.y}">
+                    </div>
+                </div>
+
+                <!-- Size -->
+                <div class="properties-section">
+                    <div class="properties-title">Size</div>
+                    <div class="property-row">
+                        <span class="property-label">W</span>
+                        <input type="number" class="property-input" id="propWidth" value="${element.bounds.width}">
+                        <span class="property-label">H</span>
+                        <input type="number" class="property-input" id="propHeight" value="${element.bounds.height}">
+                    </div>
+                </div>
+
+                <!-- Fill -->
+                <div class="properties-section">
+                    <div class="properties-title">Fill</div>
+                    <div class="property-row">
+                        <span class="property-label">Color</span>
+                        <div class="color-input-wrapper">
+                            <input type="color" class="property-input" id="propFill" value="${rgbToHex(resolveToken(element.style?.fill) || '#ffffff')}">
+                            <input type="text" class="property-input" id="propFillText" value="${element.style?.fill || ''}" placeholder="#ffffff">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stroke -->
+                <div class="properties-section">
+                    <div class="properties-title">Stroke</div>
+                    <div class="property-row">
+                        <span class="property-label">Color</span>
+                        <div class="color-input-wrapper">
+                            <input type="color" class="property-input" id="propStroke" value="${rgbToHex(element.style?.stroke?.color || '#000000')}">
+                            <input type="text" class="property-input" id="propStrokeText" value="${element.style?.stroke?.color || ''}" placeholder="none">
+                        </div>
+                    </div>
+                    <div class="property-row">
+                        <span class="property-label">Width</span>
+                        <input type="number" class="property-input" id="propStrokeWidth" value="${element.style?.stroke?.width || 0}" min="0">
+                    </div>
+                </div>
+
+                <!-- Border Radius -->
+                <div class="properties-section">
+                    <div class="properties-title">Corner Radius</div>
+                    <div class="property-row">
+                        <span class="property-label">Radius</span>
+                        <input type="number" class="property-input" id="propRadius" value="${element.style?.radius || 0}" min="0">
+                    </div>
+                </div>
+
+                ${element.type === 'text' ? `
+                <!-- Text -->
+                <div class="properties-section">
+                    <div class="properties-title">Text</div>
+                    <div class="property-row">
+                        <span class="property-label">Content</span>
+                        <input type="text" class="property-input" id="propContent" value="${element.content || ''}">
+                    </div>
+                    <div class="property-row">
+                        <span class="property-label">Size</span>
+                        <input type="number" class="property-input" id="propFontSize" value="${element.style?.text?.fontSize || 16}" min="1">
+                    </div>
+                    <div class="property-row">
+                        <span class="property-label">Weight</span>
+                        <select class="property-select" id="propFontWeight">
+                            <option value="normal" ${element.style?.text?.fontWeight === 'normal' ? 'selected' : ''}>Normal</option>
+                            <option value="medium" ${element.style?.text?.fontWeight === 'medium' ? 'selected' : ''}>Medium</option>
+                            <option value="semibold" ${element.style?.text?.fontWeight === 'semibold' ? 'selected' : ''}>Semibold</option>
+                            <option value="bold" ${element.style?.text?.fontWeight === 'bold' ? 'selected' : ''}>Bold</option>
+                        </select>
+                    </div>
+                </div>
+                ` : ''}
+            `;
+
+            // Add event listeners for property changes
+            setupPropertyListeners(element);
+        }
+
+        function setupPropertyListeners(element) {
+            // Name
+            const nameInput = document.getElementById('propName');
+            if (nameInput) {
+                nameInput.addEventListener('change', () => {
+                    saveState();
+                    updateElementProperty(element.id, 'name', nameInput.value);
+                });
+            }
+
+            // Position
+            const xInput = document.getElementById('propX');
+            const yInput = document.getElementById('propY');
+            if (xInput && yInput) {
+                xInput.addEventListener('change', () => {
+                    saveState();
+                    element.bounds.x = parseInt(xInput.value);
+                    syncToServer('move_element', { id: element.id, x: element.bounds.x, y: element.bounds.y });
+                    renderDesign();
+                });
+                yInput.addEventListener('change', () => {
+                    saveState();
+                    element.bounds.y = parseInt(yInput.value);
+                    syncToServer('move_element', { id: element.id, x: element.bounds.x, y: element.bounds.y });
+                    renderDesign();
+                });
+            }
+
+            // Size
+            const widthInput = document.getElementById('propWidth');
+            const heightInput = document.getElementById('propHeight');
+            if (widthInput && heightInput) {
+                widthInput.addEventListener('change', () => {
+                    saveState();
+                    element.bounds.width = parseInt(widthInput.value);
+                    syncToServer('resize_element', { id: element.id, width: element.bounds.width, height: element.bounds.height });
+                    renderDesign();
+                });
+                heightInput.addEventListener('change', () => {
+                    saveState();
+                    element.bounds.height = parseInt(heightInput.value);
+                    syncToServer('resize_element', { id: element.id, width: element.bounds.width, height: element.bounds.height });
+                    renderDesign();
+                });
+            }
+
+            // Fill
+            const fillInput = document.getElementById('propFill');
+            const fillTextInput = document.getElementById('propFillText');
+            if (fillInput && fillTextInput) {
+                fillInput.addEventListener('input', () => {
+                    fillTextInput.value = fillInput.value;
+                    element.style = element.style || {};
+                    element.style.fill = fillInput.value;
+                    renderDesign();
+                });
+                fillInput.addEventListener('change', () => {
+                    saveState();
+                    syncToServer('set_style', { id: element.id, fill: fillInput.value });
+                });
+                fillTextInput.addEventListener('change', () => {
+                    saveState();
+                    element.style = element.style || {};
+                    element.style.fill = fillTextInput.value;
+                    syncToServer('set_style', { id: element.id, fill: fillTextInput.value });
+                    renderDesign();
+                });
+            }
+
+            // Stroke
+            const strokeInput = document.getElementById('propStroke');
+            const strokeTextInput = document.getElementById('propStrokeText');
+            const strokeWidthInput = document.getElementById('propStrokeWidth');
+            if (strokeInput && strokeWidthInput) {
+                strokeInput.addEventListener('change', () => {
+                    saveState();
+                    element.style = element.style || {};
+                    element.style.stroke = element.style.stroke || {};
+                    element.style.stroke.color = strokeInput.value;
+                    syncToServer('set_style', { id: element.id, stroke: strokeInput.value, strokeWidth: element.style.stroke.width });
+                    renderDesign();
+                });
+                strokeWidthInput.addEventListener('change', () => {
+                    saveState();
+                    element.style = element.style || {};
+                    element.style.stroke = element.style.stroke || {};
+                    element.style.stroke.width = parseInt(strokeWidthInput.value);
+                    syncToServer('set_style', { id: element.id, stroke: element.style.stroke.color, strokeWidth: element.style.stroke.width });
+                    renderDesign();
+                });
+            }
+
+            // Radius
+            const radiusInput = document.getElementById('propRadius');
+            if (radiusInput) {
+                radiusInput.addEventListener('change', () => {
+                    saveState();
+                    element.style = element.style || {};
+                    element.style.radius = parseInt(radiusInput.value);
+                    syncToServer('set_style', { id: element.id, radius: element.style.radius });
+                    renderDesign();
+                });
+            }
+
+            // Text content
+            const contentInput = document.getElementById('propContent');
+            if (contentInput) {
+                contentInput.addEventListener('change', () => {
+                    saveState();
+                    element.content = contentInput.value;
+                    syncToServer('update_element', { id: element.id, content: element.content });
+                    renderDesign();
+                });
+            }
+
+            // Font size
+            const fontSizeInput = document.getElementById('propFontSize');
+            if (fontSizeInput) {
+                fontSizeInput.addEventListener('change', () => {
+                    saveState();
+                    element.style = element.style || {};
+                    element.style.text = element.style.text || {};
+                    element.style.text.fontSize = parseInt(fontSizeInput.value);
+                    syncToServer('update_element', { id: element.id, fontSize: element.style.text.fontSize });
+                    renderDesign();
+                });
+            }
+
+            // Font weight
+            const fontWeightSelect = document.getElementById('propFontWeight');
+            if (fontWeightSelect) {
+                fontWeightSelect.addEventListener('change', () => {
+                    saveState();
+                    element.style = element.style || {};
+                    element.style.text = element.style.text || {};
+                    element.style.text.fontWeight = fontWeightSelect.value;
+                    syncToServer('update_element', { id: element.id, fontWeight: element.style.text.fontWeight });
+                    renderDesign();
+                });
+            }
+        }
+
+        function rgbToHex(color) {
+            if (!color) return '#ffffff';
+            if (color.startsWith('#')) return color;
+            if (color.startsWith('rgb')) {
+                const match = color.match(/\d+/g);
+                if (match && match.length >= 3) {
+                    const r = parseInt(match[0]).toString(16).padStart(2, '0');
+                    const g = parseInt(match[1]).toString(16).padStart(2, '0');
+                    const b = parseInt(match[2]).toString(16).padStart(2, '0');
+                    return `#${r}${g}${b}`;
+                }
+            }
+            return color;
+        }
+
+        function updateElementProperty(id, property, value) {
+            const element = findElement(design.elements, id);
+            if (element) {
+                element[property] = value;
+                syncToServer('update_element', { id, [property]: value });
+                renderDesign();
+            }
+        }
+
+        // Selection
+        function selectElement(id) {
+            selectedId = id;
+            renderDesign();
+
+            const element = id ? findElement(design.elements, id) : null;
+            if (element) {
+                document.getElementById('selectedInfo').textContent =
+                    `Selected: ${element.name || element.semantic || element.type}`;
+                // Switch to properties tab
+                document.querySelector('[data-tab="properties"]').click();
+            } else {
+                document.getElementById('selectedInfo').textContent = 'No selection';
+            }
+
+            vscode.postMessage({ type: 'elementSelected', id });
+        }
+
+        function findElement(elements, id) {
+            for (const el of elements) {
+                if (el.id === id) return el;
+                if (el.children) {
+                    const found = findElement(el.children, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        // Element operations
+        function deleteSelected() {
+            if (!selectedId) return;
+
+            saveState();
+            removeElement(design.elements, selectedId);
+            syncToServer('delete_element', { id: selectedId });
+            selectElement(null);
+            renderDesign();
+        }
+
+        function removeElement(elements, id) {
+            for (let i = 0; i < elements.length; i++) {
+                if (elements[i].id === id) {
+                    elements.splice(i, 1);
+                    return true;
+                }
+                if (elements[i].children) {
+                    if (removeElement(elements[i].children, id)) return true;
+                }
+            }
+            return false;
+        }
+
+        function duplicateSelected() {
+            if (!selectedId) return;
+
+            const element = findElement(design.elements, selectedId);
+            if (!element) return;
+
+            saveState();
+            const newElement = JSON.parse(JSON.stringify(element));
+            newElement.id = 'el_' + Date.now();
+            newElement.bounds.x += 20;
+            newElement.bounds.y += 20;
+
+            design.elements.push(newElement);
+
+            // Sync with server - create the same type of element
+            const createTool = `create_${element.type}`;
+            syncToServer(createTool, {
+                name: newElement.name,
+                x: newElement.bounds.x,
+                y: newElement.bounds.y,
+                width: newElement.bounds.width,
+                height: newElement.bounds.height,
+                fill: newElement.style?.fill,
+                radius: newElement.style?.radius
+            });
+
+            selectElement(newElement.id);
+            renderDesign();
+        }
+
+        function bringToFront() {
+            if (!selectedId) return;
+
+            saveState();
+            const index = design.elements.findIndex(el => el.id === selectedId);
+            if (index > -1) {
+                const element = design.elements.splice(index, 1)[0];
+                design.elements.push(element);
+                renderDesign();
+            }
+        }
+
+        function sendToBack() {
+            if (!selectedId) return;
+
+            saveState();
+            const index = design.elements.findIndex(el => el.id === selectedId);
+            if (index > -1) {
+                const element = design.elements.splice(index, 1)[0];
+                design.elements.unshift(element);
+                renderDesign();
+            }
+        }
+
+        // Export
+        function exportDesign() {
+            vscode.postMessage({ type: 'exportDesign' });
+        }
+
+        function takeScreenshot() {
+            vscode.postMessage({ type: 'takeScreenshot' });
+        }
+
+        // Initialize
+        init();
+    </script>
+</body>
+</html>

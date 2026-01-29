@@ -1,0 +1,30 @@
+{
+    "name": "penpot-mcp-server",
+    "version": "1.0.0",
+    "description": "MCP server for Penpot integration",
+    "type": "module",
+    "main": "dist/index.js",
+    "scripts": {
+        "start": "node dist/index.js",
+        "start:multi-user": "node dist/index.js --multi-user"
+    },
+    "keywords": [
+        "mcp",
+        "penpot",
+        "server"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.24.0",
+        "class-transformer": "^0.5.1",
+        "class-validator": "^0.14.3",
+        "express": "^5.1.0",
+        "js-yaml": "^4.1.1",
+        "pino": "^9.10.0",
+        "pino-pretty": "^13.1.1",
+        "reflect-metadata": "^0.1.13",
+        "sharp": "^0.34.5",
+        "ws": "^8.18.0"
+    }
+}

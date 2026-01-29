@@ -521,9 +521,18 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	): void {
 		// Only add max_completion_tokens if includeMaxTokens is true
 		if (this.options.includeMaxTokens === true) {
-			// Use user-configured modelMaxTokens if available, otherwise fall back to model's default maxTokens
+			// Use user-configured modelMaxTokens if available and positive
+			// If modelMaxTokens is -1 (let server decide) or undefined, fall back to model's default maxTokens
 			// Using max_completion_tokens as max_tokens is deprecated
-			requestOptions.max_completion_tokens = this.options.modelMaxTokens || modelInfo.maxTokens
+			const userMaxTokens = this.options.modelMaxTokens
+			const maxTokens = (userMaxTokens && userMaxTokens > 0) ? userMaxTokens : modelInfo.maxTokens
+
+			// Only set max_completion_tokens if we have a valid positive value
+			if (maxTokens && maxTokens > 0) {
+				requestOptions.max_completion_tokens = maxTokens
+			}
+			// If maxTokens is still undefined or <= 0, don't set max_completion_tokens at all
+			// This lets the server decide based on context window
 		}
 	}
 }

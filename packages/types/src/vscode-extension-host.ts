@@ -354,6 +354,12 @@ export type ExtensionState = Pick<
 	| "talkToFigmaEnabled"
 	| "figmaFileUrl"
 	| "figmaWebPreviewEnabled"
+	| "penpotMcpEnabled"
+	| "penpotFileUrl"
+	| "penpotWebPreviewEnabled"
+	| "mcpUiEnabled"
+	| "mcpUiServerUrl"
+	| "uiDesignCanvasEnabled"
 > & {
 	version: string
 	clineMessages: ClineMessage[]
@@ -552,6 +558,8 @@ export interface WebviewMessage {
 		| "setFigmaApiToken"
 		| "testFigmaConnection"
 		| "openFigmaPreview"
+		| "openPenpotPreview"
+		| "reconnectMcpUiServer"
 		| "searchFiles"
 		| "toggleApiConfigPin"
 		| "hasOpenedModeSelector"
@@ -632,6 +640,7 @@ export interface WebviewMessage {
 		| "createWorktreeInclude"
 		| "checkoutBranch"
 	text?: string
+	agentSlug?: string // Agent slug for TTS voice selection (e.g., "sentinel-architect")
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
 	disabled?: boolean
