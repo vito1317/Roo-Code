@@ -299,6 +299,22 @@ export const ChatRowContent = ({
 					mcpServerUse.serverName === "figma-write" ||
 					mcpServerUse.serverName?.toLowerCase().includes("figma")
 
+				// Check if this is MCP-UI server - completely hide header (only HTML will be shown)
+				const isMcpUiServer =
+					mcpServerUse.serverName === "MCP-UI" ||
+					mcpServerUse.serverName?.toLowerCase().includes("mcp-ui") ||
+					mcpServerUse.serverName?.toLowerCase().includes("mcp_ui")
+
+				// Check if this is UIDesignCanvas server - use beautified display
+				const isUIDesignCanvas =
+					mcpServerUse.serverName === "UIDesignCanvas" ||
+					mcpServerUse.serverName?.toLowerCase().includes("uidesigncanvas")
+
+				// MCP-UI: completely hide header, only the HTML output will show
+				if (isMcpUiServer) {
+					return [null, null]
+				}
+
 				if (isFigmaMcpServer) {
 					return [
 						isMcpServerResponding ? (
@@ -311,6 +327,21 @@ export const ChatRowContent = ({
 						</span>,
 					]
 				}
+
+				// UIDesignCanvas: beautified display
+				if (isUIDesignCanvas) {
+					return [
+						isMcpServerResponding ? (
+							<ProgressIndicator />
+						) : (
+							<span style={{ fontSize: "16px", marginBottom: "-1.5px" }}>🖼️</span>
+						),
+						<span style={{ color: normalColor, fontWeight: "bold" }}>
+							Designer 正在設計 UI
+						</span>,
+					]
+				}
+
 				return [
 					isMcpServerResponding ? (
 						<ProgressIndicator />
@@ -1730,6 +1761,22 @@ export const ChatRowContent = ({
 						useMcpServer.serverName === "figma-write" ||
 						useMcpServer.serverName?.toLowerCase().includes("figma")
 
+					// Check if this is MCP-UI server - completely hide (only HTML renders)
+					const isMcpUiServer =
+						useMcpServer.serverName === "MCP-UI" ||
+						useMcpServer.serverName?.toLowerCase().includes("mcp-ui") ||
+						useMcpServer.serverName?.toLowerCase().includes("mcp_ui")
+
+					// Check if this is UIDesignCanvas server - use beautified display
+					const isUIDesignCanvas =
+						useMcpServer.serverName === "UIDesignCanvas" ||
+						useMcpServer.serverName?.toLowerCase().includes("uidesigncanvas")
+
+					// MCP-UI: completely hide the tool block, only HTML output will be visible
+					if (isMcpUiServer && useMcpServer.type === "use_mcp_tool") {
+						return null
+					}
+
 					// Simplified display for Figma tools
 					if (isFigmaServer && useMcpServer.type === "use_mcp_tool") {
 						return (
@@ -1747,6 +1794,54 @@ export const ChatRowContent = ({
 									</div>
 									<div className="text-xs text-vscode-descriptionForeground mt-1 ml-7">
 										正在執行 Figma 操作...
+									</div>
+								</div>
+							</>
+						)
+					}
+
+					// Beautified display for UIDesignCanvas tools
+					if (isUIDesignCanvas && useMcpServer.type === "use_mcp_tool") {
+						// Format tool name for display
+						const formatToolName = (name: string | undefined) => {
+							if (!name) return "設計中"
+							const toolLabels: Record<string, string> = {
+								"create_frame": "創建框架",
+								"create_text": "添加文字",
+								"create_button": "添加按鈕",
+								"create_card": "添加卡片",
+								"create_input": "添加輸入框",
+								"create_rectangle": "添加矩形",
+								"create_ellipse": "添加橢圓",
+								"create_image": "添加圖片",
+								"update_element": "更新元素",
+								"delete_element": "刪除元素",
+								"move_element": "移動元素",
+								"resize_element": "調整大小",
+								"set_style": "設定樣式",
+								"set_layout": "設定佈局",
+								"get_design": "讀取設計",
+								"get_element": "獲取元素",
+								"find_elements": "搜尋元素",
+								"new_design": "新建設計",
+								"export_html": "匯出 HTML",
+								"export_json": "匯出 JSON",
+							}
+							return toolLabels[name] || name.replace(/_/g, " ")
+						}
+
+						return (
+							<>
+								<div style={headerStyle}>
+									{icon}
+									{title}
+								</div>
+								<div className="w-full bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-500/30 rounded-md p-3 mt-2">
+									<div className="flex items-center gap-2 text-vscode-foreground">
+										<span className="text-lg">🖼️</span>
+										<span className="font-medium text-purple-300">
+											{formatToolName(useMcpServer.toolName)}
+										</span>
 									</div>
 								</div>
 							</>

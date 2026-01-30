@@ -69,7 +69,7 @@ function getAgentContext(modeSlug: string): { name: string; personality: string 
 		case "sentinel-builder":
 			return {
 				name: "Builder（工程師）",
-				personality: "這傢伙寫 code 寫了十年，但有時候還是會問一些基礎問題",
+				personality: "這傢伙寫 code 寫了十六年，但有時候還是會問一些基礎問題",
 			}
 		case "sentinel-designer":
 			return {

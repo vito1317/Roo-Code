@@ -650,14 +650,23 @@ async function handleTool(name: string, args: any): Promise<any> {
     }
 
     case "create_text": {
-      // Auto-stack text elements if no position specified and has parent
+      // Auto-stack text elements if no valid position specified and has parent
       let textX = args.x;
       let textY = args.y;
       
-      if (args.parentId && (textX === undefined || textY === undefined)) {
+      // Log incoming args for debugging
+      console.log(`[McpServer] create_text called with args:`, JSON.stringify(args));
+      
+      // Check if we need auto-positioning (y is missing, undefined, null, or 0 without explicit intent)
+      const needsAutoY = args.parentId && (textY === undefined || textY === null || (textY === 0 && !args.explicitY));
+      const needsAutoX = args.parentId && (textX === undefined || textX === null);
+      
+      if (needsAutoY || needsAutoX) {
         // Find parent and calculate next available position
         const design = store.getDesign();
         const parent = findElementById(design.elements || [], args.parentId);
+        console.log(`[McpServer] Parent found:`, parent ? parent.id : 'null', 'children:', parent?.children?.length || 0);
+        
         if (parent && parent.children && parent.children.length > 0) {
           // Stack below existing children
           let maxBottom = 16; // Start with padding
@@ -669,13 +678,14 @@ async function handleTool(name: string, args: any): Promise<any> {
               maxBottom = childBottom;
             }
           }
-          if (textX === undefined) textX = 16; // Default padding
-          if (textY === undefined) textY = maxBottom + 12; // 12px gap
-          console.log(`[McpServer] Auto-stacking text at y=${textY} (after ${parent.children.length} siblings)`);
+          if (needsAutoX) textX = 16; // Default padding
+          if (needsAutoY) textY = maxBottom + 12; // 12px gap
+          console.log(`[McpServer] ✅ Auto-stacking text "${args.content?.substring(0,10)}..." at y=${textY} (after ${parent.children.length} siblings, maxBottom=${maxBottom})`);
         } else {
           // First child - use padding
-          if (textX === undefined) textX = 16;
-          if (textY === undefined) textY = 16;
+          if (needsAutoX) textX = 16;
+          if (needsAutoY) textY = 16;
+          console.log(`[McpServer] ✅ First child text at y=${textY}`);
         }
       }
       

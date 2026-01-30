@@ -82,6 +82,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			}
 
 			// CRITICAL: Only Designer agent can use design-related MCP servers!
+			// Exception: Design Review can use READ-ONLY tools from UIDesignCanvas
 			// Check if this is a design server that requires Designer agent
 			const designServers = ["uidesigncanvas", "talktofigma", "figma-write", "penpot"]
 			const serverNameLower = serverName.toLowerCase()
@@ -92,13 +93,44 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				const currentMode = task.taskMode || ""
 				const isDesigner = currentMode.includes("designer") || 
 					currentMode === "sentinel-designer"
+				const isDesignReview = currentMode.includes("design-review") || 
+					currentMode === "sentinel-design-review"
 				
-				if (!isDesigner) {
+				// Design Review can use read-only tools from UIDesignCanvas
+				const uiDesignCanvasReadOnlyTools = ["get_design", "get_element", "list_elements"]
+				const isUIDesignCanvas = serverNameLower.includes("uidesigncanvas")
+				const isReadOnlyTool = uiDesignCanvasReadOnlyTools.includes(resolvedToolName.toLowerCase())
+				
+				// Allow if:
+				// 1. User is Designer (full access)
+				// 2. User is Design Review AND server is UIDesignCanvas AND tool is read-only
+				const hasAccess = isDesigner || 
+					(isDesignReview && isUIDesignCanvas && isReadOnlyTool)
+				
+				if (!hasAccess) {
 					task.consecutiveMistakeCount++
 					task.recordToolError("use_mcp_tool")
 					task.didToolFailInCurrentTurn = true
 					
-					const errorMessage = `❌ 錯誤：設計工具 "${serverName}" 只能由 Designer Agent 使用！
+					let errorMessage: string
+					if (isDesignReview && isUIDesignCanvas && !isReadOnlyTool) {
+						errorMessage = `❌ 錯誤：Design Review 只能使用 UIDesignCanvas 的查看工具！
+
+🔍 你目前的角色是：${currentMode}
+⚠️ 你嘗試使用的工具：${resolvedToolName}
+
+✅ Design Review 可用的工具：
+   - get_design（查看整體設計結構）
+   - get_element（查看特定元素）
+   - list_elements（列出所有元素）
+
+❌ 以下工具需要 Designer Agent：
+   - create_frame, create_text, create_button 等創建工具
+   - update_element, delete_element 等修改工具
+
+💡 如需修改 UI，請使用 handoff_context 交接給 Designer Agent。`
+					} else {
+						errorMessage = `❌ 錯誤：設計工具 "${serverName}" 只能由 Designer Agent 使用！
 
 🚫 你目前的角色是：${currentMode || "未知"}
 🎨 設計工具包括：UIDesignCanvas, TalkToFigma, figma-write, Penpot 等
@@ -120,6 +152,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 
 ❌ Architect/Builder/QA 都不能直接使用設計工具！
 ✅ 只有 Designer 負責 UI 設計！`
+					}
 					
 					await task.say("error", errorMessage)
 					pushToolResult(formatResponse.toolError(errorMessage))

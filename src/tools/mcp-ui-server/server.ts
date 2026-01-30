@@ -486,6 +486,17 @@ function renderCodeBlock(args: any): string {
 
 function renderList(args: any): string {
   const { items, ordered = false, title, icon } = args;
+  
+  // Validate items is an array
+  if (!items || !Array.isArray(items)) {
+    return `
+      <div class="mcp-ui">
+        ${getStyles()}
+        <div style="color: #ff6b6b; padding: 8px;">Error: items must be an array</div>
+      </div>
+    `;
+  }
+  
   const tag = ordered ? "ol" : "ul";
   const itemsHtml = items.map((item: string) =>
     `<li>${icon && !ordered ? `${icon} ` : ""}${item}</li>`
@@ -499,6 +510,7 @@ function renderList(args: any): string {
     </div>
   `;
 }
+
 
 function renderBadge(args: any): string {
   const { text, variant = "default", size = "medium" } = args;
