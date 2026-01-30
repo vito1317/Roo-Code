@@ -751,7 +751,7 @@ export class SpecWorkflowPanelManager {
 								<div class="task-title">\${task.title}</div>
 							</div>
 							\${task.complexity ? '<span class="task-complexity">' + task.complexity + '</span>' : ''}
-							\${task.status === 'pending' ? '<button class="task-btn" onclick="startTask(\\'\'' + task.id + '\\'\\')">▶ Run</button>' : ''}
+							\${task.status === 'pending' ? '<button class="task-btn" onclick="startTask(\\'' + task.id + '\\')">▶ Run</button>' : ''}
 							\${task.status === 'in-progress' ? '<span class="task-complexity" style="background:#f59e0b">Running...</span>' : ''}
 						</div>
 					\`;
