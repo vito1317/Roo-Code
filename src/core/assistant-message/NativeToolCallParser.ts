@@ -644,6 +644,52 @@ export class NativeToolCallParser {
 				}
 				break
 
+			// Sentinel Edition tools - accept string parameters for JSON arrays
+			case "parallel_mcp_calls":
+				if (partialArgs.server !== undefined) {
+					nativeArgs = {
+						server: partialArgs.server,
+						calls: typeof partialArgs.calls === "string" ? partialArgs.calls : JSON.stringify(partialArgs.calls),
+					}
+				}
+				break
+
+			case "parallel_ui_tasks":
+				if (partialArgs.tasks !== undefined) {
+					nativeArgs = {
+						tasks: typeof partialArgs.tasks === "string" ? partialArgs.tasks : JSON.stringify(partialArgs.tasks),
+						containerFrame: partialArgs.containerFrame,
+					}
+				}
+				break
+
+			case "handoff_context":
+				if (partialArgs.context_json !== undefined) {
+					nativeArgs = {
+						notes: partialArgs.notes,
+						context_json: typeof partialArgs.context_json === "string" ? partialArgs.context_json : JSON.stringify(partialArgs.context_json),
+					}
+				}
+				break
+
+			case "adjust_layout":
+				if (partialArgs.layout !== undefined) {
+					nativeArgs = {
+						layout: partialArgs.layout,
+						columns: partialArgs.columns,
+						gap: partialArgs.gap,
+						gapX: partialArgs.gapX,
+						gapY: partialArgs.gapY,
+						startX: partialArgs.startX,
+						startY: partialArgs.startY,
+						within: partialArgs.within,
+						nodeIds: partialArgs.nodeIds,
+						excludeTypes: partialArgs.excludeTypes,
+						sortBy: partialArgs.sortBy,
+					}
+				}
+				break
+
 			default:
 				break
 		}
@@ -994,6 +1040,52 @@ export class NativeToolCallParser {
 							mode: args.mode,
 							message: args.message,
 							todos: args.todos,
+						} as NativeArgsFor<TName>
+					}
+					break
+
+				// Sentinel Edition tools - accept string parameters for JSON arrays
+				case "parallel_mcp_calls":
+					if (args.server !== undefined) {
+						nativeArgs = {
+							server: args.server,
+							calls: typeof args.calls === "string" ? args.calls : JSON.stringify(args.calls),
+						} as NativeArgsFor<TName>
+					}
+					break
+
+				case "parallel_ui_tasks":
+					if (args.tasks !== undefined) {
+						nativeArgs = {
+							tasks: typeof args.tasks === "string" ? args.tasks : JSON.stringify(args.tasks),
+							containerFrame: args.containerFrame,
+						} as NativeArgsFor<TName>
+					}
+					break
+
+				case "handoff_context":
+					if (args.context_json !== undefined) {
+						nativeArgs = {
+							notes: args.notes,
+							context_json: typeof args.context_json === "string" ? args.context_json : JSON.stringify(args.context_json),
+						} as NativeArgsFor<TName>
+					}
+					break
+
+				case "adjust_layout":
+					if (args.layout !== undefined) {
+						nativeArgs = {
+							layout: args.layout,
+							columns: args.columns,
+							gap: args.gap,
+							gapX: args.gapX,
+							gapY: args.gapY,
+							startX: args.startX,
+							startY: args.startY,
+							within: args.within,
+							nodeIds: args.nodeIds,
+							excludeTypes: args.excludeTypes,
+							sortBy: args.sortBy,
 						} as NativeArgsFor<TName>
 					}
 					break

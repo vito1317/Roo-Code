@@ -478,25 +478,75 @@ function renderButton(args: any): string {
 }
 
 function renderCard(args: any): string {
-  const { title, content, footer, variant = "default" } = args;
+  const { title, content, footer, variant = "default", collapsible = false } = args;
+  
+  // Generate unique ID for collapsible card
+  const cardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  const toggleScript = collapsible ? `
+    <script>
+      (function() {
+        var card = document.getElementById('${cardId}');
+        var header = card.querySelector('.mcp-card-header');
+        var body = card.querySelector('.mcp-card-body');
+        var footerEl = card.querySelector('.mcp-card-footer');
+        var toggle = card.querySelector('.mcp-card-toggle');
+        var isCollapsed = false;
+        
+        header.style.cursor = 'pointer';
+        header.onclick = function() {
+          isCollapsed = !isCollapsed;
+          body.style.display = isCollapsed ? 'none' : 'block';
+          if (footerEl) footerEl.style.display = isCollapsed ? 'none' : 'block';
+          toggle.textContent = isCollapsed ? '▶' : '▼';
+        };
+      })();
+    </script>
+  ` : '';
+  
+  const toggleIcon = collapsible ? `<span class="mcp-card-toggle" style="float:right;font-size:12px;opacity:0.7;">▼</span>` : '';
+  
   return `
     <div class="mcp-ui">
       ${getStyles()}
-      <div class="mcp-card ${variant}">
-        <div class="mcp-card-header">${title}</div>
+      <div class="mcp-card ${variant}" id="${cardId}">
+        <div class="mcp-card-header">${toggleIcon}${title}</div>
         <div class="mcp-card-body">${content}</div>
         ${footer ? `<div class="mcp-card-footer">${footer}</div>` : ""}
       </div>
+      ${toggleScript}
     </div>
   `;
 }
 
 function renderTable(args: any): string {
-  const { headers, rows, caption, striped = true, compact = false } = args;
+  let { headers, rows, caption, striped = true, compact = false } = args;
+  
+  // Parse stringified arrays from LLM
+  if (typeof headers === 'string') {
+    try {
+      headers = JSON.parse(headers);
+    } catch (e) {
+      return `<div class="mcp-ui">${getStyles()}<div style="color: #ff6b6b; padding: 8px;">Error: Invalid headers format</div></div>`;
+    }
+  }
+  if (typeof rows === 'string') {
+    try {
+      rows = JSON.parse(rows);
+    } catch (e) {
+      return `<div class="mcp-ui">${getStyles()}<div style="color: #ff6b6b; padding: 8px;">Error: Invalid rows format</div></div>`;
+    }
+  }
+  
+  if (!Array.isArray(headers) || !Array.isArray(rows)) {
+    return `<div class="mcp-ui">${getStyles()}<div style="color: #ff6b6b; padding: 8px;">Error: headers and rows must be arrays</div></div>`;
+  }
+  
   const headerHtml = headers.map((h: string) => `<th>${h}</th>`).join("");
   const rowsHtml = rows.map((row: string[]) =>
     `<tr>${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`
   ).join("");
+
 
   return `
     <div class="mcp-ui">
@@ -565,7 +615,21 @@ function renderCodeBlock(args: any): string {
 }
 
 function renderList(args: any): string {
-  const { items, ordered = false, title, icon } = args;
+  let { items, ordered = false, title, icon } = args;
+  
+  // Parse stringified array from LLM
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch (e) {
+      return `
+        <div class="mcp-ui">
+          ${getStyles()}
+          <div style="color: #ff6b6b; padding: 8px;">Error: Invalid items format</div>
+        </div>
+      `;
+    }
+  }
   
   // Validate items is an array
   if (!items || !Array.isArray(items)) {
@@ -575,6 +639,11 @@ function renderList(args: any): string {
         <div style="color: #ff6b6b; padding: 8px;">Error: items must be an array</div>
       </div>
     `;
+  }
+  
+  // Handle ordered as string
+  if (typeof ordered === 'string') {
+    ordered = ordered === 'true';
   }
   
   const tag = ordered ? "ol" : "ul";

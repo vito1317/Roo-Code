@@ -18,6 +18,28 @@ export interface PlanTask {
 }
 
 /**
+ * Spec Mode Task Context
+ * Context from tasks.md passed to FSM for spec-driven development
+ */
+export interface SpecTaskContext {
+	/** Task ID from tasks.md */
+	taskId: string
+	/** Task title */
+	title: string
+	/** Task description */
+	description?: string
+	/** Acceptance criteria from spec */
+	acceptanceCriteria?: string[]
+	/** Estimated complexity (1-5) */
+	complexity?: number
+	/** Source spec file (requirements.md, design.md) */
+	specFile?: string
+	/** Dependencies on other tasks */
+	dependencies?: string[]
+}
+
+
+/**
  * Risk identified by architect
  */
 export interface IdentifiedRisk {
@@ -262,6 +284,9 @@ export interface HandoffContext {
 
 	// Dynamic phase instructions (injected at handoff)
 	nextPhaseInstructions?: string
+
+	// Spec Mode task context (for spec-driven development)
+	specTaskContext?: SpecTaskContext
 
 	// State
 	status: "pending" | "in_progress" | "completed" | "failed" | "blocked"

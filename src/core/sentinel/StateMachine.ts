@@ -419,6 +419,97 @@ export class SentinelStateMachine {
 	}
 
 	/**
+	 * Spec task completion callback (set by TaskExecutor)
+	 */
+	private onSpecTaskCompleteCallback?: (result: { success: boolean; taskId: string }) => void
+
+	/**
+	 * Set callback for Spec task completion
+	 */
+	setOnSpecTaskComplete(callback: (result: { success: boolean; taskId: string }) => void): void {
+		this.onSpecTaskCompleteCallback = callback
+	}
+
+	/**
+	 * Start FSM from a Spec Mode task
+	 * This initializes the FSM with task context and runs the complete pipeline:
+	 * Architect → Designer → Review → Builder → QA → Sentinel → Final Review
+	 */
+	async startFromSpecTask(specTaskContext: import("./HandoffContext").SpecTaskContext): Promise<TransitionResult> {
+		if (this.currentState !== AgentState.IDLE) {
+			return {
+				success: false,
+				fromState: this.currentState,
+				toState: this.currentState,
+				error: "FSM already active. Call reset() first.",
+			}
+		}
+
+		console.log(`[SentinelFSM] Starting from Spec Task: ${specTaskContext.taskId} - ${specTaskContext.title}`)
+
+		// Create initial context with Spec task info
+		this.currentContext = createHandoffContext(AgentState.IDLE, AgentState.ARCHITECT)
+		this.currentContext.specTaskContext = specTaskContext
+
+		// Build initial architect instructions from task info
+		const taskInstructions = this.buildArchitectInstructionsFromSpec(specTaskContext)
+		this.currentContext.nextPhaseInstructions = taskInstructions
+
+		// Start the workflow
+		return this.transition(AgentState.ARCHITECT)
+	}
+
+	/**
+	 * Build Architect instructions from Spec task context
+	 */
+	private buildArchitectInstructionsFromSpec(spec: import("./HandoffContext").SpecTaskContext): string {
+		const lines: string[] = []
+		
+		lines.push("## 📋 Spec Mode Task Execution")
+		lines.push("")
+		lines.push(`### Task: ${spec.title}`)
+		
+		if (spec.description) {
+			lines.push("")
+			lines.push(`**Description:** ${spec.description}`)
+		}
+		
+		if (spec.acceptanceCriteria && spec.acceptanceCriteria.length > 0) {
+			lines.push("")
+			lines.push("**Acceptance Criteria:**")
+			for (const criteria of spec.acceptanceCriteria) {
+				lines.push(`- ${criteria}`)
+			}
+		}
+		
+		if (spec.complexity) {
+			lines.push("")
+			lines.push(`**Complexity:** ${spec.complexity}/5`)
+		}
+		
+		if (spec.specFile) {
+			lines.push("")
+			lines.push(`**Source Spec:** \`${spec.specFile}\``)
+		}
+		
+		lines.push("")
+		lines.push("---")
+		lines.push("")
+		lines.push("**IMPORTANT:** This task is from the project's `.specs/tasks.md` file.")
+		lines.push("Complete this task following the full Sentinel pipeline:")
+		lines.push("1. 規劃 (Architect) → Analyze requirements and create implementation plan")
+		lines.push("2. 畫UI (Designer) → Create UI mockups if needed")
+		lines.push("3. Review → Verify design quality")
+		lines.push("4. Builder → Implement the feature")
+		lines.push("5. Code Review → Verify code quality")
+		lines.push("6. 資安審核 (Sentinel) → Security audit")
+		lines.push("7. Final Review → Final sign-off")
+		
+		return lines.join("\n")
+	}
+
+
+	/**
 	 * Handle agent completion - called when attempt_completion is intercepted
 	 */
 	async handleAgentCompletion(handoffData: Partial<HandoffContext>): Promise<TransitionResult> {
@@ -940,6 +1031,13 @@ export class SentinelStateMachine {
 			if (task) {
 				task.clearSentinelAgentMemory()
 				console.log("[SentinelFSM] Cleared agent memory on workflow completion")
+			}
+
+			// Trigger Spec task completion callback if set (for TaskExecutor auto-advance)
+			if (this.onSpecTaskCompleteCallback && this.currentContext.specTaskContext) {
+				const specTaskId = this.currentContext.specTaskContext.taskId
+				console.log(`[SentinelFSM] Triggering Spec task completion callback for task: ${specTaskId}`)
+				this.onSpecTaskCompleteCallback({ success: true, taskId: specTaskId })
 			}
 		}
 

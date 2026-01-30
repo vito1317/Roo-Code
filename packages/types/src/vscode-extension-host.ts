@@ -113,6 +113,9 @@ export interface ExtensionMessage {
 		| "clearMcpUiHtml"
 		| "folderSelected"
 		| "skills"
+		// Spec Mode types
+		| "specsStatus"
+		| "specTasksList"
 	text?: string
 	html?: string // MCP-UI HTML output
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -224,6 +227,14 @@ export interface ExtensionMessage {
 	tools?: SerializedCustomToolDefinition[] // For customToolsResult
 	modes?: { slug: string; name: string }[] // For modes response
 	skills?: SkillMetadata[] // For skills response
+	// For specTasksList: array of spec tasks
+	tasks?: Array<{
+		id: string
+		title: string
+		description?: string
+		status: "pending" | "in-progress" | "done"
+		complexity?: string
+	}>
 	aggregatedCosts?: {
 		// For taskWithAggregatedCosts response
 		totalCost: number
@@ -648,6 +659,15 @@ export interface WebviewMessage {
 		| "createSkill"
 		| "deleteSkill"
 		| "openSkillFile"
+		// Spec Mode messages
+		| "requestSpecsStatus"
+		| "runAllSpecTasks"
+		| "updateSpecs"
+		| "openSpecFile"
+		| "requestSpecTasks"
+		| "startSpecTask"
+		| "createSpecsFromPrompt"
+		| "openSpecWorkflowPanel"
 	text?: string
 	agentSlug?: string // Agent slug for TTS voice selection (e.g., "sentinel-architect")
 	editedMessageContent?: string
@@ -749,6 +769,9 @@ export interface WebviewMessage {
 	worktreeForce?: boolean
 	worktreeNewWindow?: boolean
 	worktreeIncludeContent?: string
+	// Spec Mode properties
+	file?: string // For openSpecFile
+	taskId?: string // For startSpecTask
 }
 
 export interface RequestOpenAiCodexRateLimitsMessage {

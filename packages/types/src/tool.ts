@@ -45,6 +45,7 @@ export const toolNames = [
 	"parallel_ui_tasks",
 	"parallel_mcp_calls",
 	"adjust_layout",
+	"run_all_spec_tasks",
 ] as const
 
 export const toolNamesSchema = z.enum(toolNames)

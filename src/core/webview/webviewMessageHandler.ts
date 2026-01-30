@@ -64,6 +64,7 @@ import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
+import { SpecWorkflowPanelManager } from "./SpecWorkflowPanelManager"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -3765,7 +3766,141 @@ export const webviewMessageHandler = async (
 			break
 		}
 
+		// Spec Mode Workflow Handlers
+		case "openSpecWorkflowPanel": {
+			// Open the Spec Workflow Panel in editor area
+			const specPanel = SpecWorkflowPanelManager.getInstance(provider)
+			await specPanel.show()
+			break
+		}
+
+		case "requestSpecsStatus": {
+			// Check .specs directory for spec files existence
+			const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+			if (workspacePath) {
+				const specsDir = path.join(workspacePath, ".specs")
+				const fs = require("fs")
+				const requirementsExists = fs.existsSync(path.join(specsDir, "requirements.md"))
+				const designExists = fs.existsSync(path.join(specsDir, "design.md"))
+				const tasksExists = fs.existsSync(path.join(specsDir, "tasks.md"))
+
+				await provider.postMessageToWebview({
+					type: "specsStatus",
+					values: {
+						requirements: requirementsExists,
+						design: designExists,
+						tasks: tasksExists,
+					},
+				})
+			}
+			break
+		}
+
+		case "openSpecFile": {
+			const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+			if (workspacePath && message.file) {
+				const filePath = path.join(workspacePath, ".specs", message.file)
+				const uri = vscode.Uri.file(filePath)
+				await vscode.window.showTextDocument(uri)
+			}
+			break
+		}
+
+		case "runAllSpecTasks": {
+			// Trigger TaskExecutor to run all tasks with Sentinel pipeline
+			const currentTask = provider.getCurrentTask()
+			if (currentTask) {
+				// Send message to start running all tasks
+				await currentTask.say("text", "🚀 Starting Spec Mode task execution pipeline...\n\nI will now execute all tasks from `tasks.md` in sequence, using the Sentinel multi-agent pipeline for each task.")
+			} else {
+				// No active task - prompt user to start a task first
+				vscode.window.showInformationMessage(
+					t("common:info.start_chat_first") || "Please start a chat first, then use this button to run all spec tasks."
+				)
+			}
+			break
+		}
+
+		case "updateSpecs": {
+			// Trigger specs refresh/update
+			const task = provider.getCurrentTask()
+			if (task) {
+				await task.say("text", "🔄 Reviewing and updating specifications...\n\nPlease describe what changes you'd like to make to the requirements, design, or tasks.")
+			}
+			break
+		}
+
+		case "requestSpecTasks": {
+			// Read and parse tasks from tasks.md
+			try {
+				const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+				if (workspacePath) {
+					const fsSync = require("fs")
+					const tasksPath = path.join(workspacePath, ".specs", "tasks.md")
+					if (fsSync.existsSync(tasksPath)) {
+						const content = fsSync.readFileSync(tasksPath, "utf-8")
+						// Parse tasks from markdown content
+						const tasks: Array<{ id: string; title: string; description?: string; status: "pending" | "in-progress" | "done"; complexity?: string }> = []
+						const lines = content.split("\n")
+						let taskCounter = 0
+						for (const line of lines) {
+							// Match task lines like "- [x] Task title" or "- [ ] Task title (complexity: high)"
+							const match = line.match(/^[\s-]*\[([ x\/])\]\s*(.+)$/i)
+							if (match) {
+								taskCounter++
+								const statusChar = match[1].toLowerCase()
+								const taskText = match[2].trim()
+								const complexityMatch = taskText.match(/\(complexity:\s*(low|medium|high)\)/i)
+
+								tasks.push({
+									id: `task-${taskCounter}`,
+									title: taskText.replace(/\(complexity:\s*(low|medium|high)\)/i, "").trim(),
+									status: statusChar === "x" ? "done" : statusChar === "/" ? "in-progress" : "pending",
+									complexity: complexityMatch ? complexityMatch[1] : undefined,
+								})
+							}
+						}
+						await provider.postMessageToWebview({
+							type: "specTasksList",
+							tasks,
+						})
+					} else {
+						await provider.postMessageToWebview({
+							type: "specTasksList",
+							tasks: [],
+						})
+					}
+				}
+			} catch (error) {
+				console.error("Error parsing spec tasks:", error)
+				await provider.postMessageToWebview({
+					type: "specTasksList",
+					tasks: [],
+				})
+			}
+			break
+		}
+
+
+		case "startSpecTask": {
+			// Start a specific task via Sentinel pipeline
+			const currentTask = provider.getCurrentTask()
+			const taskId = message.taskId
+			if (!taskId) break
+			
+			if (currentTask) {
+				await currentTask.say("text", `▶ Starting task **${taskId}** via Sentinel pipeline...\n\nThe task will go through: Architect → Designer → Builder → QA → Security`)
+			} else {
+				// No active task - prompt user to start a task first
+				vscode.window.showInformationMessage(
+					t("common:info.start_chat_first") || `Please start a chat first, then use this button to run task ${taskId}.`
+				)
+			}
+			break
+		}
+
 		default: {
+
 			// console.log(`Unhandled message type: ${message.type}`)
 			//
 			// Currently unhandled:

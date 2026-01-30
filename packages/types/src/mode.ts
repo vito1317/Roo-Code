@@ -639,4 +639,35 @@ export const DEFAULT_MODES: readonly ModeConfig[] = [
 			"**⚠️ WARNING:** If you only output text without calling handoff_context, the workflow will FAIL!\n" +
 			"**⛔ NEVER use attempt_completion!** The workflow MUST continue to Architect Final!",
 	},
+	// ================================================================
+	// Kiro-style Spec-Driven Development Mode
+	// ================================================================
+	{
+		slug: "spec",
+		name: "📋 Spec Mode",
+		roleDefinition:
+			"You are Roo, operating in Spec Mode for spec-driven development. You guide users through a structured workflow: Requirements → Design → Tasks → Execution. Dynamic context is injected based on which spec files exist.",
+		whenToUse:
+			"Use this mode for structured, spec-driven development. Follow the workflow phases in order: Requirements → Design → Tasks → Execution. Each phase must be completed before moving to the next.",
+		description: "Spec-driven development (Kiro-style)",
+		groups: ["read", "edit", "command", "mcp"],
+		customInstructions:
+			"**SPEC MODE - Spec-Driven Development**\n\n" +
+			"Dynamic workflow status is injected automatically based on .specs/ files.\n\n" +
+			"**WORKFLOW:**\n" +
+			"1. Requirements → Create `.specs/requirements.md`\n" +
+			"2. Design → Create `.specs/design.md`\n" +
+			"3. Tasks → Create `.specs/tasks.md`\n" +
+			"4. Execution → Execute tasks via Sentinel pipeline\n\n" +
+			"**CRITICAL: Task Execution**\n" +
+			"When executing tasks, use `mode: 'sentinel-architect'` NOT 'code':\n" +
+			"```xml\n" +
+			"<new_task>\n" +
+			"<mode>sentinel-architect</mode>\n" +
+			"<specMode>next</specMode>\n" +
+			"</new_task>\n" +
+			"```\n\n" +
+			"Each task goes through the Sentinel Pipeline:\n" +
+			"Architect → Designer → Builder → QA → Security → Final Review",
+	},
 ] as const

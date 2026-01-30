@@ -25,7 +25,7 @@ const AGENT_CONFIG = {
 		textColor: "text-blue-400",
 		icon: "🟦",
 		label: "Architect",
-		statusMessage: "📐 Designing architecture...",
+		statusMessage: "📐 規劃架構中...",
 		spinning: false,
 	},
 	DESIGNER: {

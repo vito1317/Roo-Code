@@ -313,10 +313,25 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 				return toolName
 			}
 
-			// Show approval message
-			const callSummary = parsedCalls
-				.map((c, i) => `${i + 1}. ${mapToolName(c.tool)}(${JSON.stringify(c.args).substring(0, 50)}...)`)
-				.join("\n")
+			// Build a beautified call summary - show tool names and key args only
+			const formatToolCall = (call: { tool: string; args: Record<string, unknown> }, index: number): string => {
+				const mappedTool = mapToolName(call.tool)
+				// Extract just the name/id from args for a cleaner display
+				const nameArg = call.args?.name || call.args?.id || call.args?.node_id || ""
+				const nameStr = nameArg ? ` "${String(nameArg).substring(0, 20)}${String(nameArg).length > 20 ? "..." : ""}"` : ""
+				return `   ${index + 1}. **${mappedTool}**${nameStr}`
+			}
+
+			// Create compact summary (show first 5 calls, then "... and N more")
+			const maxDisplayCalls = 5
+			const displayCalls = parsedCalls.slice(0, maxDisplayCalls)
+			const remainingCount = parsedCalls.length - maxDisplayCalls
+
+			const callSummaryLines = displayCalls.map((c, i) => formatToolCall(c, i))
+			if (remainingCount > 0) {
+				callSummaryLines.push(`   ... 還有 ${remainingCount} 個操作`)
+			}
+			const callSummary = callSummaryLines.join("\n")
 
 			const toolMessage = JSON.stringify({
 				tool: "parallelMcpCalls",
@@ -325,7 +340,8 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 				calls: callSummary,
 			})
 
-			await task.say("text", `🔄 Executing ${parsedCalls.length} MCP calls in parallel on "${actualServer}":\n${callSummary}`)
+			// Use text with beautified format for cleaner display
+			await task.say("text", `🔄 正在並行執行 **${parsedCalls.length}** 個 ${actualServer} 操作...\n${callSummary}`)
 
 			const didApprove = await askApproval("tool", toolMessage)
 			if (!didApprove) {

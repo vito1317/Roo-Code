@@ -40,6 +40,7 @@ import { handoffContextTool } from "../tools/HandoffContextTool"
 import { startBackgroundServiceTool } from "../tools/StartBackgroundServiceTool"
 import { parallelUITasksTool } from "../tools/ParallelUITasksTool"
 import { parallelMcpCallsTool } from "../tools/ParallelMcpCallsTool"
+import { runAllSpecTasksTool } from "../tools/RunAllSpecTasksTool"
 import { adjustLayoutTool } from "../tools/AdjustLayoutTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
@@ -995,6 +996,15 @@ export async function presentAssistantMessage(cline: Task) {
 				case "new_task":
 					await checkpointSaveAndMark(cline)
 					await newTaskTool.handle(cline, block as ToolUse<"new_task">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+						toolCallId: block.id,
+					})
+					break
+				case "run_all_spec_tasks":
+					await checkpointSaveAndMark(cline)
+					await runAllSpecTasksTool.handle(cline, block as ToolUse<"run_all_spec_tasks">, {
 						askApproval,
 						handleError,
 						pushToolResult,

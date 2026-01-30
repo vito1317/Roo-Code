@@ -503,18 +503,22 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 				`[ParallelUI] Dynamic layout: ${GRID_COLUMNS} columns (max by width: ${maxColumnsByWidth}), cell=${ADJUSTED_CELL_WIDTH}x${CELL_HEIGHT}px, element=${adjustedTaskWidth}x${avgTaskHeight}px, grid=${gridWidth}x${gridHeight}px, frameWidth=${estimatedFrameWidth}, tasks=${taskCount}`,
 			)
 
-			// Show approval message with position and color info
-			const taskSummary = parsedTasks
-				.map((t, i) => {
-					const pos = t.position || {
-						x: START_X + (i % GRID_COLUMNS) * ADJUSTED_CELL_WIDTH,
-						y: START_Y + Math.floor(i / GRID_COLUMNS) * CELL_HEIGHT,
-					}
-					const colorInfo = t.designSpec?.colors?.[0] ? ` 🎨 ${t.designSpec.colors[0]}` : ""
-					const textInfo = t.designSpec?.text ? ` "${t.designSpec.text}"` : ""
-					return `${i + 1}. [${t.id}] ${t.description}${textInfo}${colorInfo} @ (${pos.x}, ${pos.y})`
-				})
-				.join("\n")
+			// Show approval message with compact summary
+			const maxDisplayTasks = 4
+			const summaryDisplayTasks = parsedTasks.slice(0, maxDisplayTasks)
+			const remainingCount = parsedTasks.length - maxDisplayTasks
+
+			const taskSummaryLines = summaryDisplayTasks.map((t, i) => {
+				// Just show id and description, omit raw coords and colors
+				const textInfo = t.designSpec?.text ? ` 「${t.designSpec.text}」` : ""
+				return `   ${i + 1}. **${t.id}** - ${t.description.substring(0, 30)}${t.description.length > 30 ? "..." : ""}${textInfo}`
+			})
+
+			if (remainingCount > 0) {
+				taskSummaryLines.push(`   ... 還有 ${remainingCount} 個元素`)
+			}
+
+			const taskSummary = taskSummaryLines.join("\n")
 
 			const toolMessage = JSON.stringify({
 				tool: "parallelUITasks",
@@ -524,7 +528,7 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 
 			await task.say(
 				"text",
-				`🎨 Starting ${parsedTasks.length} parallel UI drawing tasks:\n${taskSummary}\n\n📍 Grid layout: ${GRID_COLUMNS} columns, ${ADJUSTED_CELL_WIDTH}x${CELL_HEIGHT}px cells`,
+				`🎨 正在繪製 **${parsedTasks.length}** 個 UI 元素...\n${taskSummary}`,
 			)
 
 			const didApprove = await askApproval("tool", toolMessage)

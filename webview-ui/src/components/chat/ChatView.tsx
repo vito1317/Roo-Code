@@ -28,6 +28,7 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import RooHero from "@src/components/welcome/RooHero"
+import { SpecModeToggle, SpecModeInfo, SpecWorkflowBar } from "@src/components/specs"
 import RooTips from "@src/components/welcome/RooTips"
 import { StandardTooltip, Button } from "@src/components/ui"
 import { CloudUpsellDialog } from "@src/components/cloud/CloudUpsellDialog"
@@ -163,6 +164,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	>(undefined)
 	const [isCondensing, setIsCondensing] = useState<boolean>(false)
 	const [showAnnouncementModal, setShowAnnouncementModal] = useState(false)
+	const [isCanvasPreviewCollapsed, setIsCanvasPreviewCollapsed] = useState(false)
 	const everVisibleMessagesTsRef = useRef<LRUCache<number, boolean>>(
 		new LRUCache({
 			max: 100,
@@ -1803,19 +1805,26 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					)}
 				</>
 			) : (
-				<div className="flex flex-col h-full justify-center p-6 min-h-0 overflow-y-auto gap-4 relative">
-					<div className="flex flex-col items-start gap-2 justify-center h-full min-[400px]:px-6">
-						<VersionIndicator
-							onClick={() => setShowAnnouncementModal(true)}
-							className="absolute top-2 right-3 z-10"
-						/>
-						<div className="flex flex-col gap-4 w-full">
+				<div className="flex flex-col h-full min-h-0 relative">
+					{/* Spec Mode Toggle - Fixed at top */}
+					<div className="flex-shrink-0 p-4 border-b border-[var(--vscode-panel-border)]">
+						<SpecModeToggle isSpecMode={mode === "spec"} onToggle={(isSpec) => setMode(isSpec ? "spec" : "code")} />
+						{mode === "spec" && <SpecModeInfo />}
+					</div>
+					{/* Scrollable content area */}
+					<div className="flex-1 overflow-y-auto p-6">
+						<div className="flex flex-col items-start gap-4 min-[400px]:px-6">
+							<VersionIndicator
+								onClick={() => setShowAnnouncementModal(true)}
+								className="absolute top-2 right-3 z-10"
+							/>
 							<RooHero />
 							{/* Show RooTips when authenticated or when user is new */}
 							{taskHistory.length < 6 && <RooTips />}
 							{/* Everyone should see their task history if any */}
 							{taskHistory.length > 0 && <HistoryPreview />}
 						</div>
+
 						{/* Logged out users should see a one-time upsell, but not for brand new users */}
 						{!cloudIsAuthenticated && taskHistory.length >= 6 && (
 							<DismissibleUpsell
@@ -1841,12 +1850,22 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			{task && (
 				<>
 					{/* UI Design Canvas Preview - shows when Designer is active */}
-					<UIDesignCanvasPreview />
+					<UIDesignCanvasPreview
+							collapsed={isCanvasPreviewCollapsed}
+							onToggleCollapse={() => setIsCanvasPreviewCollapsed(!isCanvasPreviewCollapsed)}
+						/>
 
 					{/* Sentinel Agent Status Indicator */}
 					<div className="px-4 pt-2">
 						<SentinelAgentIndicator variant="full" />
 					</div>
+
+					{/* Spec Mode Workflow Bar - shows progress: Requirements → Design → Tasks */}
+					{mode === "spec" && (
+						<div className="px-4 py-2">
+							<SpecWorkflowBar />
+						</div>
+					)}
 					<div className="grow flex" ref={scrollContainerRef}>
 						<Virtuoso
 							ref={virtuosoRef}

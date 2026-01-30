@@ -484,7 +484,27 @@ function renderCard(args) {
   `;
 }
 function renderTable(args) {
-    const { headers, rows, caption, striped = true, compact = false } = args;
+    let { headers, rows, caption, striped = true, compact = false } = args;
+    // Parse stringified arrays from LLM
+    if (typeof headers === 'string') {
+        try {
+            headers = JSON.parse(headers);
+        }
+        catch (e) {
+            return `<div class="mcp-ui">${getStyles()}<div style="color: #ff6b6b; padding: 8px;">Error: Invalid headers format</div></div>`;
+        }
+    }
+    if (typeof rows === 'string') {
+        try {
+            rows = JSON.parse(rows);
+        }
+        catch (e) {
+            return `<div class="mcp-ui">${getStyles()}<div style="color: #ff6b6b; padding: 8px;">Error: Invalid rows format</div></div>`;
+        }
+    }
+    if (!Array.isArray(headers) || !Array.isArray(rows)) {
+        return `<div class="mcp-ui">${getStyles()}<div style="color: #ff6b6b; padding: 8px;">Error: headers and rows must be arrays</div></div>`;
+    }
     const headerHtml = headers.map((h) => `<th>${h}</th>`).join("");
     const rowsHtml = rows.map((row) => `<tr>${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("");
     return `
@@ -549,7 +569,21 @@ function renderCodeBlock(args) {
   `;
 }
 function renderList(args) {
-    const { items, ordered = false, title, icon } = args;
+    let { items, ordered = false, title, icon } = args;
+    // Parse stringified array from LLM
+    if (typeof items === 'string') {
+        try {
+            items = JSON.parse(items);
+        }
+        catch (e) {
+            return `
+        <div class="mcp-ui">
+          ${getStyles()}
+          <div style="color: #ff6b6b; padding: 8px;">Error: Invalid items format</div>
+        </div>
+      `;
+        }
+    }
     // Validate items is an array
     if (!items || !Array.isArray(items)) {
         return `
@@ -558,6 +592,10 @@ function renderList(args) {
         <div style="color: #ff6b6b; padding: 8px;">Error: items must be an array</div>
       </div>
     `;
+    }
+    // Handle ordered as string
+    if (typeof ordered === 'string') {
+        ordered = ordered === 'true';
     }
     const tag = ordered ? "ol" : "ul";
     const itemsHtml = items.map((item) => `<li>${icon && !ordered ? `${icon} ` : ""}${item}</li>`).join("");

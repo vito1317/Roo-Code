@@ -163,6 +163,8 @@ export type NativeToolArgs = {
 		excludeTypes?: string
 		sortBy?: string
 	}
+	// Sentinel Edition: handoff_context for agent transitions
+	handoff_context: { notes?: string; context_json: string }
 }
 
 /**
@@ -352,6 +354,8 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	parallel_ui_tasks: "execute parallel UI drawing tasks",
 	parallel_mcp_calls: "execute parallel MCP tool calls",
 	adjust_layout: "arrange Figma nodes in grid/row/column layout",
+	// Spec Mode
+	run_all_spec_tasks: "run all spec tasks",
 } as const
 
 // Define available tool groups.

@@ -353,6 +353,123 @@
 				text-transform: uppercase;
 			}
 
+			.tree-item-checkbox {
+				width: 14px;
+				height: 14px;
+				accent-color: var(--accent);
+				cursor: pointer;
+				margin-right: 4px;
+			}
+
+			.tree-item-name.editing {
+				background: var(--bg-tertiary);
+				border: 1px solid var(--accent);
+				border-radius: 3px;
+				padding: 2px 6px;
+				outline: none;
+			}
+
+			.tree-item-actions {
+				display: flex;
+				gap: 4px;
+				opacity: 0;
+				transition: opacity 0.15s;
+			}
+
+			.tree-item:hover .tree-item-actions {
+				opacity: 1;
+			}
+
+			.tree-item-btn {
+				background: transparent;
+				border: none;
+				color: var(--text-secondary);
+				cursor: pointer;
+				padding: 2px 4px;
+				font-size: 11px;
+				border-radius: 3px;
+			}
+
+			.tree-item-btn:hover {
+				background: var(--accent);
+				color: white;
+			}
+
+			/* Element Toolbar */
+			.element-toolbar {
+				display: flex;
+				gap: 4px;
+				padding: 8px 0;
+				margin-bottom: 8px;
+				border-bottom: 1px solid var(--border);
+			}
+
+			.element-toolbar-btn {
+				background: var(--bg-tertiary);
+				border: 1px solid var(--border);
+				color: var(--text-primary);
+				padding: 4px 8px;
+				border-radius: 4px;
+				font-size: 11px;
+				cursor: pointer;
+				transition: all 0.15s;
+				display: flex;
+				align-items: center;
+				gap: 4px;
+			}
+
+			.element-toolbar-btn:hover {
+				background: var(--accent);
+				border-color: var(--accent);
+			}
+
+			.element-toolbar-btn.danger:hover {
+				background: var(--error);
+				border-color: var(--error);
+			}
+
+			.element-toolbar-btn:disabled {
+				opacity: 0.5;
+				cursor: not-allowed;
+			}
+
+			/* Add Element Dropdown */
+			.add-element-dropdown {
+				position: relative;
+				display: inline-block;
+			}
+
+			.add-element-menu {
+				position: absolute;
+				top: 100%;
+				left: 0;
+				background: var(--bg-secondary);
+				border: 1px solid var(--border);
+				border-radius: 6px;
+				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+				padding: 4px 0;
+				z-index: 100;
+				min-width: 140px;
+				display: none;
+			}
+
+			.add-element-menu.visible {
+				display: block;
+			}
+
+			.add-element-item {
+				padding: 8px 12px;
+				font-size: 12px;
+				cursor: pointer;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+			}
+
+			.add-element-item:hover {
+				background: var(--accent);
+			}
+
 			.tree-children {
 				padding-left: 16px;
 			}
@@ -655,12 +772,28 @@
 				<div class="sidebar-tabs">
 					<button class="sidebar-tab active" data-tab="elements">Elements</button>
 					<button class="sidebar-tab" data-tab="properties">Properties</button>
-					<button class="sidebar-tab" data-tab="preview">Preview</button>
 				</div>
 
 				<div class="sidebar-content">
 					<!-- Elements Panel -->
 					<div class="sidebar-panel active" id="elementsPanel">
+						<div class="element-toolbar">
+							<div class="add-element-dropdown">
+								<button class="element-toolbar-btn" id="addElementBtn">+ Add</button>
+								<div class="add-element-menu" id="addElementMenu">
+									<div class="add-element-item" data-type="frame">◻️ Frame</div>
+									<div class="add-element-item" data-type="rectangle">▬ Rectangle</div>
+									<div class="add-element-item" data-type="ellipse">◯ Ellipse</div>
+									<div class="add-element-item" data-type="text">T Text</div>
+									<div class="add-element-item" data-type="button">🔘 Button</div>
+									<div class="add-element-item" data-type="input">📝 Input</div>
+									<div class="add-element-item" data-type="card">📋 Card</div>
+								</div>
+							</div>
+							<button class="element-toolbar-btn" id="selectAllBtn">☑ All</button>
+							<button class="element-toolbar-btn" id="deselectAllBtn">☐ None</button>
+							<button class="element-toolbar-btn danger" id="deleteSelectedBtn" disabled>🗑 Delete</button>
+						</div>
 						<div class="element-tree" id="elementTree">
 							<!-- Element tree will be rendered here -->
 						</div>
@@ -673,20 +806,7 @@
 						</div>
 					</div>
 
-					<!-- MCP-UI Preview Panel -->
-					<div class="sidebar-panel" id="previewPanel">
-						<div style="padding: 12px; border-bottom: 1px solid var(--border);">
-							<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">MCP-UI Render Preview</div>
-							<div style="font-size: 11px; color: var(--text-secondary);">HTML output from MCP-UI tools will be displayed here</div>
-						</div>
-						<div id="mcpUiPreviewContent" style="padding: 12px; overflow: auto; flex: 1;">
-							<div class="mcp-ui-empty" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-								<div style="font-size: 32px; margin-bottom: 12px;">🎨</div>
-								<div style="font-size: 13px; font-weight: 500;">No Preview Available</div>
-								<div style="font-size: 11px; margin-top: 4px;">Use MCP-UI tools (render_button, render_card, etc.) to generate preview</div>
-							</div>
-						</div>
-					</div>
+
 				</div>
 			</div>
 		</div>
@@ -713,6 +833,7 @@
 			// State
 			let design = null
 			let selectedId = null
+			let selectedIds = [] // Multi-select support
 			let zoom = 1
 			let isDragging = false
 			let isResizing = false
@@ -727,6 +848,7 @@
 			function init() {
 				setupEventListeners()
 				setupTabs()
+				setupElementToolbar()
 				connectToServer()
 				requestDesign()
 				subscribeToDesignUpdates()
@@ -778,6 +900,214 @@
 					})
 				})
 			}
+
+			// Element toolbar setup
+			function setupElementToolbar() {
+				const addBtn = document.getElementById("addElementBtn")
+				const addMenu = document.getElementById("addElementMenu")
+				const selectAllBtn = document.getElementById("selectAllBtn")
+				const deselectAllBtn = document.getElementById("deselectAllBtn")
+				const deleteSelectedBtn = document.getElementById("deleteSelectedBtn")
+
+				// Toggle add element dropdown
+				addBtn.addEventListener("click", (e) => {
+					e.stopPropagation()
+					addMenu.classList.toggle("visible")
+				})
+
+				// Close dropdown when clicking outside
+				document.addEventListener("click", (e) => {
+					if (!addMenu.contains(e.target) && e.target !== addBtn) {
+						addMenu.classList.remove("visible")
+					}
+				})
+
+				// Add element menu items
+				addMenu.querySelectorAll(".add-element-item").forEach((item) => {
+					item.addEventListener("click", () => {
+						const type = item.dataset.type
+						addNewElement(type)
+						addMenu.classList.remove("visible")
+					})
+				})
+
+				// Select All
+				selectAllBtn.addEventListener("click", () => {
+					if (!design) return
+					selectedIds = getAllElementIds(design.elements)
+					updateSelectionState()
+					renderElementTree()
+				})
+
+				// Deselect All
+				deselectAllBtn.addEventListener("click", () => {
+					selectedIds = []
+					selectedId = null
+					updateSelectionState()
+					renderElementTree()
+					renderPropertiesPanel()
+				})
+
+				// Delete Selected
+				deleteSelectedBtn.addEventListener("click", () => {
+					if (selectedIds.length === 0) return
+					saveState()
+					selectedIds.forEach(id => {
+						deleteElementById(id)
+					})
+					selectedIds = []
+					selectedId = null
+					updateSelectionState()
+					syncToServer("set_design", { design })
+					renderDesign()
+				})
+			}
+
+			// Get all element IDs recursively
+			function getAllElementIds(elements) {
+				let ids = []
+				elements.forEach(el => {
+					ids.push(el.id)
+					if (el.children) {
+						ids = ids.concat(getAllElementIds(el.children))
+					}
+				})
+				return ids
+			}
+
+			// Update selection state (enable/disable delete button, update status)
+			function updateSelectionState() {
+				const deleteBtn = document.getElementById("deleteSelectedBtn")
+				deleteBtn.disabled = selectedIds.length === 0
+				document.getElementById("selectedInfo").textContent = 
+					selectedIds.length > 0 ? `${selectedIds.length} selected` : "No selection"
+			}
+
+			// Toggle element selection (for multi-select)
+			function toggleElementSelection(id, isMulti = false) {
+				if (isMulti) {
+					const index = selectedIds.indexOf(id)
+					if (index === -1) {
+						selectedIds.push(id)
+					} else {
+						selectedIds.splice(index, 1)
+					}
+				} else {
+					selectedIds = [id]
+				}
+				selectedId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null
+				updateSelectionState()
+				renderElementTree()
+				renderPropertiesPanel()
+				updateCanvasSelection()
+			}
+
+			// Update canvas element selection visually
+			function updateCanvasSelection() {
+				document.querySelectorAll(".design-element").forEach(el => {
+					if (selectedIds.includes(el.dataset.id)) {
+						el.classList.add("selected")
+					} else {
+						el.classList.remove("selected")
+					}
+				})
+			}
+
+			// Add new element
+			function addNewElement(type) {
+				if (!design) return
+				saveState()
+
+				const id = "elem_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6)
+				const defaultBounds = { x: 20, y: 20, width: 100, height: type === "text" ? 30 : 100 }
+				
+				// Offset based on existing elements to avoid overlap
+				if (design.elements.length > 0) {
+					const lastEl = design.elements[design.elements.length - 1]
+					defaultBounds.y = lastEl.bounds.y + lastEl.bounds.height + 20
+				}
+
+				const newElement = {
+					id,
+					type,
+					name: type.charAt(0).toUpperCase() + type.slice(1) + " " + (design.elements.length + 1),
+					bounds: defaultBounds,
+					style: {}
+				}
+
+				// Type-specific defaults
+				switch (type) {
+					case "frame":
+						newElement.style.fill = "#FFFFFF"
+						newElement.style.stroke = { color: "#E0E0E0", width: 1 }
+						newElement.style.radius = 8
+						newElement.children = []
+						break
+					case "rectangle":
+						newElement.style.fill = "#3B82F6"
+						newElement.style.radius = 4
+						break
+					case "ellipse":
+						newElement.style.fill = "#10B981"
+						break
+					case "text":
+						newElement.text = "New Text"
+						newElement.style.fill = "#333333"
+						newElement.style.fontSize = 16
+						newElement.bounds.height = 24
+						break
+					case "button":
+						newElement.semantic = "button"
+						newElement.text = "Button"
+						newElement.style.fill = "#007AFF"
+						newElement.style.radius = 8
+						newElement.bounds.width = 120
+						newElement.bounds.height = 44
+						break
+					case "input":
+						newElement.semantic = "input"
+						newElement.text = "Placeholder..."
+						newElement.style.fill = "#FFFFFF"
+						newElement.style.stroke = { color: "#D0D0D0", width: 1 }
+						newElement.style.radius = 6
+						newElement.bounds.width = 200
+						newElement.bounds.height = 40
+						break
+					case "card":
+						newElement.semantic = "card"
+						newElement.style.fill = "#FFFFFF"
+						newElement.style.shadow = { offsetX: 0, offsetY: 2, blur: 8, color: "rgba(0,0,0,0.1)" }
+						newElement.style.radius = 12
+						newElement.bounds.width = 200
+						newElement.bounds.height = 150
+						newElement.children = []
+						break
+				}
+
+				design.elements.push(newElement)
+				syncToServer("set_design", { design })
+				renderDesign()
+				selectElement(id)
+			}
+
+			// Delete element by ID
+			function deleteElementById(id) {
+				function removeFromArray(elements, targetId) {
+					const index = elements.findIndex(el => el.id === targetId)
+					if (index !== -1) {
+						elements.splice(index, 1)
+						return true
+					}
+					for (const el of elements) {
+						if (el.children && removeFromArray(el.children, targetId)) {
+							return true
+						}
+					}
+					return false
+				}
+				removeFromArray(design.elements, id)
+			}
+
 
 			function setupEventListeners() {
 				// Zoom controls
@@ -1379,15 +1709,81 @@
 
 			function createTreeItem(element) {
 				const item = document.createElement("div")
+				const isSelected = selectedIds.includes(element.id)
 
 				const row = document.createElement("div")
-				row.className = "tree-item" + (element.id === selectedId ? " selected" : "")
-				row.innerHTML = `
-                <span class="tree-item-icon">${getTypeIcon(element.type)}</span>
-                <span class="tree-item-name">${element.name || element.semantic || element.id}</span>
-                <span class="tree-item-type">${element.type}</span>
-            `
-				row.addEventListener("click", () => selectElement(element.id))
+				row.className = "tree-item" + (isSelected ? " selected" : "")
+				
+				// Create checkbox
+				const checkbox = document.createElement("input")
+				checkbox.type = "checkbox"
+				checkbox.className = "tree-item-checkbox"
+				checkbox.checked = isSelected
+				checkbox.addEventListener("click", (e) => {
+					e.stopPropagation()
+					toggleElementSelection(element.id, e.shiftKey || e.ctrlKey || e.metaKey)
+				})
+				checkbox.addEventListener("change", (e) => {
+					e.stopPropagation()
+				})
+
+				// Icon
+				const icon = document.createElement("span")
+				icon.className = "tree-item-icon"
+				icon.textContent = getTypeIcon(element.type)
+
+				// Name (editable on double-click)
+				const nameSpan = document.createElement("span")
+				nameSpan.className = "tree-item-name"
+				nameSpan.textContent = element.name || element.semantic || element.id
+				nameSpan.addEventListener("dblclick", (e) => {
+					e.stopPropagation()
+					startInlineEdit(nameSpan, element)
+				})
+
+				// Type badge
+				const typeSpan = document.createElement("span")
+				typeSpan.className = "tree-item-type"
+				typeSpan.textContent = element.type
+
+				// Action buttons (visible on hover)
+				const actions = document.createElement("div")
+				actions.className = "tree-item-actions"
+				actions.innerHTML = `
+					<button class="tree-item-btn" data-action="edit" title="Edit">✏️</button>
+					<button class="tree-item-btn" data-action="duplicate" title="Duplicate">📋</button>
+					<button class="tree-item-btn" data-action="delete" title="Delete">🗑</button>
+				`
+				actions.querySelector('[data-action="edit"]').addEventListener("click", (e) => {
+					e.stopPropagation()
+					startInlineEdit(nameSpan, element)
+				})
+				actions.querySelector('[data-action="duplicate"]').addEventListener("click", (e) => {
+					e.stopPropagation()
+					duplicateElement(element.id)
+				})
+				actions.querySelector('[data-action="delete"]').addEventListener("click", (e) => {
+					e.stopPropagation()
+					saveState()
+					deleteElementById(element.id)
+					if (selectedId === element.id) selectedId = null
+					selectedIds = selectedIds.filter(id => id !== element.id)
+					updateSelectionState()
+					syncToServer("set_design", { design })
+					renderDesign()
+				})
+
+				// Assemble row
+				row.appendChild(checkbox)
+				row.appendChild(icon)
+				row.appendChild(nameSpan)
+				row.appendChild(typeSpan)
+				row.appendChild(actions)
+
+				row.addEventListener("click", (e) => {
+					if (e.target === checkbox) return
+					toggleElementSelection(element.id, e.shiftKey || e.ctrlKey || e.metaKey)
+				})
 				item.appendChild(row)
 
 				if (element.children && element.children.length > 0) {
@@ -1401,6 +1797,77 @@
 
 				return item
 			}
+
+			// Start inline editing for element name
+			function startInlineEdit(nameSpan, element) {
+				if (nameSpan.contentEditable === "true") return
+				
+				const originalName = nameSpan.textContent
+				nameSpan.contentEditable = "true"
+				nameSpan.classList.add("editing")
+				nameSpan.focus()
+				
+				// Select all text
+				const range = document.createRange()
+				range.selectNodeContents(nameSpan)
+				const sel = window.getSelection()
+				sel.removeAllRanges()
+				sel.addRange(range)
+
+				const finishEdit = () => {
+					nameSpan.contentEditable = "false"
+					nameSpan.classList.remove("editing")
+					const newName = nameSpan.textContent.trim()
+					if (newName && newName !== originalName) {
+						saveState()
+						element.name = newName
+						syncToServer("set_design", { design })
+					} else {
+						nameSpan.textContent = originalName
+					}
+				}
+
+				nameSpan.addEventListener("blur", finishEdit, { once: true })
+				nameSpan.addEventListener("keydown", (e) => {
+					if (e.key === "Enter") {
+						e.preventDefault()
+						nameSpan.blur()
+					} else if (e.key === "Escape") {
+						nameSpan.textContent = originalName
+						nameSpan.blur()
+					}
+				})
+			}
+
+			// Duplicate an element
+			function duplicateElement(id) {
+				const element = findElement(design.elements, id)
+				if (!element) return
+
+				saveState()
+				const newElement = JSON.parse(JSON.stringify(element))
+				newElement.id = "elem_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6)
+				newElement.name = (element.name || element.type) + " Copy"
+				newElement.bounds.x += 20
+				newElement.bounds.y += 20
+
+				// Regenerate IDs for children
+				function regenerateIds(el) {
+					el.id = "elem_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6)
+					if (el.children) {
+						el.children.forEach(regenerateIds)
+					}
+				}
+				if (newElement.children) {
+					newElement.children.forEach(regenerateIds)
+				}
+
+				design.elements.push(newElement)
+				syncToServer("set_design", { design })
+				renderDesign()
+				selectElement(newElement.id)
+			}
+
 
 			function getTypeIcon(type) {
 				const icons = {

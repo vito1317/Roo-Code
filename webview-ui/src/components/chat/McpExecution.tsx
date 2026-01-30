@@ -189,17 +189,38 @@ export const McpExecution = ({
 		}
 	}, [text, useMcpServer, initialServerName, initialToolName, serverName, toolName, isArguments])
 
-	// For MCP-UI server, use a simplified/minimal display with enhanced styling
+	// For MCP-UI server, use a simplified/minimal display with enhanced styling and collapsible feature
 	if (isMcpUiServer) {
 		const isLoading = status && status.status !== "completed"
 		const hasResponse = formattedResponseText && formattedResponseText.length > 0
 
 		return (
 			<div className="w-full">
-				{/* MCP-UI styled container */}
+				{/* MCP-UI styled container with collapsible header */}
 				<div className="rounded-lg overflow-hidden">
+					{/* Collapsible header */}
+					{hasResponse && (
+						<div
+							className="flex items-center justify-between gap-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-t-lg cursor-pointer hover:from-purple-500/15 hover:to-blue-500/15 transition-colors"
+							onClick={onToggleResponseExpand}
+						>
+							<div className="flex items-center gap-2">
+								<span className="text-sm">🎨</span>
+								<span className="text-xs font-medium text-purple-400">MCP-UI</span>
+								{isLoading && (
+									<div className="animate-spin rounded-full size-3 border-2 border-blue-400/30 border-t-blue-400" />
+								)}
+							</div>
+							<ChevronDown
+								className={cn("size-4 text-purple-400 transition-transform duration-300", {
+									"rotate-180": isResponseExpanded,
+								})}
+							/>
+						</div>
+					)}
+
 					{/* Loading state with animated gradient */}
-					{isLoading && (
+					{isLoading && !hasResponse && (
 						<div className="flex items-center gap-3 px-3 py-2 bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-lg mb-2">
 							<div className="relative">
 								<div className="animate-spin rounded-full size-4 border-2 border-blue-400/30 border-t-blue-400" />
@@ -210,16 +231,25 @@ export const McpExecution = ({
 						</div>
 					)}
 
-					{/* Response section - auto-expanded for MCP-UI */}
-					{hasResponse && (
-						<ResponseContainer
-							isExpanded={isResponseExpanded}
-							response={formattedResponseText}
-							isJson={responseIsJson}
-							hasArguments={false}
-							isPartial={status ? status.status !== "completed" : false}
-							isMcpUi={true}
-						/>
+					{/* Response section - collapsible */}
+					{hasResponse && isResponseExpanded && (
+						<div className="border border-t-0 border-purple-500/20 rounded-b-lg overflow-hidden">
+							<ResponseContainer
+								isExpanded={isResponseExpanded}
+								response={formattedResponseText}
+								isJson={responseIsJson}
+								hasArguments={false}
+								isPartial={status ? status.status !== "completed" : false}
+								isMcpUi={true}
+							/>
+						</div>
+					)}
+
+					{/* Collapsed indicator */}
+					{hasResponse && !isResponseExpanded && (
+						<div className="px-3 py-1.5 text-xs text-vscode-descriptionForeground/50 border border-t-0 border-purple-500/20 rounded-b-lg bg-black/10">
+							點擊展開 UI 內容...
+						</div>
 					)}
 
 					{/* Empty state when no response yet */}

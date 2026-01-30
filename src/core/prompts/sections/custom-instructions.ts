@@ -14,6 +14,8 @@ import {
 	getAgentsDirectoriesForCwd,
 	getGlobalRooDirectory,
 } from "../../../services/roo-config"
+import { getSpecModeContext } from "../../specs/SpecModeContextProvider"
+
 
 /**
  * Safely read a file and return its trimmed content
@@ -420,6 +422,17 @@ export async function addCustomInstructions(
 	if (typeof modeCustomInstructions === "string" && modeCustomInstructions.trim()) {
 		sections.push(`Mode-specific Instructions:\n${modeCustomInstructions.trim()}`)
 	}
+
+	// Add Spec mode dynamic context if in spec mode
+	if (mode === "spec") {
+		try {
+			const specContext = getSpecModeContext(cwd)
+			sections.push(`Spec Mode Dynamic Context:\n${specContext.dynamicPrompt}`)
+		} catch (err) {
+			// Silently ignore errors - spec context is optional enhancement
+		}
+	}
+
 
 	// Add rules - include both mode-specific and generic rules if they exist
 	const rules = []
