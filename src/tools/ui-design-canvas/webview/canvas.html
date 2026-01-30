@@ -843,6 +843,34 @@
 			let undoStack = []
 			let redoStack = []
 			let serverUrl = "http://127.0.0.1:4420"
+			
+			// Edit lock - prevents SSE updates from overwriting user edits
+			let isEditing = false
+			let editLockTimeout = null
+			let pendingDesignUpdate = null
+			
+			// Set edit lock (called when user starts editing)
+			function setEditLock() {
+				isEditing = true
+				// Clear any existing timeout
+				if (editLockTimeout) clearTimeout(editLockTimeout)
+				// Auto-release lock after 2 seconds of inactivity
+				editLockTimeout = setTimeout(() => {
+					releaseEditLock()
+				}, 2000)
+			}
+			
+			// Release edit lock and apply pending updates
+			function releaseEditLock() {
+				isEditing = false
+				if (editLockTimeout) {
+					clearTimeout(editLockTimeout)
+					editLockTimeout = null
+				}
+				// Don't apply pending updates - user's edits should take priority
+				// The server already has the latest from user's sync
+				pendingDesignUpdate = null
+			}
 
 			// Initialize
 			function init() {
@@ -862,7 +890,15 @@
 					eventSource.onmessage = (event) => {
 						try {
 							const newDesign = JSON.parse(event.data)
-							console.log("[Canvas] Received design update via SSE")
+							console.log("[Canvas] Received design update via SSE, isEditing:", isEditing)
+							
+							// If user is editing, skip this update to avoid overwriting their changes
+							if (isEditing || isDragging || isResizing) {
+								console.log("[Canvas] Skipping SSE update - user is editing")
+								pendingDesignUpdate = newDesign
+								return
+							}
+							
 							design = newDesign
 							renderDesign()
 							setConnectionStatus("connected")
@@ -1215,6 +1251,7 @@
 			}
 
 			async function syncToServer(toolName, args) {
+				setEditLock() // Prevent SSE updates from overwriting during/after sync
 				setConnectionStatus("syncing")
 				try {
 					// Send update through VS Code extension which will call MCP
@@ -1223,21 +1260,10 @@
 						tool: toolName,
 						args: args,
 					})
-
-					// Also try direct fetch to get updated design
-					setTimeout(async () => {
-						try {
-							const response = await fetch(`${serverUrl}/design`)
-							if (response.ok) {
-								const newDesign = await response.json()
-								design = newDesign
-								renderDesign()
-								setConnectionStatus("connected")
-							}
-						} catch (e) {
-							console.error("Failed to fetch design:", e)
-						}
-					}, 100)
+					
+					// Don't auto-fetch design after sync - it causes overwrites!
+					// The SSE subscription will update us once edit lock expires
+					setConnectionStatus("connected")
 				} catch (e) {
 					console.error("Sync failed:", e)
 					setConnectionStatus("disconnected")
@@ -1540,6 +1566,7 @@
 
 			function startDrag(e, element) {
 				isDragging = true
+				setEditLock() // Prevent SSE updates during drag
 				dragStartPos = { x: e.clientX, y: e.clientY }
 				elementStartPos = {
 					x: element.bounds.x,
@@ -1557,6 +1584,7 @@
 				if (!element) return
 
 				isResizing = true
+				setEditLock() // Prevent SSE updates during resize
 				resizeHandle = handle
 				dragStartPos = { x: e.clientX, y: e.clientY }
 				elementStartPos = {
@@ -1622,6 +1650,8 @@
 							width: element.bounds.width,
 							height: element.bounds.height,
 						})
+						// Keep edit lock active briefly after sync to prevent immediate SSE overwrite
+						setEditLock()
 					}
 				}
 

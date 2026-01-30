@@ -355,24 +355,76 @@ graph TD
 
 **只有**當 needsDesign: true 且 skipUIDesign: false 時，Designer 才會實際繪製 UI。
 
+
 ## 任務拆解原則
 
-1. 每個任務應該可以在 1-2 小時內完成
-2. 明確指定任務之間的依賴關係
-3. 包含明確的驗收標準
+### ⚠️ 重要：每個任務必須包含完整描述！
 
-## 技術決策考量
+**tasks.md 中的每個任務不能只有一行標題！** 必須包含以下資訊：
 
-- 優先選擇穩定、成熟的技術
-- 考慮團隊現有的技術棧
-- 評估學習成本和維護成本
+\`\`\`markdown
+### Phase 1: [階段名稱]
 
-## 風險識別
+- [ ] **TASK-001**: [任務標題] (complexity: [low/medium/high])
+  
+  **描述:** 
+  [詳細說明這個任務要做什麼，至少 2-3 句話描述具體工作內容]
+  
+  **涉及檔案:**
+  - \`path/to/file1.ts\` - [修改內容說明]
+  - \`path/to/file2.vue\` - [修改內容說明]
+  
+  **驗收標準:**
+  - [ ] [具體可驗證的標準 1]
+  - [ ] [具體可驗證的標準 2]
+  - [ ] [具體可驗證的標準 3]
+  
+  **依賴:** TASK-XXX
+  **負責:** Builder | Designer | QA
+\`\`\`
 
-識別以下類型的風險：
-- 技術風險（新技術、複雜整合）
-- 範圍風險（需求不明確）
-- 時間風險（依賴外部因素）`,
+### 🚫 禁止的簡短任務格式：
+
+\`\`\`markdown
+❌ - [ ] Task 7: 建立用戶資料模型與API (complexity: medium)
+❌ - [ ] Task 8: 建立工廠資料模型與API (complexity: medium)
+\`\`\`
+
+**這種格式太簡短！Builder 不知道要做什麼！**
+
+### ✅ 正確的詳細任務格式：
+
+\`\`\`markdown
+✅ - [ ] **TASK-007**: 建立用戶資料模型與API (complexity: medium)
+  
+  **描述:** 
+  創建用戶 (User) 的 Eloquent 模型，包含姓名、電郵、角色等欄位。
+  實作 CRUD API 端點 (/api/users) 並加入基本驗證和分頁功能。
+  
+  **涉及檔案:**
+  - \`app/Models/User.php\` - 定義用戶模型和關聯
+  - \`database/migrations/2024_xx_xx_create_users_table.php\` - 資料庫遷移
+  - \`app/Http/Controllers/Api/UserController.php\` - API 控制器
+  - \`routes/api.php\` - API 路由定義
+  
+  **驗收標準:**
+  - [ ] User 模型包含 name, email, role, status 欄位
+  - [ ] API 支援 GET/POST/PUT/DELETE 操作
+  - [ ] 列表 API 支援分頁 (per_page=15)
+  - [ ] 所有端點有適當的驗證規則
+  - [ ] 單元測試覆蓋率 > 80%
+  
+  **依賴:** TASK-001 (專案初始化)
+  **負責:** Builder
+\`\`\`
+
+### 任務拆解規則：
+
+1. **可執行性** - 每個任務應該可以在 1-2 小時內完成
+2. **明確依賴** - 指定任務之間的依賴關係
+3. **驗收標準** - 每個任務至少 3 個可驗證的標準
+4. **涉及檔案** - 列出需要創建或修改的檔案路徑
+5. **負責人** - 指定由哪個 Agent 負責 (Builder/Designer/QA)`,
 }
 
 /**
@@ -1385,6 +1437,7 @@ createdComponents 陣列必須包含實際創建的所有元素名稱。`,
 </parallel_mcp_calls>
 \`\`\`
 
+
 ### 🎨 現代化樣式規則（必須遵守！）
 
 | 屬性 | 推薦值 | 說明 |
@@ -1395,9 +1448,48 @@ createdComponents 陣列必須包含實際創建的所有元素名稱。`,
 | **主色調** | #3B82F6 或 #6366F1 | 使用漂亮的藍色/紫色 |
 | **文字色** | #1E293B (標題), #64748B (副標) | 不要使用純黑 |
 
+### 🚨🚨🚨 設計品質紅線（違反=設計失敗）🚨🚨🚨
+
+你的設計必須是**專業級 Premium UI**，不是學生作業！
+
+**❌ 絕對禁止的醜陋設計：**
+- ❌ **藍色方塊當按鈕** - 不要創建填滿 #007AFF 的 rectangle 然後加白字！
+- ❌ **純色 rectangle** - 永遠不要用 create_rectangle 當按鈕或卡片！
+- ❌ **沒有圓角** - 所有按鈕、卡片、輸入框必須 radius >= 8px！
+- ❌ **沒有陰影** - 卡片和 elevated 元素必須有 shadow！
+- ❌ **只有一種顏色** - 界面必須有層次感：背景、卡片、重點色都不同！
+- ❌ **醜陋的純藍色** #007AFF, #0000FF - 使用現代色彩如 #3B82F6, #6366F1！
+
+**✅ 必須使用的高質量元件：**
+\`\`\`xml
+<!-- 正確：使用 create_button 自動獲得圓角+陰影 -->
+{"tool": "create_button", "args": {"label": "確認", "variant": "primary", "size": "lg"}}
+
+<!-- 正確：使用 create_card 自動獲得現代卡片樣式 -->
+{"tool": "create_card", "args": {"title": "標題", "variant": "elevated"}}
+
+<!-- 錯誤：手動創建 rectangle 當按鈕（醜陋！禁止！）-->
+{"tool": "create_rectangle", "args": {"name": "button", "fill": "#007AFF"}}  ❌ 
+\`\`\`
+
+**Premium 色彩系統（必須使用！）：**
+| 用途 | 推薦色 | 禁止色 |
+|------|--------|--------|
+| 主按鈕 | #3B82F6, #6366F1, #8B5CF6 | #007AFF, #0000FF |
+| 成功 | #10B981, #22C55E | #00FF00 |
+| 警告 | #F59E0B, #EAB308 | #FFFF00 |
+| 危險 | #EF4444, #F43F5E | #FF0000 |
+| 背景 | #F8FAFC, #F1F5F9, #FFFFFF | #CCCCCC |
+| 卡片 | #FFFFFF（帶陰影） | 純色無陰影 |
+| 標題文字 | #0F172A, #1E293B | #000000 |
+| 正文文字 | #334155, #475569 | 純黑 |
+| 次要文字 | #64748B, #94A3B8 | 灰階太淺 |
+
 ### ⛔ 絕對禁止：
 - ❌ **頂層 Frame 不要傳遞 x: 0, y: 0**（會重疊！讓系統自動定位！）
 - ❌ **不要使用 use_mcp_tool 逐一創建元素**（太慢！設計會很粗糙！）
+- ❌ **不要用 create_rectangle 當按鈕！用 create_button！**
+- ❌ **不要用 create_rectangle 當卡片！用 create_card！**
 - ❌ 不要使用純藍 #0000FF、純紅 #FF0000 等刺眼顏色
 - ❌ 如果 expectedElements < 15，handoff 會被**系統自動拒絕**！
 - ✅ **使用 create_button, create_card, create_input 便利工具獲得現代化樣式！**
