@@ -1745,6 +1745,64 @@ export class ParallelUIService {
 
 			console.log(`[ParallelUI Direct] Task ${task.id}: Creating button "${textContent}" at (${posX}, ${posY})`)
 
+			// Use UIDesignCanvas convenience tools for better-looking UI with shadows and modern styling
+			if (this.activeDesignServer === "UIDesignCanvas") {
+				// Use create_button convenience tool which auto-applies shadows, rounded corners, and styling
+				// Determine button variant based on colors or default to primary
+				let variant = "primary" // Default to primary for best styling
+				if (bgColor) {
+					const lowerBg = bgColor.toLowerCase()
+					if (lowerBg.includes("ef4444") || lowerBg.includes("dc2626") || lowerBg.includes("red")) {
+						variant = "danger"
+					} else if (lowerBg.includes("f1f5f9") || lowerBg.includes("e5e7eb") || lowerBg.includes("gray") || lowerBg.includes("secondary")) {
+						variant = "secondary"
+					} else if (lowerBg === "transparent" || lowerBg.includes("outline")) {
+						variant = "outline"
+					}
+				}
+				
+				// Determine size based on height
+				let size = "md"
+				if (height >= 52) {
+					size = "lg"
+				} else if (height <= 32) {
+					size = "sm"
+				}
+				
+				const buttonArgs: Record<string, unknown> = {
+					x: posX,
+					y: posY,
+					width,
+					label: textContent,
+					variant,
+					size,
+				}
+				if (containerFrame) {
+					buttonArgs.parentId = containerFrame
+				}
+
+				try {
+					console.log(`[ParallelUI Direct] Using UIDesignCanvas create_button for "${textContent}"`)
+					const buttonResult = await this.mcpHub!.callTool("UIDesignCanvas", "create_button", buttonArgs)
+					const buttonNodeId = this.extractNodeIdFromResult(buttonResult)
+					if (buttonNodeId) {
+						nodeIds.push(buttonNodeId)
+						console.log(`[ParallelUI Direct] ✓ Button created with create_button, ID: ${buttonNodeId}`)
+					}
+					onProgress?.(task.id, "completed")
+					return {
+						taskId: task.id,
+						success: true,
+						nodeIds,
+						duration: Date.now() - startTime,
+					}
+				} catch (err) {
+					console.warn(`[ParallelUI Direct] create_button failed, falling back to basic tools:`, err)
+					// Fall through to basic tool approach
+				}
+			}
+
+			// Fallback: Use basic create_rectangle + text approach for other design servers
 			// Step 1: Create rectangle (button background)
 			const rectArgs: Record<string, unknown> = {
 				width,

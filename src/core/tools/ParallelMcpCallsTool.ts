@@ -161,6 +161,38 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 			// Determine actual server to use based on settings (for Figma servers)
 			let actualServer = params.server
 			const isFigmaServer = params.server === "figma-write" || params.server === "TalkToFigma" || params.server?.toLowerCase().includes("figma")
+			
+			// CRITICAL: Only Designer agent can use design-related MCP servers!
+			const designServers = ["uidesigncanvas", "talktofigma", "figma-write", "penpot"]
+			const serverNameLower = (params.server || "").toLowerCase()
+			const isDesignServer = designServers.some(ds => serverNameLower.includes(ds)) || 
+				serverNameLower.startsWith("fig") || isFigmaServer
+			
+			if (isDesignServer) {
+				const currentMode = task.taskMode || ""
+				const isDesigner = currentMode.includes("designer") || 
+					currentMode === "sentinel-designer"
+				
+				if (!isDesigner) {
+					task.consecutiveMistakeCount++
+					task.recordToolError("parallel_mcp_calls")
+					task.didToolFailInCurrentTurn = true
+					
+					const errorMessage = `❌ 錯誤：設計工具 "${params.server}" 只能由 Designer Agent 使用！
+
+🚫 你目前的角色是：${currentMode || "未知"}
+🎨 設計工具包括：UIDesignCanvas, TalkToFigma, figma-write, Penpot 等
+
+✅ 正確做法：使用 handoff_context 工具將設計任務交接給 Designer Agent
+
+❌ Architect/Builder/QA 都不能直接使用設計工具！
+✅ 只有 Designer 負責 UI 設計！`
+					
+					await task.say("error", errorMessage)
+					pushToolResult(formatResponse.toolError(errorMessage))
+					return
+				}
+			}
 
 			if (isFigmaServer) {
 				// Get user settings to determine preferred Figma server
@@ -187,6 +219,58 @@ export class ParallelMcpCallsTool extends BaseTool<"parallel_mcp_calls"> {
 
 				if (actualServer !== params.server) {
 					console.log(`[ParallelMcpCalls] Using ${actualServer} instead of requested ${params.server} (based on settings)`)
+				}
+			}
+
+			// Auto-reconnect if non-Figma server is disconnected or stuck in connecting state
+			if (actualServer && !isFigmaServer) {
+				const targetServer = mcpHub.getServers().find((s) => s.name === actualServer)
+				if (targetServer && (targetServer.status === "disconnected" || targetServer.status === "connecting")) {
+					console.log(`[ParallelMcpCalls] Server ${actualServer} is ${targetServer.status}, attempting to reconnect...`)
+					await task.say("text", `🔄 MCP 服務器 "${actualServer}" ${targetServer.status === "disconnected" ? "已斷線" : "連接中"}，正在嘗試重新連接...`)
+					
+					try {
+						// Use restartConnection to reconnect the server
+						await mcpHub.restartConnection(actualServer)
+						
+						// Wait a bit for the connection to establish
+						const maxWaitTime = 10000 // 10 seconds
+						const pollInterval = 500 // 500ms
+						let waited = 0
+						
+						while (waited < maxWaitTime) {
+							await new Promise(resolve => setTimeout(resolve, pollInterval))
+							waited += pollInterval
+							
+							// Check if connected now
+							const updatedServer = mcpHub.getServers().find((s) => s.name === actualServer)
+							if (updatedServer?.status === "connected") {
+								console.log(`[ParallelMcpCalls] Server ${actualServer} reconnected successfully`)
+								await task.say("text", `✅ MCP 服務器 "${actualServer}" 已重新連接！`)
+								break
+							}
+						}
+						
+						// Check final status
+						const finalServer = mcpHub.getServers().find((s) => s.name === actualServer)
+						if (finalServer?.status !== "connected") {
+							console.log(`[ParallelMcpCalls] Server ${actualServer} failed to reconnect after ${maxWaitTime}ms`)
+							task.consecutiveMistakeCount++
+							task.recordToolError("parallel_mcp_calls")
+							await task.say("error", `❌ MCP 服務器 "${actualServer}" 重新連接失敗。請手動檢查服務器狀態。`)
+							task.didToolFailInCurrentTurn = true
+							pushToolResult(formatResponse.toolError(`MCP server "${actualServer}" is not connected and reconnection failed. Please check server status manually.`))
+							return
+						}
+					} catch (reconnectError) {
+						console.error(`[ParallelMcpCalls] Error reconnecting server ${actualServer}:`, reconnectError)
+						task.consecutiveMistakeCount++
+						task.recordToolError("parallel_mcp_calls")
+						await task.say("error", `❌ MCP 服務器 "${actualServer}" 重新連接時發生錯誤：${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`)
+						task.didToolFailInCurrentTurn = true
+						pushToolResult(formatResponse.toolError(`Failed to reconnect MCP server "${actualServer}": ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`))
+						return
+					}
 				}
 			}
 

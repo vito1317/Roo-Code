@@ -118,21 +118,33 @@ const TOOLS = [
   },
   {
     name: "create_rectangle",
-    description: "Create a rectangle shape. Use for buttons, backgrounds, dividers, etc.",
+    description: "Create a rectangle shape. Use for buttons, backgrounds, dividers, badges. For BUTTONS: always add radius (8-16) and shadow for modern look!",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string" },
-        semantic: { type: "string", description: "button, divider, badge, chip, etc." },
+        semantic: { type: "string", description: "button, divider, badge, chip, card-bg, etc." },
         description: { type: "string" },
         x: { type: "number" },
         y: { type: "number" },
         width: { type: "number" },
         height: { type: "number" },
-        fill: { type: "string", description: "Fill color" },
-        stroke: { type: "string", description: "Stroke color" },
+        fill: { type: "string", description: "Fill color (e.g., #007AFF for blue button)" },
+        stroke: { type: "string", description: "Stroke/border color" },
         strokeWidth: { type: "number" },
-        radius: { type: "number", description: "Corner radius" },
+        radius: { type: "number", description: "Corner radius - use 8-16 for buttons, 12-20 for cards!" },
+        opacity: { type: "number", description: "Opacity 0-1" },
+        shadow: {
+          type: "object",
+          description: "Drop shadow for elevation - REQUIRED for buttons and cards!",
+          properties: {
+            offsetX: { type: "number", description: "Horizontal offset (default 0)" },
+            offsetY: { type: "number", description: "Vertical offset (2-8 for subtle shadow)" },
+            blur: { type: "number", description: "Blur radius (4-16 for soft shadow)" },
+            spread: { type: "number", description: "Spread radius" },
+            color: { type: "string", description: "Shadow color (e.g., rgba(0,0,0,0.1))" }
+          }
+        },
         parentId: { type: "string" }
       },
       required: ["width", "height"]
@@ -197,6 +209,56 @@ const TOOLS = [
         parentId: { type: "string" }
       },
       required: ["width", "height"]
+    }
+  },
+
+  // ===== Convenience UI Components (with auto-styling!) =====
+  {
+    name: "create_button",
+    description: "Create a styled button with proper padding, rounded corners, and shadow. USE THIS FOR ALL BUTTONS - it handles styling automatically!",
+    inputSchema: {
+      type: "object",
+      properties: {
+        label: { type: "string", description: "Button text" },
+        variant: { type: "string", enum: ["primary", "secondary", "outline", "ghost", "danger"], description: "Button style variant" },
+        size: { type: "string", enum: ["sm", "md", "lg"], description: "Button size (default md)" },
+        x: { type: "number" },
+        y: { type: "number" },
+        width: { type: "number", description: "Optional width (auto-sized if not set)" },
+        parentId: { type: "string" }
+      },
+      required: ["label"]
+    }
+  },
+  {
+    name: "create_card",
+    description: "Create a styled card with shadow, rounded corners, and optional title. USE THIS FOR ALL CARDS - includes elevation and border automatically!",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Optional card title" },
+        x: { type: "number" },
+        y: { type: "number" },
+        width: { type: "number", description: "Card width (default 300)" },
+        height: { type: "number", description: "Card height (default 200)" },
+        variant: { type: "string", enum: ["elevated", "outlined", "filled"], description: "Card style variant" },
+        parentId: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "create_input",
+    description: "Create a styled text input field with proper border, radius, and placeholder. USE THIS FOR ALL INPUT FIELDS!",
+    inputSchema: {
+      type: "object",
+      properties: {
+        placeholder: { type: "string", description: "Placeholder text" },
+        label: { type: "string", description: "Optional label above input" },
+        x: { type: "number" },
+        y: { type: "number" },
+        width: { type: "number", description: "Input width (default 280)" },
+        parentId: { type: "string" }
+      }
     }
   },
 
@@ -421,21 +483,60 @@ const TOOLS = [
   }
 ];
 
+// ========== Helper: Get All Element Positions ==========
+function getAllElementPositions(elements: any[]): { id: string; name: string; type: string; x: number; y: number; width: number; height: number }[] {
+  const positions: any[] = [];
+  const traverse = (els: any[]) => {
+    for (const el of els) {
+      positions.push({
+        id: el.id,
+        name: el.name || el.type,
+        type: el.type,
+        x: el.bounds?.x || 0,
+        y: el.bounds?.y || 0,
+        width: el.bounds?.width || 0,
+        height: el.bounds?.height || 0
+      });
+      if (el.children && Array.isArray(el.children)) {
+        traverse(el.children);
+      }
+    }
+  };
+  traverse(elements);
+  return positions;
+}
+
+// ========== Helper: Find Element by ID ==========
+function findElementById(elements: any[], id: string): any | null {
+  for (const el of elements) {
+    if (el.id === id) {
+      return el;
+    }
+    if (el.children && Array.isArray(el.children)) {
+      const found = findElementById(el.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 // ========== Tool Handlers ==========
 async function handleTool(name: string, args: any): Promise<any> {
   switch (name) {
     // Document Operations
     case "get_design": {
       const format = args.format || "full";
+      const allPositions = getAllElementPositions(store.getDesign().elements || []);
       if (format === "summary") {
-        return store.generateSummary();
+        return { ...store.generateSummary(), allPositions };
       } else if (format === "tree") {
         return {
           hierarchy: store.generateSummary().structure.hierarchy,
-          totalElements: store.generateSummary().structure.totalElements
+          totalElements: store.generateSummary().structure.totalElements,
+          allPositions
         };
       }
-      return store.getDesign();
+      return { ...store.getDesign(), allPositions };
     }
 
     case "new_design": {
@@ -478,13 +579,59 @@ async function handleTool(name: string, args: any): Promise<any> {
         create_ellipse: "ellipse",
         create_image: "image"
       };
+      
+      // ====== OVERLAP DETECTION & AUTO-POSITIONING ======
+      // For top-level frames, detect if the position overlaps with existing elements
+      // If overlap detected, automatically reposition to the right
+      let finalX = args.x ?? 0;
+      let finalY = args.y ?? 0;
+      
+      if (name === "create_frame" && !args.parentId) {
+        const design = store.getDesign();
+        const existingElements = design.elements || [];
+        
+        if (existingElements.length > 0) {
+          // Check if new frame would overlap with any existing element
+          const newWidth = args.width || 390;
+          const newHeight = args.height || 844;
+          
+          const hasOverlap = existingElements.some((el: any) => {
+            const elX = el.bounds?.x || 0;
+            const elY = el.bounds?.y || 0;
+            const elW = el.bounds?.width || 0;
+            const elH = el.bounds?.height || 0;
+            
+            // Check AABB collision
+            return !(finalX + newWidth <= elX || // new is left of el
+                     finalX >= elX + elW ||      // new is right of el
+                     finalY + newHeight <= elY || // new is above el
+                     finalY >= elY + elH);        // new is below el
+          });
+          
+          if (hasOverlap) {
+            // Find the rightmost edge of all existing elements
+            let maxRight = 0;
+            for (const el of existingElements) {
+              const elRight = (el.bounds?.x || 0) + (el.bounds?.width || 0);
+              if (elRight > maxRight) {
+                maxRight = elRight;
+              }
+            }
+            // Reposition to the right of all existing elements
+            finalX = maxRight + 40;
+            finalY = 0;
+            console.log(`[McpServer] Overlap detected! Auto-repositioning frame to x=${finalX}, y=${finalY}`);
+          }
+        }
+      }
+      
       const element = store.createElement(typeMap[name], {
         name: args.name,
         semantic: args.semantic as SemanticType,
         description: args.description,
         bounds: {
-          x: args.x || 0,
-          y: args.y || 0,
+          x: finalX,
+          y: finalY,
           width: args.width,
           height: args.height
         },
@@ -492,23 +639,54 @@ async function handleTool(name: string, args: any): Promise<any> {
           fill: args.fill || args.placeholder,
           stroke: args.stroke ? { color: args.stroke, width: args.strokeWidth || 1 } : undefined,
           radius: args.radius,
+          opacity: args.opacity,
+          shadow: args.shadow,
           layout: args.layout
         },
         src: args.src
       });
       store.addElement(element, args.parentId);
-      return { success: true, element };
+      return { success: true, element, allPositions: getAllElementPositions(store.getDesign().elements || []) };
     }
 
     case "create_text": {
+      // Auto-stack text elements if no position specified and has parent
+      let textX = args.x;
+      let textY = args.y;
+      
+      if (args.parentId && (textX === undefined || textY === undefined)) {
+        // Find parent and calculate next available position
+        const design = store.getDesign();
+        const parent = findElementById(design.elements || [], args.parentId);
+        if (parent && parent.children && parent.children.length > 0) {
+          // Stack below existing children
+          let maxBottom = 16; // Start with padding
+          for (const child of parent.children) {
+            const childY = child.bounds?.y || 0;
+            const childHeight = child.bounds?.height || 24;
+            const childBottom = childY + childHeight;
+            if (childBottom > maxBottom) {
+              maxBottom = childBottom;
+            }
+          }
+          if (textX === undefined) textX = 16; // Default padding
+          if (textY === undefined) textY = maxBottom + 12; // 12px gap
+          console.log(`[McpServer] Auto-stacking text at y=${textY} (after ${parent.children.length} siblings)`);
+        } else {
+          // First child - use padding
+          if (textX === undefined) textX = 16;
+          if (textY === undefined) textY = 16;
+        }
+      }
+      
       const element = store.createElement("text", {
         name: args.name,
         semantic: args.semantic as SemanticType,
         description: args.description,
         content: args.content,
         bounds: {
-          x: args.x || 0,
-          y: args.y || 0,
+          x: textX || 0,
+          y: textY || 0,
           width: args.width || 200,
           height: args.fontSize ? args.fontSize * 1.5 : 24
         },
@@ -522,7 +700,147 @@ async function handleTool(name: string, args: any): Promise<any> {
         }
       });
       store.addElement(element, args.parentId);
-      return { success: true, element };
+      return { success: true, element, allPositions: getAllElementPositions(store.getDesign().elements || []) };
+    }
+
+    // ===== Convenience UI Components =====
+    case "create_button": {
+      const variantStyles: Record<string, { fill: string; textColor: string; stroke?: { color: string; width: number } }> = {
+        primary: { fill: "#007AFF", textColor: "#FFFFFF" },
+        secondary: { fill: "#E5E7EB", textColor: "#374151" },
+        outline: { fill: "transparent", textColor: "#007AFF", stroke: { color: "#007AFF", width: 1 } },
+        ghost: { fill: "transparent", textColor: "#007AFF" },
+        danger: { fill: "#EF4444", textColor: "#FFFFFF" }
+      };
+      const sizeStyles: Record<string, { height: number; fontSize: number; padding: number; radius: number }> = {
+        sm: { height: 32, fontSize: 13, padding: 12, radius: 6 },
+        md: { height: 44, fontSize: 15, padding: 16, radius: 10 },
+        lg: { height: 52, fontSize: 17, padding: 20, radius: 12 }
+      };
+      const variant = variantStyles[args.variant || "primary"];
+      const size = sizeStyles[args.size || "md"];
+      // Support both 'label' and 'text' parameters (AI sometimes uses 'text')
+      const buttonLabel = args.label || args.text || "Button";
+      const textWidth = buttonLabel.length * size.fontSize * 0.6;
+      const buttonWidth = args.width || Math.max(textWidth + size.padding * 2, 80);
+
+      // Create button background
+      const buttonBg = store.createElement("rectangle", {
+        name: buttonLabel + " Button",
+        semantic: "button" as SemanticType,
+        bounds: { x: args.x || 0, y: args.y || 0, width: buttonWidth, height: size.height },
+        style: {
+          fill: variant.fill,
+          stroke: variant.stroke,
+          radius: size.radius,
+          shadow: { type: 'drop' as const, offsetX: 0, offsetY: 2, blur: 4, color: "rgba(0,0,0,0.1)" }
+        }
+      });
+      console.log(`[create_button] Created button "${buttonLabel}" with shadow:`, JSON.stringify(buttonBg.style?.shadow), "radius:", buttonBg.style?.radius);
+      store.addElement(buttonBg, args.parentId);
+
+      // Create button text
+      const buttonText = store.createElement("text", {
+        name: buttonLabel + " Text",
+        semantic: "label" as SemanticType,
+        content: buttonLabel,
+        bounds: { x: (args.x || 0) + size.padding, y: (args.y || 0) + (size.height - size.fontSize) / 2, width: buttonWidth - size.padding * 2, height: size.fontSize * 1.2 },
+        style: { fill: variant.textColor, text: { fontSize: size.fontSize, fontWeight: "semibold", textAlign: "center" } }
+      });
+      store.addElement(buttonText, args.parentId);
+
+      return { success: true, elements: [buttonBg, buttonText], buttonId: buttonBg.id, allPositions: getAllElementPositions(store.getDesign().elements || []) };
+    }
+
+    case "create_card": {
+      const variantStyles: Record<string, { fill: string; stroke?: { color: string; width: number }; shadow?: any }> = {
+        elevated: { fill: "#FFFFFF", shadow: { type: 'drop' as const, offsetX: 0, offsetY: 4, blur: 12, color: "rgba(0,0,0,0.08)" } },
+        outlined: { fill: "#FFFFFF", stroke: { color: "#E5E7EB", width: 1 } },
+        filled: { fill: "#F9FAFB" }
+      };
+      const variant = variantStyles[args.variant || "elevated"];
+      const width = args.width || 300;
+      const height = args.height || 200;
+
+      // Create card frame
+      const cardFrame = store.createElement("frame", {
+        name: args.title ? args.title + " Card" : "Card",
+        semantic: "card" as SemanticType,
+        bounds: { x: args.x || 0, y: args.y || 0, width, height },
+        style: {
+          fill: variant.fill,
+          stroke: variant.stroke,
+          radius: 16,
+          shadow: variant.shadow,
+          layout: { type: "flex", direction: "column", padding: 16, gap: 12 }
+        }
+      });
+      store.addElement(cardFrame, args.parentId);
+
+      // Add title if provided
+      if (args.title) {
+        const titleText = store.createElement("text", {
+          name: "Card Title",
+          semantic: "heading" as SemanticType,
+          content: args.title,
+          bounds: { x: 16, y: 16, width: width - 32, height: 24 },
+          style: { fill: "#1F2937", text: { fontSize: 18, fontWeight: "semibold" } }
+        });
+        store.addElement(titleText, cardFrame.id);
+      }
+
+      return { success: true, element: cardFrame, cardId: cardFrame.id, allPositions: getAllElementPositions(store.getDesign().elements || []) };
+    }
+
+    case "create_input": {
+      const width = args.width || 280;
+      const inputHeight = 44;
+      let currentY = args.y || 0;
+
+      const elements: any[] = [];
+
+      // Add label if provided
+      if (args.label) {
+        const labelText = store.createElement("text", {
+          name: "Input Label",
+          semantic: "label" as SemanticType,
+          content: args.label,
+          bounds: { x: args.x || 0, y: currentY, width, height: 18 },
+          style: { fill: "#374151", text: { fontSize: 14, fontWeight: "medium" } }
+        });
+        store.addElement(labelText, args.parentId);
+        elements.push(labelText);
+        currentY += 24;
+      }
+
+      // Create input background
+      const inputBg = store.createElement("rectangle", {
+        name: "Input Field",
+        semantic: "input" as SemanticType,
+        bounds: { x: args.x || 0, y: currentY, width, height: inputHeight },
+        style: {
+          fill: "#FFFFFF",
+          stroke: { color: "#D1D5DB", width: 1 },
+          radius: 8
+        }
+      });
+      store.addElement(inputBg, args.parentId);
+      elements.push(inputBg);
+
+      // Add placeholder text
+      if (args.placeholder) {
+        const placeholderText = store.createElement("text", {
+          name: "Placeholder",
+          semantic: "caption" as SemanticType,
+          content: args.placeholder,
+          bounds: { x: (args.x || 0) + 12, y: currentY + 12, width: width - 24, height: 20 },
+          style: { fill: "#9CA3AF", text: { fontSize: 15 } }
+        });
+        store.addElement(placeholderText, args.parentId);
+        elements.push(placeholderText);
+      }
+
+      return { success: true, elements, inputId: inputBg.id, allPositions: getAllElementPositions(store.getDesign().elements || []) };
     }
 
     // Element Modification
@@ -547,10 +865,11 @@ async function handleTool(name: string, args: any): Promise<any> {
         }
       }
 
-      if (args.fill || args.stroke || args.radius !== undefined || args.opacity !== undefined || args.fontSize || args.fontWeight || args.textAlign) {
+      if (args.fill || args.backgroundColor || args.stroke || args.radius !== undefined || args.opacity !== undefined || args.fontSize || args.fontWeight || args.textAlign) {
         const existing = store.findElement(args.id);
         updates.style = { ...existing?.style };
         if (args.fill) updates.style.fill = args.fill;
+        if (args.backgroundColor) updates.style.backgroundColor = args.backgroundColor;
         if (args.stroke) updates.style.stroke = { color: args.stroke, width: args.strokeWidth || 1 };
         if (args.radius !== undefined) updates.style.radius = args.radius;
         if (args.opacity !== undefined) updates.style.opacity = args.opacity;
@@ -589,13 +908,14 @@ async function handleTool(name: string, args: any): Promise<any> {
 
       const style = { ...existing.style };
       if (args.fill) style.fill = args.fill;
+      if (args.backgroundColor) style.backgroundColor = args.backgroundColor;
       if (args.stroke) style.stroke = { color: args.stroke, width: args.strokeWidth || 1 };
       if (args.radius !== undefined) style.radius = args.radius;
       if (args.opacity !== undefined) style.opacity = args.opacity;
       if (args.shadow) style.shadow = args.shadow;
 
       const element = store.updateElement(args.id, { style });
-      return { success: true, element };
+      return { success: true, element, allPositions: getAllElementPositions(store.getDesign().elements || []) };
     }
 
     case "set_layout": {
@@ -617,7 +937,7 @@ async function handleTool(name: string, args: any): Promise<any> {
       const element = store.updateElement(args.id, {
         style: { ...existing.style, layout }
       });
-      return { success: true, element };
+      return { success: true, element, allPositions: getAllElementPositions(store.getDesign().elements || []) };
     }
 
     // Query Operations

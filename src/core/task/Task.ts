@@ -2034,6 +2034,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				console.log(`[Task] ✅ Restored ${this.clineMessages.length} UI messages for ${toAgent}`)
 			}
 
+			// Build subtask context reminder
+			const subtaskReminder = this.parentTaskId
+				? `\n\n⚠️ **這是一個子任務！**\n` +
+				  `父任務 ID: \`${this.parentTaskId}\`\n` +
+				  `完成工作後請使用 \`attempt_completion\` 返回父任務。`
+				: ""
+
 			// Add a continuation message to inform the agent about what happened
 			await this.say(
 				"text",
@@ -2043,7 +2050,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				`**發生了什麼：**\n` +
 				`${handoffSummary.substring(0, 800)}${handoffSummary.length > 800 ? "..." : ""}\n\n` +
 				`---\n\n` +
-				`**請根據上述反饋繼續你的工作。**`,
+				`**請根據上述反饋繼續你的工作。**` +
+				subtaskReminder,
 			)
 		} else {
 			// ============================================
@@ -2077,13 +2085,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.clineMessages = minimalClineMessages.slice(-10)
 
 			// Log the fresh start
+			// Build subtask context reminder if this is a subtask
+			const subtaskReminder = this.parentTaskId
+				? `\n\n⚠️ **IMPORTANT: This is a SUBTASK**\n` +
+				  `Parent Task ID: \`${this.parentTaskId}\`\n` +
+				  `When you complete your assigned work, you MUST use \`attempt_completion\` to return results to the parent task.\n` +
+				  `Do NOT start new phases (like implementation) - just complete your assigned phase and hand back.`
+				: ""
+
 			await this.say(
 				"text",
 				`🔄 **Context Reset for ${toAgent}**\n\n` +
 				`Previous agent (${fromAgent}) context has been saved.\n` +
 				`${toAgent} starts with fresh context.\n\n` +
 				`---\n\n` +
-				`**Handoff Summary:**\n${handoffSummary.substring(0, 500)}${handoffSummary.length > 500 ? "..." : ""}`,
+				`**Handoff Summary:**\n${handoffSummary.substring(0, 500)}${handoffSummary.length > 500 ? "..." : ""}` +
+				subtaskReminder,
 			)
 		}
 
@@ -2641,6 +2658,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async initiateTaskLoop(userContent: Anthropic.Messages.ContentBlockParam[]): Promise<void> {
 		// Kicks off the checkpoints initialization process in the background.
 		getCheckpointService(this)
+
+		// Auto-reconnect any disconnected MCP servers at task start
+		// This ensures tools are available when the task begins
+		try {
+			const mcpHub = this.providerRef.deref()?.getMcpHub()
+			if (mcpHub) {
+				// Run reconnection in background - don't block task start
+				mcpHub.reconnectDisconnectedServers().catch((err) => {
+					console.error("[Task] Failed to reconnect disconnected MCP servers:", err)
+				})
+			}
+		} catch (error) {
+			console.error("[Task] Error initiating MCP reconnection:", error)
+		}
 
 		let nextUserContent = userContent
 		let includeFileDetails = true

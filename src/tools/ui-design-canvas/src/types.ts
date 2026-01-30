@@ -175,6 +175,7 @@ export interface Layout {
 
 export interface ElementStyle {
   fill?: Fill | string;             // Can be simple color or Fill object
+  backgroundColor?: string;         // Explicit background color (separate from fill for text)
   stroke?: Stroke;
   radius?: number | string | { topLeft?: number; topRight?: number; bottomLeft?: number; bottomRight?: number };
   opacity?: number;

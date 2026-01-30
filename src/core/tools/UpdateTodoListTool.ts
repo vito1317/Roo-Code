@@ -75,6 +75,9 @@ export class UpdateTodoListTool extends BaseTool<"update_todo_list"> {
 
 			await setTodoListForTask(task, normalizedTodos)
 
+			// Render todo list using MCP-UI for visual display
+			await renderTodoListWithMcpUI(task, normalizedTodos)
+
 			if (isTodoListChanged) {
 				const md = todoListToMarkdown(normalizedTodos)
 				pushToolResult(formatResponse.toolResult("User edits todo:\n\n" + md))
@@ -219,3 +222,90 @@ function validateTodos(todos: any[]): { valid: boolean; error?: string } {
 }
 
 export const updateTodoListTool = new UpdateTodoListTool()
+
+/**
+ * Render todo list using MCP-UI tools for visual display in chat
+ * Uses render_progress for completion stats and render_list for task items
+ */
+async function renderTodoListWithMcpUI(task: Task, todos: TodoItem[]): Promise<void> {
+	try {
+		const provider = task.providerRef.deref()
+		const mcpHub = provider?.getMcpHub()
+		
+		if (!mcpHub) {
+			console.log("[UpdateTodoListTool] No MCP hub available for rendering")
+			return
+		}
+
+		// Find MCP-UI connection
+		const mcpUiConnection = mcpHub.connections.find(
+			(conn) => conn.server.name === "MCP-UI" && conn.server.status === "connected"
+		)
+
+		if (!mcpUiConnection || mcpUiConnection.type !== "connected") {
+			console.log("[UpdateTodoListTool] MCP-UI not connected, skipping render")
+			return
+		}
+
+		const client = mcpUiConnection.client
+
+		// Calculate progress
+		const totalCount = todos.length
+		const completedCount = todos.filter((t) => t.status === "completed").length
+		const inProgressCount = todos.filter((t) => t.status === "in_progress").length
+		const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+
+		// Determine variant based on progress
+		let progressVariant = "default"
+		if (percentage === 100) {
+			progressVariant = "success"
+		} else if (inProgressCount > 0) {
+			progressVariant = "warning"
+		}
+
+		// Render progress bar
+		try {
+			await client.callTool({
+				name: "render_progress",
+				arguments: {
+					value: percentage,
+					label: `📋 任務進度: ${completedCount}/${totalCount} 完成`,
+					showPercentage: true,
+					variant: progressVariant,
+					size: "medium"
+				}
+			})
+		} catch (error) {
+			console.error("[UpdateTodoListTool] Failed to render progress:", error)
+		}
+
+		// Prepare list items with status icons
+		const listItems = todos.map((t) => {
+			let icon = "⬜"  // pending
+			if (t.status === "completed") {
+				icon = "✅"
+			} else if (t.status === "in_progress") {
+				icon = "🔄"
+			}
+			return `${icon} ${t.content}`
+		})
+
+		// Render task list
+		try {
+			await client.callTool({
+				name: "render_list",
+				arguments: {
+					items: listItems,
+					ordered: true,
+					title: "📝 任務清單"
+				}
+			})
+		} catch (error) {
+			console.error("[UpdateTodoListTool] Failed to render list:", error)
+		}
+
+	} catch (error) {
+		console.error("[UpdateTodoListTool] Error rendering todo list with MCP-UI:", error)
+		// Non-fatal: don't throw, just log
+	}
+}

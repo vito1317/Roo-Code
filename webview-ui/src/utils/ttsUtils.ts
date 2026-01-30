@@ -30,6 +30,13 @@ const toolPatterns = [
 	// Figma technical output - SPECIFIC patterns (not just "figma" anywhere)
 	/^(Figma|MCP):/i,
 	/\d+ MCP calls/i,
+	// UIDesignCanvas MCP calls
+	/MCP calls in parallel on.*UIDesignCanvas/i,
+	/on "?UIDesignCanvas"?:/i,
+	// MCP tool call lists (create_frame, create_text, etc.)
+	/^\d+\.\s*(create_|update_|delete_|set_|move_|resize_)/im,
+	/create_(frame|text|rectangle|button|card|input|ellipse|image)\(/i,
+	/update_element\(/i,
 	/node (created|deleted|moved) with ID/i,
 	// Code-like content
 	/^```[\s\S]*```$/,
@@ -123,6 +130,14 @@ const handoffPatterns = [
 	// Color codes and position info
 	/🎨\s*#[A-Fa-f0-9]{6}\s*@\s*\(\d+,\s*\d+\)/,
 	/#[A-Fa-f0-9]{6}\s*@\s*\(\d+,\s*\d+\)/,
+	// MCP calls completion messages (for agent messages)
+	/✅\s*All \d+ MCP calls completed/i,
+	/All \d+ MCP calls completed/i,
+	/MCP calls completed successfully/i,
+	/\d+ MCP calls completed/i,
+	// MCP execution messages
+	/Executing \d+ MCP calls/i,
+	/MCP calls in parallel/i,
 ]
 
 export interface TtsCheckResult {
@@ -181,6 +196,22 @@ export function checkTtsStatus(text: string | undefined, isAgentMessage: boolean
 		"on port 3000",
 		"on port 8080",
 		"on port 5000",
+		// UIDesignCanvas MCP calls
+		"mcp calls in parallel",
+		"uidesigncanvas",
+		"create_frame(",
+		"create_text(",
+		"create_rectangle(",
+		"create_button(",
+		"create_card(",
+		"create_input(",
+		"update_element(",
+		"parentid",
+		"semantic",
+		// MCP calls completion
+		"mcp calls completed",
+		"mcp calls successfully",
+		"executing mcp calls",
 	]
 	if (alwaysFilterPhrases.some((phrase) => textLower.includes(phrase))) {
 		return { willSpeak: false, processedText: "", skipReason: "System message (direct match)" }

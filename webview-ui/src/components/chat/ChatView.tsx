@@ -47,6 +47,7 @@ import { CheckpointWarning } from "./CheckpointWarning"
 import { QueuedMessages } from "./QueuedMessages"
 import DismissibleUpsell from "../common/DismissibleUpsell"
 import { SentinelAgentIndicator } from "./SentinelAgentIndicator"
+import { UIDesignCanvasPreview } from "./UIDesignCanvasPreview"
 import { useCloudUpsell } from "@src/hooks/useCloudUpsell"
 import { Cloud } from "lucide-react"
 
@@ -1765,6 +1766,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			{task && (
 				<>
+					{/* UI Design Canvas Preview - shows when Designer is active */}
+					<UIDesignCanvasPreview />
+
 					{/* Sentinel Agent Status Indicator */}
 					<div className="px-4 pt-2">
 						<SentinelAgentIndicator variant="full" />

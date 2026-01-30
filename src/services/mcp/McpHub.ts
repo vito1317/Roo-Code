@@ -1222,6 +1222,9 @@ export class McpHub {
 					"create_text",
 					"create_ellipse",
 					"create_image",
+					"create_button",  // Convenience tool with modern styling
+					"create_card",    // Convenience tool with shadow
+					"create_input",   // Convenience tool with border
 					"update_element",
 					"move_element",
 					"resize_element",
@@ -2894,6 +2897,134 @@ export class McpHub {
 		}
 	}
 
+	/**
+	 * Reconnect only those MCP servers that are enabled but currently disconnected
+	 * Called when starting a new task to ensure all enabled servers are available
+	 */
+	public async reconnectDisconnectedServers(): Promise<void> {
+		if (this.isConnecting) {
+			console.log("[McpHub] reconnectDisconnectedServers: Already connecting, skipping")
+			return
+		}
+
+		// Check if MCP is globally enabled
+		const mcpEnabled = await this.isMcpEnabled()
+		if (!mcpEnabled) {
+			console.log("[McpHub] reconnectDisconnectedServers: MCP is globally disabled, skipping")
+			return
+		}
+
+		// Find all servers that need reconnection and are NOT disabled
+		const serversToReconnect = this.connections.filter((conn) => {
+			// Consider servers that are disconnected, connecting (possibly stuck), or have errors
+			// Note: status can be "connected", "connecting", or "disconnected"
+			const needsReconnect = 
+				conn.server.status === "disconnected" || 
+				conn.server.status === "connecting" ||  // May be stuck
+				!!conn.server.error
+			
+			// Skip servers that are explicitly disabled
+			const isDisabled = conn.server.disabled === true
+			
+			return needsReconnect && !isDisabled
+		})
+
+		if (serversToReconnect.length === 0) {
+			console.log("[McpHub] reconnectDisconnectedServers: No servers need reconnection")
+			return
+		}
+
+		console.log(`[McpHub] reconnectDisconnectedServers: Found ${serversToReconnect.length} server(s) needing reconnection:`,
+			serversToReconnect.map(c => `${c.server.name}(${c.server.status})`).join(", "))
+
+		this.isConnecting = true
+
+		try {
+			for (const conn of serversToReconnect) {
+				const serverName = conn.server.name
+				const source = conn.server.source || "global"
+				
+				console.log(`[McpHub] reconnectDisconnectedServers: Attempting to reconnect "${serverName}"...`)
+				
+				try {
+					// Read fresh config from file
+					const config = await this.readServerConfigFromFile(serverName, source)
+					
+					// Delete old connection first
+					await this.deleteConnection(serverName, source)
+					
+					// Wait a bit for cleanup
+					await delay(500)
+					
+					// Reconnect
+					await this.connectToServer(serverName, config, source)
+					
+					console.log(`[McpHub] reconnectDisconnectedServers: Successfully reconnected "${serverName}"`)
+				} catch (error) {
+					console.error(`[McpHub] reconnectDisconnectedServers: Failed to reconnect "${serverName}":`, error)
+					// Continue with other servers even if one fails
+				}
+			}
+
+			// Also check and reconnect built-in servers
+			await this.reconnectBuiltInServersIfNeeded()
+
+			await this.notifyWebviewOfServerChanges()
+		} finally {
+			this.isConnecting = false
+		}
+	}
+
+	/**
+	 * Reconnect built-in servers if they are not connected
+	 */
+	private async reconnectBuiltInServersIfNeeded(): Promise<void> {
+		const provider = this.providerRef.deref()
+		
+		// Check UI Design Canvas
+		if (!this.isUIDesignCanvasConnected()) {
+			console.log("[McpHub] reconnectBuiltInServersIfNeeded: Reconnecting UI Design Canvas...")
+			try {
+				await this.initializeBuiltInUIDesignCanvasServer()
+			} catch (error) {
+				console.error("[McpHub] Failed to reconnect UI Design Canvas:", error)
+			}
+		}
+
+		// Check MCP-UI
+		if (!this.isMcpUiConnected()) {
+			console.log("[McpHub] reconnectBuiltInServersIfNeeded: Reconnecting MCP-UI...")
+			try {
+				await this.initializeBuiltInMcpUiServer()
+			} catch (error) {
+				console.error("[McpHub] Failed to reconnect MCP-UI:", error)
+			}
+		}
+
+		// Check TalkToFigma
+		if (!this.isTalkToFigmaConnected()) {
+			console.log("[McpHub] reconnectBuiltInServersIfNeeded: Reconnecting TalkToFigma...")
+			try {
+				await this.initializeBuiltInTalkToFigmaServer()
+			} catch (error) {
+				console.error("[McpHub] Failed to reconnect TalkToFigma:", error)
+			}
+		}
+
+		// Check Figma Write
+		if (provider) {
+			const figmaWriteConn = this.connections.find(c => c.server.name === "figma-write")
+			if (!figmaWriteConn || figmaWriteConn.server.status !== "connected") {
+				console.log("[McpHub] reconnectBuiltInServersIfNeeded: Reconnecting Figma Write...")
+				try {
+					await this.initializeBuiltInFigmaWriteServer(provider)
+				} catch (error) {
+					console.error("[McpHub] Failed to reconnect Figma Write:", error)
+				}
+			}
+		}
+	}
+
 	private async notifyWebviewOfServerChanges(): Promise<void> {
 		// Get global server order from settings file
 		const settingsPath = await this.getMcpSettingsFilePath()
@@ -3493,6 +3624,22 @@ export class McpHub {
 					console.log(`[McpHub] Retrying tool call after error (attempt ${retryCount + 1}/${maxRetries})...`)
 					await new Promise((resolve) => setTimeout(resolve, 2000)) // Wait 2 seconds
 					return this.callTool(serverName, toolName, toolArguments, source, retryCount + 1)
+				}
+			}
+
+			// Check for MCP-UI HTML output and relay to webview
+			if (serverName === "MCP-UI") {
+				const textContent = result.content?.find((c: { type: string }) => c.type === "text")
+				if (textContent && "text" in textContent) {
+					const htmlOutput = textContent.text as string
+					// Check if it looks like HTML (starts with < and contains tags)
+					if (htmlOutput.trim().startsWith("<") && htmlOutput.includes("mcp-")) {
+						console.log(`[McpHub] MCP-UI tool returned HTML, relaying to webview`)
+						const provider = this.providerRef.deref()
+						if (provider) {
+							provider.postMessageToWebview({ type: "mcpUiHtml", html: htmlOutput })
+						}
+					}
 				}
 			}
 

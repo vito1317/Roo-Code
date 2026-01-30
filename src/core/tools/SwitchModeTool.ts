@@ -5,6 +5,7 @@ import { formatResponse } from "../prompts/responses"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
+import { getAgentPersona, isSentinelAgent } from "../sentinel/personas"
 
 interface SwitchModeParams {
 	mode_slug: string
@@ -46,6 +47,34 @@ export class SwitchModeTool extends BaseTool<"switch_mode"> {
 				task.didToolFailInCurrentTurn = true
 				pushToolResult(`Already in ${targetMode.name} mode.`)
 				return
+			}
+
+			// === WORKFLOW ENFORCEMENT ===
+			// Sentinel agents can ONLY switch to modes in their canHandoffTo list
+			// This prevents Architect from skipping Designer and going directly to "code"
+			if (isSentinelAgent(currentMode)) {
+				const currentPersona = getAgentPersona(currentMode)
+				if (currentPersona) {
+					const allowedTargets = currentPersona.canHandoffTo || []
+					const isAllowedTarget = allowedTargets.includes(mode_slug)
+
+					if (!isAllowedTarget) {
+						// Block the mode switch with a helpful error message
+						const errorMsg =
+							`❌ **Workflow Violation!**\n\n` +
+							`**${currentPersona.name}** (${currentMode}) cannot switch directly to "${mode_slug}".\n\n` +
+							`**Allowed targets:** ${allowedTargets.length > 0 ? allowedTargets.join(", ") : "(none)"}\n\n` +
+							`You must follow the proper workflow sequence. Use \`handoff_context\` to hand off to one of the allowed targets.`
+
+						console.log(
+							`[SwitchModeTool] BLOCKED: ${currentMode} -> ${mode_slug}. Allowed: [${allowedTargets.join(", ")}]`,
+						)
+						task.recordToolError("switch_mode")
+						task.didToolFailInCurrentTurn = true
+						pushToolResult(formatResponse.toolError(errorMsg))
+						return
+					}
+				}
 			}
 
 			const completeMessage = JSON.stringify({ tool: "switchMode", mode: mode_slug, reason })

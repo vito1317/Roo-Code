@@ -141,18 +141,17 @@
 			/* Design Elements */
 			.design-element {
 				position: absolute;
-				transition: box-shadow 0.15s;
 				cursor: move;
 			}
 
 			.design-element:hover {
-				box-shadow: 0 0 0 2px var(--accent);
+				outline: 2px solid var(--accent);
+				outline-offset: 0px;
 			}
 
 			.design-element.selected {
-				box-shadow:
-					0 0 0 2px var(--accent),
-					0 0 0 4px rgba(0, 122, 204, 0.3);
+				outline: 2px solid var(--accent);
+				outline-offset: 2px;
 			}
 
 			.design-element.dragging {
@@ -656,6 +655,7 @@
 				<div class="sidebar-tabs">
 					<button class="sidebar-tab active" data-tab="elements">Elements</button>
 					<button class="sidebar-tab" data-tab="properties">Properties</button>
+					<button class="sidebar-tab" data-tab="preview">Preview</button>
 				</div>
 
 				<div class="sidebar-content">
@@ -670,6 +670,21 @@
 					<div class="sidebar-panel" id="propertiesPanel">
 						<div id="propertiesContent">
 							<div class="no-selection">Select an element to edit its properties</div>
+						</div>
+					</div>
+
+					<!-- MCP-UI Preview Panel -->
+					<div class="sidebar-panel" id="previewPanel">
+						<div style="padding: 12px; border-bottom: 1px solid var(--border);">
+							<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">MCP-UI Render Preview</div>
+							<div style="font-size: 11px; color: var(--text-secondary);">HTML output from MCP-UI tools will be displayed here</div>
+						</div>
+						<div id="mcpUiPreviewContent" style="padding: 12px; overflow: auto; flex: 1;">
+							<div class="mcp-ui-empty" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+								<div style="font-size: 32px; margin-bottom: 12px;">🎨</div>
+								<div style="font-size: 13px; font-weight: 500;">No Preview Available</div>
+								<div style="font-size: 11px; margin-top: 4px;">Use MCP-UI tools (render_button, render_card, etc.) to generate preview</div>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -1013,6 +1028,10 @@
 
 				// Style
 				if (element.style) {
+					// DEBUG: Log shadow and radius values to verify they are received
+					if (element.semantic === 'button' || element.style.shadow) {
+						console.log(`[renderElement] ${element.name || element.id}: shadow=`, element.style.shadow, 'radius=', element.style.radius);
+					}
 					// Apply fill - use explicit fill, or semantic defaults, or transparent for containers
 					const getFill = () => {
 						if (element.style.fill) {
@@ -1050,10 +1069,19 @@
 						}
 						return null
 					}
-					const fill = getFill()
-					if (fill) {
-						el.style.backgroundColor = fill
-					}
+                                        const fill = getFill()
+                                        if (fill) {
+                                                // For text elements, fill is the text color, not background
+                                                if (element.type === 'text') {
+                                                        el.style.color = fill
+                                                } else {
+                                                        el.style.backgroundColor = fill
+                                                }
+                                        }
+                                        // Explicit background color (works for any element including text)
+                                        if (element.style.backgroundColor) {
+                                                el.style.backgroundColor = resolveToken(element.style.backgroundColor)
+                                        }
 					if (element.style.stroke) {
 						el.style.border = `${element.style.stroke.width || 1}px solid ${resolveToken(element.style.stroke.color)}`
 					}

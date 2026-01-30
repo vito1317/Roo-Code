@@ -174,38 +174,81 @@ export class SentinelStateMachine {
 			condition: (ctx) => {
 				// Minimum element threshold - prevents placeholder-only designs
 				const MIN_ELEMENTS = 15
+				const MIN_COMPONENTS_FALLBACK = 10  // Increased from 3
 				
 				// Designer must have created enough elements for a real UI
 				const elementCount = typeof ctx?.expectedElements === "number" ? ctx.expectedElements : 0
 				const hasEnoughElements = elementCount >= MIN_ELEMENTS
 				
-				// Also check for designSpecs + createdComponents as fallback
-				const hasDesignSpecs = !!ctx?.designSpecs
-				const hasCreatedComponents = Array.isArray(ctx?.createdComponents) && ctx.createdComponents.length >= 3
+				// Check for actual UI components (not just frames)
+				const components = ctx?.createdComponents || []
+				const actualUIComponents = components.filter((name: string) => {
+					const lower = name.toLowerCase()
+					// Only count actual UI elements, not just container frames
+					const uiKeywords = ['button', 'text', 'input', 'label', 'icon', 'image', 'title', 'subtitle', 
+						'header', 'footer', 'nav', 'card', 'list', 'item', 'badge', 'avatar', 'tab', 
+						'按鈕', '文字', '輸入', '標題', '圖標', '標籤', '導航', '卡片']
+					return uiKeywords.some(keyword => lower.includes(keyword))
+				})
 				
+				// Primary check: expectedElements >= 15
 				if (hasEnoughElements) {
 					console.log(`[SentinelFSM] Designer handoff approved: ${elementCount} elements created`)
 					return true
 				}
 				
-				// Fallback: designSpecs with multiple createdComponents
-				if (hasDesignSpecs && hasCreatedComponents) {
-					console.log(`[SentinelFSM] Designer handoff approved via fallback: ${ctx.createdComponents?.length} components`)
+				// Strict fallback: require 10+ components with at least 5 actual UI elements
+				const hasDesignSpecs = !!ctx?.designSpecs
+				const hasEnoughComponents = components.length >= MIN_COMPONENTS_FALLBACK
+				const hasActualUIElements = actualUIComponents.length >= 5
+				
+				if (hasDesignSpecs && hasEnoughComponents && hasActualUIElements) {
+					console.log(`[SentinelFSM] Designer handoff approved via fallback: ${components.length} components, ${actualUIComponents.length} UI elements`)
 					return true
 				}
 				
 				// Reject handoff if design quality is too low
-				console.log(`[SentinelFSM] Designer handoff REJECTED: only ${elementCount} elements (minimum ${MIN_ELEMENTS}), designSpecs=${hasDesignSpecs}, createdComponents=${ctx?.createdComponents?.length || 0}`)
+				console.log(`[SentinelFSM] Designer handoff REJECTED: only ${elementCount} elements (minimum ${MIN_ELEMENTS}), components=${components.length}, actualUIElements=${actualUIComponents.length}`)
+				console.log(`[SentinelFSM] Components list: ${JSON.stringify(components)}`)
 				return false
 			},
 			label: "Design submitted with sufficient quality, handoff to Design Review for verification",
 		},
 
-		// Design Review approves → Builder implements
+		// Design Review approves (subtask) → Complete and return to parent
+		// IMPORTANT: This transition must come BEFORE the BUILDER transition
+		// to ensure subtasks return to parent after design phase completes
+		{
+			from: AgentState.DESIGN_REVIEW,
+			to: AgentState.COMPLETED,
+			condition: (ctx) => {
+				// Check if design review passed
+				if (ctx?.designReviewPassed !== true) return false
+				// Check if this is a subtask (has parent task)
+				// Access task via the FSM's taskRef (set during construction)
+				const task = (this as any).taskRef?.deref?.()
+				const isSubtask = !!task?.parentTaskId
+				if (isSubtask) {
+					console.log(`[SentinelFSM] Design subtask completed, returning to parent task (${task.parentTaskId})`)
+				}
+				return isSubtask
+			},
+			label: "Design subtask complete, return to parent",
+		},
+
+		// Design Review approves → Builder implements (non-subtask only)
 		{
 			from: AgentState.DESIGN_REVIEW,
 			to: AgentState.BUILDER,
-			condition: (ctx) => ctx?.designReviewPassed === true,
+			condition: (ctx) => {
+				// Only proceed to Builder if design review passed AND this is NOT a subtask
+				if (ctx?.designReviewPassed !== true) return false
+				// Check if this is a subtask
+				const task = (this as any).taskRef?.deref?.()
+				const isSubtask = !!task?.parentTaskId
+				// If it's a subtask, don't go to Builder (the COMPLETED transition above handles it)
+				return !isSubtask
+			},
 			label: "Design verified complete, handoff to Builder",
 		},
 
@@ -424,15 +467,30 @@ export class SentinelStateMachine {
 			console.log(`[SentinelFSM] Design Review rejection count: ${this.designReviewRejectionCount}/${this.config.maxDesignReviewRetries}`)
 
 			if (this.designReviewRejectionCount >= this.config.maxDesignReviewRetries) {
-				console.log(`[SentinelFSM] Max Design Review retries reached. Auto-approving and proceeding to Builder.`)
-				// Auto-approve and proceed to Builder instead of looping forever
-				if (this.currentContext) {
-					this.currentContext.designReviewPassed = true
-					this.currentContext.previousAgentNotes =
-						(this.currentContext.previousAgentNotes || "") +
-						`\n\n⚠️ Auto-approved after ${this.designReviewRejectionCount} Design Review attempts.`
+				// Check if this is a subtask - if so, complete instead of continuing to Builder
+				const task = this.taskRef?.deref?.()
+				const isSubtask = !!task?.parentTaskId
+				
+				if (isSubtask) {
+					console.log(`[SentinelFSM] Max Design Review retries reached (subtask). Auto-approving and returning to parent.`)
+					if (this.currentContext) {
+						this.currentContext.designReviewPassed = true
+						this.currentContext.previousAgentNotes =
+							(this.currentContext.previousAgentNotes || "") +
+							`\n\n⚠️ Auto-approved after ${this.designReviewRejectionCount} Design Review attempts. Returning to parent task.`
+					}
+					return this.transition(AgentState.COMPLETED)
+				} else {
+					console.log(`[SentinelFSM] Max Design Review retries reached. Auto-approving and proceeding to Builder.`)
+					// Auto-approve and proceed to Builder instead of looping forever
+					if (this.currentContext) {
+						this.currentContext.designReviewPassed = true
+						this.currentContext.previousAgentNotes =
+							(this.currentContext.previousAgentNotes || "") +
+							`\n\n⚠️ Auto-approved after ${this.designReviewRejectionCount} Design Review attempts.`
+					}
+					return this.transition(AgentState.BUILDER)
 				}
-				return this.transition(AgentState.BUILDER)
 			}
 		}
 
@@ -618,31 +676,71 @@ export class SentinelStateMachine {
 				console.log("[SentinelFSM] ========== DESIGN REVIEW HANDOFF DECISION ==========")
 				console.log("[SentinelFSM] Full handoffData:", JSON.stringify(handoffData, null, 2))
 				
-				// Check for rejection - support multiple formats
-				// Default to rejected (designReviewPassed must be explicitly true to pass)
-				const isApproved = handoffData.designReviewPassed === true
+				// Check for approval - support multiple formats
+				// Accept boolean true, string "true", or status-based approval
+				// Cast to any to allow flexible comparison (AI may output various formats)
+				const designReviewPassedValue = handoffData.designReviewPassed as any
+				const isApprovedByFlag = 
+					designReviewPassedValue === true ||
+					designReviewPassedValue === "true" ||
+					designReviewPassedValue === 1 ||
+					designReviewPassedValue === "1"
+				
+				// Also check status field for approval indicators
+				const statusLower = (handoffData.designReviewStatus || handoffData.status || "").toString().toLowerCase()
+				const isApprovedByStatus = 
+					statusLower === "approved" ||
+					statusLower === "passed" ||
+					statusLower === "pass" ||
+					statusLower.includes("通過") ||
+					statusLower.includes("approved")
+				
+				// Check notes for approval keywords
+				const notesLower = (handoffData.previousAgentNotes || "").toString().toLowerCase()
+				const isApprovedByNotes = 
+					notesLower.includes("設計審查通過") ||
+					notesLower.includes("design review passed") ||
+					notesLower.includes("審查通過") ||
+					notesLower.includes("勉強可以") ||
+					notesLower.includes("通過了")
+				
+				const isApproved = isApprovedByFlag || isApprovedByStatus || isApprovedByNotes
 
-				const isRejected =
-					!isApproved || // Not explicitly approved = rejected
+				// Only reject if NOT approved AND has explicit rejection indicators
+				// Key fix: if isApproved is true, we should NOT reject
+				const hasExplicitRejection = 
 					handoffData.designReviewStatus === "rejected" ||
 					(handoffData.completion_percentage && parseInt(handoffData.completion_percentage) < 80)
+				
+				const isRejected = !isApproved && hasExplicitRejection
 
 				console.log("[SentinelFSM] Design Review check:", {
 					designReviewPassed: handoffData.designReviewPassed,
 					designReviewPassedType: typeof handoffData.designReviewPassed,
 					designReviewStatus: handoffData.designReviewStatus,
+					status: handoffData.status,
 					completion_percentage: handoffData.completion_percentage,
+					isApprovedByFlag,
+					isApprovedByStatus,
+					isApprovedByNotes,
 					isApproved,
+					hasExplicitRejection,
 					isRejected,
-					reason: !isApproved ? "designReviewPassed !== true" : 
-						handoffData.designReviewStatus === "rejected" ? "designReviewStatus is rejected" :
-						(handoffData.completion_percentage && parseInt(handoffData.completion_percentage) < 80) ? "completion_percentage < 80" : "unknown"
 				})
 
 				if (isRejected) {
 					console.log("[SentinelFSM] Design Review REJECTED - returning to Designer")
 					return AgentState.DESIGNER
 				}
+				
+				// Check if this is a subtask - if so, complete instead of continuing to Builder
+				const task = this.taskRef?.deref?.()
+				if (task?.parentTaskId) {
+					console.log(`[SentinelFSM] Design Review PASSED - this is a subtask, returning COMPLETED to return to parent (${task.parentTaskId})`)
+					return AgentState.COMPLETED
+				}
+				
+				console.log("[SentinelFSM] Design Review PASSED - continuing to Builder")
 				return AgentState.BUILDER
 			}
 
@@ -805,10 +903,40 @@ export class SentinelStateMachine {
 
 		// Generate walkthrough on completion and clear agent memory
 		if (targetState === AgentState.COMPLETED && this.currentContext) {
+			const task = this.taskRef.deref()
+			
+			// Check if this is a subtask - if so, trigger parent return
+			if (task?.parentTaskId) {
+				console.log(`[SentinelFSM] Subtask workflow completed. Triggering return to parent (${task.parentTaskId})`)
+				
+				// Clear agent memory first
+				task.clearSentinelAgentMemory()
+				console.log("[SentinelFSM] Cleared agent memory for subtask completion")
+				
+				// Add a message that instructs the AI to use attempt_completion
+				// This will trigger the normal subtask return flow
+				await task.say(
+					"text",
+					`✅ **設計子任務已完成**\n\n` +
+					`設計審查已通過，現在需要返回父任務。\n\n` +
+					`⚠️ **重要：請立即使用 \`attempt_completion\` 工具返回父任務！**\n\n` +
+					`父任務 ID: \`${task.parentTaskId}\`\n` +
+					`請在 result 參數中總結設計結果，然後返回父任務繼續後續工作。`,
+				)
+				
+				// Skip walkthrough generation for subtasks
+				return {
+					success: true,
+					fromState,
+					toState: targetState,
+					context: this.currentContext ?? undefined,
+				}
+			}
+			
+			// For non-subtasks, generate walkthrough
 			await this.generateWalkthrough()
 
 			// Clear per-agent conversation memory as workflow is complete
-			const task = this.taskRef.deref()
 			if (task) {
 				task.clearSentinelAgentMemory()
 				console.log("[SentinelFSM] Cleared agent memory on workflow completion")
@@ -835,7 +963,14 @@ export class SentinelStateMachine {
 
 		let targetModeSlug: string
 		if (agentState === AgentState.COMPLETED || agentState === AgentState.IDLE) {
-			// Return to default mode
+			// Check if this is a subtask completing - if so, don't switch mode
+			// The subtask needs to stay in current mode to use attempt_completion
+			const task = this.taskRef.deref()
+			if (task?.parentTaskId && agentState === AgentState.COMPLETED) {
+				console.log("[SentinelFSM] switchToAgentMode: Subtask completing - skipping mode switch to allow parent return")
+				return
+			}
+			// Return to default mode for non-subtasks
 			targetModeSlug = "code"
 		} else if (agentState === AgentState.BLOCKED) {
 			// Stay in current mode

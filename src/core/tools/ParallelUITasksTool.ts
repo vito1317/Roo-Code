@@ -299,6 +299,43 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 		const { askApproval, handleError, pushToolResult } = callbacks
 
 		try {
+			// CRITICAL: Only Designer agent can use this tool!
+			// Check the current task mode from the task
+			const currentMode = task.taskMode || ""
+			const isDesigner = currentMode.includes("designer") || 
+				currentMode === "sentinel-designer"
+			
+			if (!isDesigner) {
+				task.consecutiveMistakeCount++
+				task.recordToolError("parallel_ui_tasks")
+				task.didToolFailInCurrentTurn = true
+				
+				const errorMessage = `❌ 錯誤：parallel_ui_tasks 工具只能由 Designer Agent 使用！
+
+🚫 你目前的角色是：${currentMode || "未知"}
+✅ 正確做法：使用 handoff_context 工具將設計任務交接給 Designer Agent
+
+範例：
+\`\`\`xml
+<handoff_context>
+<target_agent>sentinel-designer</target_agent>
+<context_json>{
+  "needsDesign": true,
+  "useUIDesignCanvas": true,
+  "screens": ["首頁", "設定頁"],
+  ...
+}</context_json>
+</handoff_context>
+\`\`\`
+
+❌ Architect/Builder/QA 都不能直接畫 UI！
+✅ 只有 Designer 負責 UI 設計！`
+				
+				await task.say("error", errorMessage)
+				pushToolResult(formatResponse.toolError(errorMessage))
+				return
+			}
+			
 			// Validate tasks parameter
 			if (!params.tasks) {
 				task.consecutiveMistakeCount++
@@ -561,6 +598,9 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 					create_rectangle: ["width", "height", "x", "y", "cornerRadius", "radius", "opacity"],
 					create_frame: ["width", "height", "x", "y"],
 					create_text: ["x", "y", "fontSize"],
+					create_button: ["width", "height", "x", "y", "fontSize"],  // UIDesignCanvas convenience tool
+					create_card: ["width", "height", "x", "y", "padding"],      // UIDesignCanvas convenience tool
+					create_input: ["width", "height", "x", "y", "fontSize"],    // UIDesignCanvas convenience tool
 					add_text: ["x", "y", "fontSize"],
 					move_node: ["x", "y"],
 					set_position: ["x", "y"],
@@ -910,6 +950,54 @@ export class ParallelUITasksTool extends BaseTool<"parallel_ui_tasks"> {
 							console.log(
 								`[ParallelUI] Creating display element at (${displayX}, ${displayY}) with cornerRadius=${cornerRadius}`,
 							)
+
+							// Use UIDesignCanvas convenience tools for better-looking UI
+							if (designServerName === "UIDesignCanvas") {
+								try {
+									console.log(`[ParallelUI] Using UIDesignCanvas create_card for display element`)
+									// Determine card variant based on color or use elevated for shadow effect
+									let cardVariant = "elevated" // Default to elevated for shadow effect
+									if (bgColor) {
+										const lowerBg = bgColor.toLowerCase()
+										if (lowerBg.includes("f9fafb") || lowerBg.includes("filled")) {
+											cardVariant = "filled"
+										} else if (lowerBg === "transparent" || lowerBg.includes("e5e7eb")) {
+											cardVariant = "outlined"
+										}
+									}
+
+									const cardResult = await mcpHub!.callTool("UIDesignCanvas", "create_card", {
+										x: displayX,
+										y: displayY,
+										width,
+										height,
+										title: displayTask.designSpec?.text || displayTask.description || "Display",
+										variant: cardVariant,
+										parentId: params.containerFrame,
+									})
+									
+									// Extract card node ID
+									if (cardResult.content && cardResult.content.length > 0) {
+										const textContent = cardResult.content.find((c: any) => c.type === "text")
+										if (textContent && textContent.type === "text") {
+											try {
+												const data = JSON.parse(textContent.text)
+												if (data.id || data.nodeId) {
+													console.log(`[ParallelUI] ✓ Display card created with create_card, ID: ${data.id || data.nodeId}`)
+												}
+											} catch {}
+										}
+									}
+									
+									await task.say("text", `✅ Created: ${displayTask.description}`)
+									continue // Skip the basic tool approach
+								} catch (err) {
+									console.warn(`[ParallelUI] create_card failed, falling back to basic tools:`, err)
+									// Fall through to basic tool approach
+								}
+							}
+
+							// Fallback: Basic create_rectangle approach
 							const rectResult = await callFigmaTool("create_rectangle", {
 								width,
 								height,

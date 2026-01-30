@@ -126,6 +126,23 @@ export class HandoffContextTool extends BaseTool<"handoff_context"> {
 				
 				// STRICT: Require at least 15 elements for a proper design
 				const MIN_REQUIRED_ELEMENTS = 15
+
+				// ====== Fetch ACTUAL element count from UIDesignCanvas ======
+				let actualElementCount = 0
+				try {
+					const resp = await fetch("http://127.0.0.1:4420/design", { signal: AbortSignal.timeout(3000) })
+					if (resp.ok) {
+						const design = await resp.json()
+						const count = (els: any[]): number => els.reduce((n, e) => n + 1 + (e.children ? count(e.children) : 0), 0)
+						actualElementCount = count(design.elements || [])
+						console.log(`[HandoffContextTool] UIDesignCanvas ACTUAL: ${actualElementCount} elements`)
+					}
+				} catch (e) { /* ignore */ }
+				if (actualElementCount > 0 && actualElementCount < MIN_REQUIRED_ELEMENTS) {
+					task.recordToolError("handoff_context")
+					pushToolResult(formatResponse.toolError(`❌ 設計驗證失敗！實際只有 ${actualElementCount} 個元素（需要 ${MIN_REQUIRED_ELEMENTS} 個）。請繼續創建更多 UI 元素！`))
+					return
+				}
 				
 				if (createdComponents.length === 0 || expectedElements === 0) {
 					task.recordToolError("handoff_context")

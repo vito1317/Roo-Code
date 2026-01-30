@@ -186,10 +186,20 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			/vite(\s|$)/i,
 			/next(\s+dev|\s+start)/i,
 			/node\s+.*server/i,
-			/python\s+-m\s+http\.server/i,
+			/python3?\s+-m\s+http\.server/i,  // Match both python and python3
 			/flask\s+run/i,
 			/uvicorn/i,
 			/nodemon/i,
+			/npx\s+serve/i,                    // npx serve .
+			/php\s+-S/i,                        // php -S localhost:8000
+			/php\s+artisan\s+serve/i,           // php artisan serve (Laravel)
+			/ruby\s+.*server/i,                 // ruby server
+			/rails\s+server/i,                  // rails server
+			/go\s+run\s+.*server/i,             // go run server.go
+			/cargo\s+run/i,                     // cargo run (Rust)
+			/deno\s+(run|serve)/i,              // deno run/serve
+			/live-server/i,                     // live-server
+			/http-server/i,                     // http-server
 		]
 		return serverPatterns.some((pattern) => pattern.test(command))
 	}

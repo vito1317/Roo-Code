@@ -109,7 +109,10 @@ export interface ExtensionMessage {
 		| "branchWorktreeIncludeResult"
 		| "sentinelAgentState"
 		| "figmaConnectionResult"
+		| "mcpUiHtml"
+		| "clearMcpUiHtml"
 	text?: string
+	html?: string // MCP-UI HTML output
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	checkpointWarning?: {
 		type: "WAIT_TIMEOUT" | "INIT_TIMEOUT"
@@ -559,6 +562,7 @@ export interface WebviewMessage {
 		| "testFigmaConnection"
 		| "openFigmaPreview"
 		| "openPenpotPreview"
+		| "openUIDesignCanvas"
 		| "reconnectMcpUiServer"
 		| "searchFiles"
 		| "toggleApiConfigPin"

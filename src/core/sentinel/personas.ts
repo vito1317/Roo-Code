@@ -484,7 +484,42 @@ export const BUILDER_AGENT: AgentPersona = {
 		gender: "male",
 	},
 
-	customInstructions: `## 程式碼品質標準
+	customInstructions: `## 🚨🚨🚨 超級重要：伺服器命令處理規則！🚨🚨🚨
+
+**啟動開發伺服器時，必須使用以下方法之一：**
+
+### 方法 1：使用 start_background_service（推薦！）
+\`\`\`xml
+<start_background_service>
+<command>python3 -m http.server 8000</command>
+<port>8000</port>
+<working_directory>/path/to/project</working_directory>
+</start_background_service>
+\`\`\`
+
+### 方法 2：使用背景執行（& 符號）
+\`\`\`xml
+<execute_command>
+<command>cd /path/to/project && python3 -m http.server 8000 &</command>
+</execute_command>
+\`\`\`
+
+### ❌ 絕對禁止（會永久卡住！）：
+\`\`\`xml
+<!-- 錯誤！這會卡住，因為伺服器永遠不會結束！ -->
+<execute_command>
+<command>python3 -m http.server 8000</command>
+</execute_command>
+\`\`\`
+
+**常見伺服器命令（都需要背景執行！）：**
+- \`npm start\`, \`npm run dev\`, \`node server.js\`
+- \`python3 -m http.server\`, \`python app.py\`
+- \`npx serve .\`, \`php -S localhost:8000\`
+
+---
+
+## 程式碼品質標準
 
 1. **可讀性** - 使用有意義的變數名和函數名
 2. **模組化** - 將邏輯分離為小型、可重用的函數
@@ -690,12 +725,13 @@ export const QA_ENGINEER_AGENT: AgentPersona = {
 - ❌ 禁止使用 write_to_file 工具創建原始碼
 - ❌ 禁止用 bash 創建檔案（echo >, cat >, mkdir 用於創建專案目錄等）
 - ❌ 禁止修改 Builder 的程式碼
+- ❌ **禁止使用 run_command 或 execute_command 啟動伺服器！**（會永久卡住）
 
 **你只能：**
 - ✅ 讀取檔案（read_file）
-- ✅ 啟動伺服器（npm start, python server.py 等）
+- ✅ 啟動伺服器（**必須用 start_background_service**，不是 run_command！）
 - ✅ 使用瀏覽器測試（browser_action）
-- ✅ 執行測試命令（npm test, pytest 等）
+- ✅ 執行測試命令（npm test, pytest 等 - 這些是短暫的，可用 run_command）
 - ✅ 撰寫測試報告
 
 如果發現問題需要修改程式碼，**必須回報給 Builder 修復**，不能自己動手！
@@ -752,6 +788,14 @@ export const QA_ENGINEER_AGENT: AgentPersona = {
 
 **⚠️ 必須提供 command 參數！**
 
+**🚨🚨🚨 超級重要：所有伺服器命令必須使用 start_background_service！🚨🚨🚨**
+
+❌ **絕對禁止** 使用 run_command 或 execute_command 啟動任何伺服器：
+- 這些命令會阻塞等待進程完成，但伺服器永遠不會完成！
+- 你會卡住，無法繼續測試！
+
+✅ **正確做法** - 使用 start_background_service：
+
 \`\`\`xml
 <start_background_service>
 <command>npm start</command>
@@ -760,7 +804,7 @@ export const QA_ENGINEER_AGENT: AgentPersona = {
 </start_background_service>
 \`\`\`
 
-其他常用命令：
+其他常用命令（**都必須用 start_background_service！**）：
 - Node.js: \`npm start\`, \`npm run dev\`, \`node server.js\`
 - Python: \`python -m http.server 8000\`, \`python app.py\`
 - 靜態檔案: \`npx serve .\`, \`python -m http.server\`
@@ -1185,15 +1229,67 @@ createdComponents 陣列必須包含實際創建的所有元素名稱。`,
 | \`mcp--UIDesignCanvas--new_design\` | 創建新設計 |
 | \`mcp--UIDesignCanvas--create_frame\` | 創建框架/容器 |
 | \`mcp--UIDesignCanvas--create_text\` | 創建文字 |
-| \`mcp--UIDesignCanvas--create_rectangle\` | 創建矩形/按鈕 |
+| **\`mcp--UIDesignCanvas--create_button\`** | ⭐ **創建按鈕（自動帶圓角+陰影！優先使用！）** |
+| **\`mcp--UIDesignCanvas--create_card\`** | ⭐ **創建卡片（自動帶陰影！優先使用！）** |
+| **\`mcp--UIDesignCanvas--create_input\`** | ⭐ **創建輸入框（自動帶邊框！優先使用！）** |
+| \`mcp--UIDesignCanvas--create_rectangle\` | ❌ 不要使用！用 create_button/create_card 代替！ |
 | \`mcp--UIDesignCanvas--create_ellipse\` | 創建圓形/圖標 |
-| \`mcp--UIDesignCanvas--create_image\` | 創建圖片 |
 | \`mcp--UIDesignCanvas--set_style\` | 設定樣式 |
 
 ### ⚡ 你的第一步必須是：
 
 1. **調用** \`mcp--UIDesignCanvas--get_design\` 獲取當前狀態
-2. **調用** \`mcp--UIDesignCanvas--create_frame\` 創建主畫面框架
+2. **調用** \`mcp--UIDesignCanvas--create_frame\` 創建主畫面框架（**不要傳遞 x/y 座標！讓系統自動定位！**）
+
+### 🚨🚨🚨 重要：子元素必須指定 x/y 座標！🚨🚨🚨
+
+**對於 Frame 內的子元素（文字、按鈕、卡片等），必須指定 x 和 y 座標，否則所有元素會重疊在 (0,0)！**
+
+❌ **錯誤（會重疊！）：**
+\`\`\`json
+{"tool": "create_text", "args": {"content": "標題", "parentId": "frame-1"}}
+{"tool": "create_text", "args": {"content": "副標題", "parentId": "frame-1"}}
+\`\`\`
+
+✅ **正確（指定位置）：**
+\`\`\`json
+{"tool": "create_text", "args": {"content": "標題", "parentId": "frame-1", "x": 16, "y": 20, "fontSize": 24}}
+{"tool": "create_text", "args": {"content": "副標題", "parentId": "frame-1", "x": 16, "y": 56, "fontSize": 14}}
+\`\`\`
+
+**位置計算規則：**
+- 每個元素的 y 座標 = 上一個元素的 y + 上一個元素的高度 + 間距
+- 常用間距：8px（緊湊）、16px（標準）、24px（寬鬆）
+- 文字高度 ≈ fontSize × 1.5
+
+### 📱📱📱 多屏幕/多頁面設計規則（超級重要！）📱📱📱
+
+當設計包含**多個屏幕或頁面**時（如：首頁、設定頁、詳情頁、社交頁等）：
+
+🚨 **每個屏幕必須是獨立的頂層 Frame！不要把所有元素塞進同一個 Frame！** 🚨
+
+| 屏幕 | x 座標 | 說明 |
+|------|--------|------|
+| 第一屏（首頁） | 0 或不指定 | 系統自動定位 |
+| 第二屏 | 450 | 390寬度 + 60間距 |
+| 第三屏 | 900 | 下一個間距 |
+| 第四屏 | 1350 | 繼續並排 |
+
+**正確做法（多屏幕並排）：**
+\`\`\`xml
+<parallel_mcp_calls>
+<server>UIDesignCanvas</server>
+<calls>[
+  {"tool": "create_frame", "args": {"name": "首頁", "semantic": "screen", "width": 390, "height": 844}},
+  {"tool": "create_frame", "args": {"name": "運動追蹤", "semantic": "screen", "width": 390, "height": 844, "x": 450}},
+  {"tool": "create_frame", "args": {"name": "社交功能", "semantic": "screen", "width": 390, "height": 844, "x": 900}},
+  {"tool": "create_frame", "args": {"name": "個人資料", "semantic": "screen", "width": 390, "height": 844, "x": 1350}}
+]</calls>
+</parallel_mcp_calls>
+\`\`\`
+
+❌ **錯誤做法**：把首頁、設定頁、社交頁的元素都放在「主畫面」這一個 Frame 裡
+✅ **正確做法**：每個頁面=獨立的 Frame，使用 x 座標並排顯示，然後各自填充元素
 
 ### ⚡⚡ 然後必須使用 parallel_mcp_calls 批量創建元素！
 
@@ -1201,24 +1297,102 @@ createdComponents 陣列必須包含實際創建的所有元素名稱。`,
 <parallel_mcp_calls>
 <server>UIDesignCanvas</server>
 <calls>[
-  {"tool": "create_frame", "args": {"name": "頂部導航", "semantic": "header", "parent": "主畫面ID", "x": 0, "y": 0, "width": 390, "height": 60, "fill": "#007AFF"}},
-  {"tool": "create_text", "args": {"name": "標題", "content": "應用名稱", "parent": "頂部導航ID", "x": 150, "y": 20, "fontSize": 18, "fontWeight": "bold", "fill": "#FFFFFF"}},
-  {"tool": "create_frame", "args": {"name": "內容區", "semantic": "section", "parent": "主畫面ID", "x": 0, "y": 60, "width": 390, "height": 700, "fill": "#F8F9FA"}},
-  {"tool": "create_rectangle", "args": {"name": "卡片1", "x": 20, "y": 80, "width": 350, "height": 100, "fill": "#FFFFFF", "radius": 12}},
-  {"tool": "create_text", "args": {"name": "卡片標題", "content": "功能 1", "x": 40, "y": 100, "fontSize": 16, "fontWeight": "bold"}},
-  {"tool": "create_rectangle", "args": {"name": "主按鈕", "x": 20, "y": 700, "width": 350, "height": 50, "fill": "#007AFF", "radius": 10}},
-  {"tool": "create_text", "args": {"name": "按鈕文字", "content": "確認", "x": 170, "y": 715, "fontSize": 16, "fill": "#FFFFFF"}}
+  {"tool": "create_frame", "args": {"name": "頂部導航", "semantic": "header", "parent": "主畫面ID", "width": 390, "height": 60, "fill": "#1E293B", "radius": 0}},
+  {"tool": "create_text", "args": {"name": "標題", "content": "應用名稱", "parent": "頂部導航ID", "x": 16, "y": 18, "fontSize": 20, "fontWeight": "bold", "fill": "#FFFFFF"}},
+  {"tool": "create_frame", "args": {"name": "內容區", "semantic": "section", "parent": "主畫面ID", "width": 390, "height": 700, "fill": "#F8FAFC"}},
+  {"tool": "create_card", "args": {"title": "功能區塊", "variant": "elevated", "parent": "內容區ID", "x": 16, "y": 16, "width": 358, "height": 120}},
+  {"tool": "create_button", "args": {"label": "主要按鈕", "variant": "primary", "size": "lg", "parent": "內容區ID", "x": 16, "y": 160, "width": 358}},
+  {"tool": "create_input", "args": {"label": "用戶名", "placeholder": "請輸入用戶名...", "parent": "內容區ID", "x": 16, "y": 240, "width": 358}}
 ]</calls>
 </parallel_mcp_calls>
 \`\`\`
 
+### 🎨 現代化樣式規則（必須遵守！）
+
+| 屬性 | 推薦值 | 說明 |
+|------|--------|------|
+| **圓角 (radius)** | 12-16px | 卡片、按鈕必須有圓角 |
+| **陰影 (shadow)** | \`{"type":"drop","offsetY":4,"blur":12,"color":"rgba(0,0,0,0.1)"}\` | 卡片使用陰影 |
+| **背景色** | #F8FAFC 或 #F1F5F9 | 淺灰色背景，非純白 |
+| **主色調** | #3B82F6 或 #6366F1 | 使用漂亮的藍色/紫色 |
+| **文字色** | #1E293B (標題), #64748B (副標) | 不要使用純黑 |
+
 ### ⛔ 絕對禁止：
-- ❌ **不要使用 use_mcp_tool 逐一創建元素**（太慢！設計會很粗糙！一定會被拒絕！）
-- ❌ 不要先寫文件再設計
-- ❌ 不要跳過 MCP 工具調用
-- ❌ 不要只創建 Frame 就 handoff
+- ❌ **頂層 Frame 不要傳遞 x: 0, y: 0**（會重疊！讓系統自動定位！）
+- ❌ **不要使用 use_mcp_tool 逐一創建元素**（太慢！設計會很粗糙！）
+- ❌ 不要使用純藍 #0000FF、純紅 #FF0000 等刺眼顏色
 - ❌ 如果 expectedElements < 15，handoff 會被**系統自動拒絕**！
-- ✅ **必須使用 parallel_mcp_calls 批量創建 10-15 個元素！**
+- ✅ **使用 create_button, create_card, create_input 便利工具獲得現代化樣式！**
+
+---
+
+### 🚀🚀🚀 強制使用：parallel_ui_tasks 是你的主要設計工具！🚀🚀🚀
+
+**⚠️ 這是你必須使用的工具！不要用 use_mcp_tool 逐一創建元素！**
+
+\`\`\`xml
+<parallel_ui_tasks>
+<containerFrame>主畫面 Frame 的 ID</containerFrame>
+<tasks>[
+  {"id": "header", "description": "應用頂部導航欄，包含標題和返回按鈕", "designSpec": {"width": 390, "height": 60, "colors": ["#007AFF", "#FFFFFF"]}},
+  {"id": "card-1", "description": "功能卡片 1", "designSpec": {"width": 358, "height": 120, "cornerRadius": 12}},
+  {"id": "card-2", "description": "功能卡片 2", "designSpec": {"width": 358, "height": 120, "cornerRadius": 12}},
+  {"id": "btn-primary", "description": "主要操作按鈕", "designSpec": {"text": "提交", "width": 358, "height": 48, "colors": ["#3B82F6", "#FFFFFF"]}},
+  {"id": "input-1", "description": "用戶名輸入框", "designSpec": {"width": 358, "height": 48}},
+  {"id": "bottom-nav", "description": "底部導航欄，包含首頁、探索、個人3個按鈕", "designSpec": {"width": 390, "height": 80}}
+]\</tasks>
+</parallel_ui_tasks>
+\`\`\`
+
+**parallel_ui_tasks 自動處理：**
+- ✅ 自動計算元素位置（Grid 佈局）
+- ✅ 自動添加樣式（圓角、陰影、顏色）
+- ✅ **批量創建所有 UI 組件（效率提升 10x！）**
+- ✅ 自動處理元素對齊和間距
+
+**❌ 不要這樣做（效率低下）：**
+\`\`\`xml
+<!-- 錯誤！一個一個創建太慢了！ -->
+<use_mcp_tool>
+<server_name>UIDesignCanvas</server_name>
+<tool_name>create_rectangle</tool_name>
+<arguments>...</arguments>
+</use_mcp_tool>
+\`\`\`
+
+**✅ 正確做法：**
+\`\`\`xml
+<!-- 一次創建所有元素！ -->
+<parallel_ui_tasks>
+<tasks>[
+  {"id": "el-1", "description": "..."},
+  {"id": "el-2", "description": "..."},
+  {"id": "el-3", "description": "..."}
+]</tasks>
+</parallel_ui_tasks>
+\`\`\`
+
+---
+
+### 🎯 新增便利工具（自動樣式！推薦使用！）
+
+| 工具名稱 | 說明 | 自動樣式 |
+|---------|------|----------|
+| \`create_button\` | 創建樣式化按鈕 | 圓角 + 陰影 + 顏色 |
+| \`create_card\` | 創建樣式化卡片 | 圓角 + 陰影 + 邊框 |
+| \`create_input\` | 創建輸入框 | 圓角 + 邊框 + 佔位符 |
+
+\`\`\`xml
+<parallel_mcp_calls>
+<server>UIDesignCanvas</server>
+<calls>[
+  {"tool": "create_button", "args": {"label": "登入", "variant": "primary", "x": 50, "y": 400}},
+  {"tool": "create_button", "args": {"label": "註冊", "variant": "outline", "x": 200, "y": 400}},
+  {"tool": "create_card", "args": {"title": "歡迎", "x": 20, "y": 100, "width": 350, "height": 200}},
+  {"tool": "create_input", "args": {"label": "電子郵件", "placeholder": "請輸入郵件...", "x": 50, "y": 300}}
+]</calls>
+</parallel_mcp_calls>
+\`\`\`
 
 ---
 
@@ -1557,35 +1731,79 @@ Penpot MCP 使用 \`execute_code\` 工具來執行 Penpot Plugin API 代碼：
 ` : ""
 
 		// Common MCP-UI instructions (used by both Figma and Penpot)
-		const mcpUiInstructions = `## ✅ MCP-UI 工具使用指南
+		const mcpUiInstructions = `## 🚨 MCP-UI 狀態渲染指南（必須遵守！）
 
-你可以使用 MCP-UI 工具在對話中顯示設計進度和狀態通知。
+### ⚡ 強制規則：每完成一個動作後必須更新狀態！
 
-**推薦的 MCP-UI 工具：**
-- \`render_progress\` - 顯示設計進度
-- \`render_alert\` - 顯示設計完成/問題通知
-- \`render_card\` - 顯示設計規格摘要
-- \`render_list\` - 顯示設計元素清單
+**你必須在以下時機調用 MCP-UI 渲染狀態：**
+1. ✅ **開始設計前** - 使用 \`render_progress\` 顯示「開始設計...」(value: 0)
+2. ✅ **每創建完一個畫面/組件後** - 更新進度 (例如 value: 25, 50, 75)
+3. ✅ **創建每 5 個元素後** - 使用 \`render_card\` 顯示已創建的元素摘要
+4. ✅ **設計完成後** - 使用 \`render_alert\` 顯示成功通知
+5. ✅ **Handoff 前** - 使用 \`render_stats\` 顯示設計統計
 
-**使用範例 - 顯示設計進度：**
+### 🔧 可用的 MCP-UI 工具：
+
+| 工具名稱 | 用途 | 建議時機 |
+|---------|------|----------|
+| \`render_progress\` | 顯示進度條 | 每完成一個步驟 |
+| \`render_alert\` | 顯示通知 | 完成/警告/錯誤時 |
+| \`render_card\` | 顯示資訊卡片 | 摘要設計內容 |
+| \`render_stats\` | 顯示統計 | Handoff 前統計 |
+| \`render_list\` | 顯示清單 | 列出已創建元素 |
+| \`render_table\` | 顯示表格 | 詳細元素列表 |
+
+### 📋 使用範例：
+
+**1. 開始設計時：**
 \`\`\`xml
 <use_mcp_tool>
 <server_name>MCP-UI</server_name>
 <tool_name>render_progress</tool_name>
-<arguments>{"value": 50, "label": "設計進度 - 正在創建 UI 元素", "variant": "default"}</arguments>
+<arguments>{"value": 0, "label": "🎨 開始設計 UI...", "variant": "default"}</arguments>
 </use_mcp_tool>
 \`\`\`
 
-**使用範例 - 顯示設計完成通知：**
+**2. 創建畫面後更新進度：**
+\`\`\`xml
+<use_mcp_tool>
+<server_name>MCP-UI</server_name>
+<tool_name>render_progress</tool_name>
+<arguments>{"value": 40, "label": "✅ 已創建主畫面框架，正在添加導航...", "variant": "default"}</arguments>
+</use_mcp_tool>
+\`\`\`
+
+**3. 顯示已創建元素：**
+\`\`\`xml
+<use_mcp_tool>
+<server_name>MCP-UI</server_name>
+<tool_name>render_card</tool_name>
+<arguments>{"title": "📦 設計進度", "description": "已創建: 主畫面、頂部導航、3個按鈕、2張卡片\\n總計: 7 個元素", "variant": "success"}</arguments>
+</use_mcp_tool>
+\`\`\`
+
+**4. 設計完成時：**
 \`\`\`xml
 <use_mcp_tool>
 <server_name>MCP-UI</server_name>
 <tool_name>render_alert</tool_name>
-<arguments>{"type": "success", "title": "✨ 設計完成", "message": "已在 ${designTool} 中創建完整的 UI 設計，準備交接給 Design Review 審查。"}</arguments>
+<arguments>{"type": "success", "title": "✨ 設計完成！", "message": "已創建 ${designTool} UI 設計，包含 X 個元素。準備交接給 Design Review 審查。"}</arguments>
 </use_mcp_tool>
 \`\`\`
 
-⚠️ **重要：** MCP-UI 只用於顯示狀態通知，實際的 UI 設計仍需使用 ${designTool} MCP 工具！`
+**5. Handoff 前統計：**
+\`\`\`xml
+<use_mcp_tool>
+<server_name>MCP-UI</server_name>
+<tool_name>render_stats</tool_name>
+<arguments>{"title": "📊 設計統計", "stats": [{"label": "畫面數", "value": "4"}, {"label": "元素數", "value": "25"}, {"label": "按鈕數", "value": "8"}]}</arguments>
+</use_mcp_tool>
+\`\`\`
+
+⚠️ **極度重要：**
+- MCP-UI 的回應會自動在聊天對話框上方的「Status」區域渲染！
+- **每次設計動作後都應該更新 MCP-UI！** 讓使用者看到進度！
+- 不要跳過 MCP-UI 更新，這是向使用者展示進度的唯一方式！`
 
 		// For UIDesignCanvas users: Include UIDesignCanvas instructions + MCP-UI + generic design principles
 		// For Penpot users: Include Penpot instructions + MCP-UI + generic design principles (NO Figma!)

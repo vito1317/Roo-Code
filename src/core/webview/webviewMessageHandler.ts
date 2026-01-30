@@ -809,6 +809,17 @@ export const webviewMessageHandler = async (
 			}
 			break
 
+		case "openUIDesignCanvas":
+			try {
+				const { UIDesignCanvasPanel } = await import("../../services/ui-design/UIDesignCanvasPanel")
+				UIDesignCanvasPanel.createOrShow(provider.context.extensionUri)
+				console.log("[UIDesignCanvas] Preview panel opened from webview")
+			} catch (error) {
+				console.error("[UIDesignCanvas] Failed to open preview:", error)
+				vscode.window.showErrorMessage(`Failed to open UI Design Canvas: ${error instanceof Error ? error.message : String(error)}`)
+			}
+			break
+
 		case "reconnectMcpUiServer":
 			try {
 				const mcpHub = provider.getMcpHub()

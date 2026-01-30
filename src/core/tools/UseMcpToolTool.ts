@@ -76,6 +76,52 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				return
 			}
 
+			// CRITICAL: Only Designer agent can use design-related MCP servers!
+			// Check if this is a design server that requires Designer agent
+			const designServers = ["uidesigncanvas", "talktofigma", "figma-write", "penpot"]
+			const serverNameLower = serverName.toLowerCase()
+			const isDesignServer = designServers.some(ds => serverNameLower.includes(ds)) || 
+				serverNameLower.startsWith("fig")
+			
+			if (isDesignServer) {
+				const currentMode = task.taskMode || ""
+				const isDesigner = currentMode.includes("designer") || 
+					currentMode === "sentinel-designer"
+				
+				if (!isDesigner) {
+					task.consecutiveMistakeCount++
+					task.recordToolError("use_mcp_tool")
+					task.didToolFailInCurrentTurn = true
+					
+					const errorMessage = `❌ 錯誤：設計工具 "${serverName}" 只能由 Designer Agent 使用！
+
+🚫 你目前的角色是：${currentMode || "未知"}
+🎨 設計工具包括：UIDesignCanvas, TalkToFigma, figma-write, Penpot 等
+
+✅ 正確做法：使用 handoff_context 工具將設計任務交接給 Designer Agent
+
+範例：
+\`\`\`xml
+<handoff_context>
+<target_agent>sentinel-designer</target_agent>
+<context_json>{
+  "needsDesign": true,
+  "useUIDesignCanvas": true,
+  "screens": ["首頁", "設定頁"],
+  ...
+}</context_json>
+</handoff_context>
+\`\`\`
+
+❌ Architect/Builder/QA 都不能直接使用設計工具！
+✅ 只有 Designer 負責 UI 設計！`
+					
+					await task.say("error", errorMessage)
+					pushToolResult(formatResponse.toolError(errorMessage))
+					return
+				}
+			}
+
 			// For internal Figma servers, skip MCP-style approval (treat as built-in tool)
 			// Match any variation: figma, figma-write, fig, figma-read, etc.
 			const isFigmaServer = serverName.toLowerCase().startsWith("fig")
@@ -249,6 +295,55 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 
 				pushToolResult(formatResponse.unknownMcpServerError(serverName, availableServersArray))
 				return { isValid: false, availableTools: [] }
+			}
+
+			// Auto-reconnect if server is disconnected or stuck in connecting state
+			if (server.status === "disconnected" || server.status === "connecting") {
+				console.log(`[UseMcpToolTool] Server ${serverName} is ${server.status}, attempting to reconnect...`)
+				await task.say("text", `🔄 MCP 服務器 "${serverName}" ${server.status === "disconnected" ? "已斷線" : "連接中"}，正在嘗試重新連接...`)
+				
+				try {
+					// Use restartConnection to reconnect the server
+					await mcpHub.restartConnection(serverName)
+					
+					// Wait a bit for the connection to establish
+					const maxWaitTime = 10000 // 10 seconds
+					const pollInterval = 500 // 500ms
+					let waited = 0
+					
+					while (waited < maxWaitTime) {
+						await new Promise(resolve => setTimeout(resolve, pollInterval))
+						waited += pollInterval
+						
+						// Check if connected now
+						const updatedServer = mcpHub.getServers().find((s) => s.name === serverName)
+						if (updatedServer?.status === "connected") {
+							console.log(`[UseMcpToolTool] Server ${serverName} reconnected successfully`)
+							await task.say("text", `✅ MCP 服務器 "${serverName}" 已重新連接！`)
+							break
+						}
+					}
+					
+					// Check final status
+					const finalServer = mcpHub.getServers().find((s) => s.name === serverName)
+					if (finalServer?.status !== "connected") {
+						console.log(`[UseMcpToolTool] Server ${serverName} failed to reconnect after ${maxWaitTime}ms`)
+						task.consecutiveMistakeCount++
+						task.recordToolError("use_mcp_tool")
+						await task.say("error", `❌ MCP 服務器 "${serverName}" 重新連接失敗。請手動檢查服務器狀態。`)
+						task.didToolFailInCurrentTurn = true
+						pushToolResult(formatResponse.toolError(`MCP server "${serverName}" is not connected and reconnection failed. Please check server status manually.`))
+						return { isValid: false, availableTools: [] }
+					}
+				} catch (reconnectError) {
+					console.error(`[UseMcpToolTool] Error reconnecting server ${serverName}:`, reconnectError)
+					task.consecutiveMistakeCount++
+					task.recordToolError("use_mcp_tool")
+					await task.say("error", `❌ MCP 服務器 "${serverName}" 重新連接時發生錯誤：${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`)
+					task.didToolFailInCurrentTurn = true
+					pushToolResult(formatResponse.toolError(`Failed to reconnect MCP server "${serverName}": ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`))
+					return { isValid: false, availableTools: [] }
+				}
 			}
 
 			// Check if the server has tools defined

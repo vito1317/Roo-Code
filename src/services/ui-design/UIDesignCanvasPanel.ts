@@ -537,7 +537,18 @@ export class UIDesignCanvasPanel {
 
       if (el.style?.fill) {
         const fill = this.resolveToken(el.style.fill, design);
-        styles.push(`background-color: ${fill}`);
+        // For text elements, fill is the text color, not background
+        if (el.type === "text") {
+          styles.push(`color: ${fill}`);
+        } else {
+          styles.push(`background-color: ${fill}`);
+        }
+      }
+
+      // Explicit background color (works for any element including text)
+      if (el.style?.backgroundColor) {
+        const bgColor = this.resolveToken(el.style.backgroundColor, design);
+        styles.push(`background-color: ${bgColor}`);
       }
 
       if (el.style?.radius) {
@@ -619,7 +630,17 @@ ${elements}
       }
 
       if (el.style?.fill) {
-        styles.backgroundColor = this.resolveToken(el.style.fill, design);
+        // For text elements, fill is the text color, not background
+        if (el.type === "text") {
+          styles.color = this.resolveToken(el.style.fill, design);
+        } else {
+          styles.backgroundColor = this.resolveToken(el.style.fill, design);
+        }
+      }
+
+      // Explicit background color (works for any element including text)
+      if (el.style?.backgroundColor) {
+        styles.backgroundColor = this.resolveToken(el.style.backgroundColor, design);
       }
 
       if (el.style?.radius) {
