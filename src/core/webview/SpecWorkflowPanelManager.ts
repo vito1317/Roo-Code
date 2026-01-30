@@ -345,50 +345,50 @@ export class SpecWorkflowPanelManager {
 		}
 		.container {
 			display: flex;
+			flex-direction: column;
 			height: 100vh;
 		}
-		.left-panel {
-			width: 320px;
-			min-width: 280px;
-			border-right: 1px solid var(--vscode-panel-border);
-			display: flex;
-			flex-direction: column;
+		
+		/* Header */
+		.workflow-header {
+			padding: 16px 20px;
+			border-bottom: 1px solid var(--vscode-panel-border);
 			background: var(--vscode-sideBar-background);
 		}
-		.right-panel {
-			flex: 1;
+		.header-top {
 			display: flex;
-			flex-direction: column;
-			overflow: hidden;
-		}
-		.workflow-header {
-			padding: 12px 16px;
-			border-bottom: 1px solid var(--vscode-panel-border);
+			align-items: center;
+			justify-content: space-between;
+			margin-bottom: 12px;
 		}
 		.workflow-title {
-			font-size: 16px;
+			font-size: 18px;
 			font-weight: 600;
-			margin: 0 0 12px 0;
+			margin: 0;
+		}
+		.header-actions {
+			display: flex;
+			gap: 8px;
 		}
 		.workflow-steps {
 			display: flex;
-			gap: 6px;
+			gap: 8px;
 			align-items: center;
-			flex-wrap: wrap;
 		}
 		.step {
 			display: flex;
 			align-items: center;
 			gap: 6px;
-			padding: 6px 10px;
-			border-radius: 6px;
+			padding: 8px 14px;
+			border-radius: 8px;
 			background: var(--vscode-button-secondaryBackground);
 			cursor: pointer;
 			transition: all 0.15s;
-			font-size: 12px;
+			font-size: 13px;
 		}
 		.step:hover {
 			background: var(--vscode-button-secondaryHoverBackground);
+			transform: translateY(-1px);
 		}
 		.step.completed {
 			background: var(--vscode-testing-iconPassed);
@@ -396,48 +396,32 @@ export class SpecWorkflowPanelManager {
 		}
 		.step.active {
 			outline: 2px solid var(--vscode-focusBorder);
+			outline-offset: 2px;
 		}
 		.step.disabled {
 			opacity: 0.5;
 			cursor: not-allowed;
 		}
-		.step-number {
-			width: 18px;
-			height: 18px;
-			border-radius: 50%;
-			background: var(--vscode-badge-background);
-			color: var(--vscode-badge-foreground);
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			font-size: 10px;
-			font-weight: 600;
+		.step.disabled:hover {
+			transform: none;
 		}
-		.step.completed .step-number {
-			background: white;
-			color: var(--vscode-testing-iconPassed);
+		.step-icon {
+			font-size: 16px;
 		}
 		.arrow {
 			color: var(--vscode-descriptionForeground);
-			font-size: 12px;
+			font-size: 16px;
 		}
-		.actions {
-			padding: 12px 16px;
-			display: flex;
-			gap: 8px;
-			border-bottom: 1px solid var(--vscode-panel-border);
-		}
+		
+		/* Buttons */
 		.btn {
-			padding: 6px 12px;
-			border-radius: 4px;
+			padding: 8px 14px;
+			border-radius: 6px;
 			border: none;
 			cursor: pointer;
 			font-size: 12px;
-			display: flex;
-			align-items: center;
-			gap: 4px;
-			flex: 1;
-			justify-content: center;
+			font-weight: 500;
+			transition: all 0.15s;
 		}
 		.btn-primary {
 			background: var(--vscode-button-background);
@@ -450,34 +434,54 @@ export class SpecWorkflowPanelManager {
 			background: var(--vscode-button-secondaryBackground);
 			color: var(--vscode-button-secondaryForeground);
 		}
+		.btn-secondary:hover {
+			background: var(--vscode-button-secondaryHoverBackground);
+		}
 		.btn:disabled {
 			opacity: 0.5;
 			cursor: not-allowed;
 		}
-		.task-list {
+		
+		/* Main Content Area */
+		.main-content {
+			flex: 1;
+			overflow: hidden;
+			display: flex;
+			flex-direction: column;
+		}
+		
+		/* Task List View */
+		.task-view {
 			flex: 1;
 			overflow-y: auto;
-			padding: 12px 16px;
+			padding: 16px 20px;
+		}
+		.task-view.hidden {
+			display: none;
 		}
 		.task-item {
 			display: flex;
 			align-items: center;
-			gap: 8px;
-			padding: 8px 10px;
-			border-radius: 6px;
-			margin-bottom: 6px;
+			gap: 12px;
+			padding: 12px 14px;
+			border-radius: 8px;
+			margin-bottom: 8px;
 			background: var(--vscode-list-hoverBackground);
-			font-size: 12px;
+			font-size: 13px;
+			transition: all 0.15s;
+		}
+		.task-item:hover {
+			background: var(--vscode-list-activeSelectionBackground);
 		}
 		.task-checkbox {
-			width: 16px;
-			height: 16px;
+			width: 20px;
+			height: 20px;
 			border: 2px solid var(--vscode-checkbox-border);
-			border-radius: 4px;
+			border-radius: 5px;
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			font-size: 10px;
+			font-size: 12px;
 			flex-shrink: 0;
 		}
 		.task-item.done .task-checkbox {
@@ -495,7 +499,6 @@ export class SpecWorkflowPanelManager {
 			min-width: 0;
 		}
 		.task-title {
-			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
 		}
@@ -504,16 +507,16 @@ export class SpecWorkflowPanelManager {
 			opacity: 0.7;
 		}
 		.task-complexity {
-			font-size: 10px;
-			padding: 2px 6px;
+			font-size: 11px;
+			padding: 3px 8px;
 			border-radius: 4px;
 			background: var(--vscode-badge-background);
 			color: var(--vscode-badge-foreground);
 			flex-shrink: 0;
 		}
 		.task-btn {
-			padding: 3px 6px;
-			font-size: 10px;
+			padding: 5px 10px;
+			font-size: 11px;
 			border-radius: 4px;
 			border: 1px solid var(--vscode-button-background);
 			background: transparent;
@@ -532,119 +535,139 @@ export class SpecWorkflowPanelManager {
 		}
 		.empty-state {
 			text-align: center;
-			padding: 24px;
+			padding: 48px 24px;
 			color: var(--vscode-descriptionForeground);
-			font-size: 12px;
+			font-size: 14px;
+		}
+		.empty-state-icon {
+			font-size: 48px;
+			margin-bottom: 16px;
+			opacity: 0.5;
 		}
 		
-		/* Content Viewer Styles */
+		/* Content View (Markdown Preview) */
+		.content-view {
+			flex: 1;
+			overflow: hidden;
+			display: flex;
+			flex-direction: column;
+		}
+		.content-view.hidden {
+			display: none;
+		}
 		.content-header {
-			padding: 12px 16px;
+			padding: 12px 20px;
 			border-bottom: 1px solid var(--vscode-panel-border);
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
-			background: var(--vscode-editor-background);
+			background: var(--vscode-sideBar-background);
+		}
+		.content-header-left {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+		}
+		.back-btn {
+			padding: 6px 10px;
+			border-radius: 4px;
+			border: none;
+			background: var(--vscode-button-secondaryBackground);
+			color: var(--vscode-button-secondaryForeground);
+			cursor: pointer;
+			font-size: 14px;
+		}
+		.back-btn:hover {
+			background: var(--vscode-button-secondaryHoverBackground);
 		}
 		.content-title {
-			font-size: 14px;
+			font-size: 15px;
 			font-weight: 600;
-			margin: 0;
 			display: flex;
 			align-items: center;
 			gap: 8px;
-		}
-		.content-title-icon {
-			font-size: 16px;
-		}
-		.content-actions {
-			display: flex;
-			gap: 8px;
+			margin: 0;
 		}
 		.content-body {
 			flex: 1;
 			overflow-y: auto;
-			padding: 16px;
-			font-size: 13px;
-			line-height: 1.6;
+			padding: 20px;
+			font-size: 14px;
+			line-height: 1.7;
 		}
 		.content-body pre {
 			background: var(--vscode-textCodeBlock-background);
-			padding: 12px;
-			border-radius: 6px;
+			padding: 14px;
+			border-radius: 8px;
 			overflow-x: auto;
 			font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
-			font-size: 12px;
+			font-size: 13px;
 		}
 		.content-body h1, .content-body h2, .content-body h3 {
-			margin-top: 16px;
-			margin-bottom: 8px;
+			margin-top: 20px;
+			margin-bottom: 10px;
 			border-bottom: 1px solid var(--vscode-panel-border);
-			padding-bottom: 4px;
+			padding-bottom: 6px;
 		}
-		.content-body h1 { font-size: 20px; }
-		.content-body h2 { font-size: 16px; }
-		.content-body h3 { font-size: 14px; }
+		.content-body h1 { font-size: 22px; }
+		.content-body h2 { font-size: 18px; }
+		.content-body h3 { font-size: 15px; }
 		.content-body ul, .content-body ol {
 			padding-left: 24px;
 		}
 		.content-body li {
-			margin-bottom: 4px;
+			margin-bottom: 6px;
 		}
 		.content-body code {
 			background: var(--vscode-textCodeBlock-background);
 			padding: 2px 6px;
 			border-radius: 4px;
 			font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
-			font-size: 12px;
+			font-size: 13px;
 		}
-		.content-placeholder {
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			justify-content: center;
-			height: 100%;
-			color: var(--vscode-descriptionForeground);
+		.loading-state {
 			text-align: center;
-			padding: 32px;
-		}
-		.content-placeholder-icon {
-			font-size: 48px;
-			margin-bottom: 16px;
-			opacity: 0.5;
+			padding: 48px;
+			color: var(--vscode-descriptionForeground);
 		}
 	</style>
 </head>
 <body>
 	<div class="container">
-		<div class="left-panel">
-			<div class="workflow-header">
+		<div class="workflow-header">
+			<div class="header-top">
 				<h1 class="workflow-title">📋 Spec Workflow</h1>
-				<div class="workflow-steps" id="steps"></div>
-			</div>
-			<div class="actions">
-				<button class="btn btn-secondary" onclick="updateSpecs()">🔄 Update</button>
-				<button class="btn btn-primary" id="runAllBtn" onclick="runAllTasks()" disabled>▶ Run All</button>
-			</div>
-			<div class="task-list" id="taskList">
-				<div class="empty-state">Loading workflow status...</div>
-			</div>
-		</div>
-		<div class="right-panel">
-			<div class="content-header" id="contentHeader" style="display: none;">
-				<h2 class="content-title">
-					<span class="content-title-icon" id="contentIcon">📄</span>
-					<span id="contentFileName">Select a file</span>
-				</h2>
-				<div class="content-actions">
-					<button class="btn btn-secondary" onclick="openInEditor()">📝 Open in Editor</button>
+				<div class="header-actions">
+					<button class="btn btn-secondary" onclick="updateSpecs()">🔄 Update</button>
+					<button class="btn btn-primary" id="runAllBtn" onclick="runAllTasks()" disabled>▶ Run All</button>
 				</div>
 			</div>
-			<div class="content-body" id="contentBody">
-				<div class="content-placeholder">
-					<div class="content-placeholder-icon">📁</div>
-					<div>Select a workflow step to view its content</div>
-					<div style="margin-top: 8px; font-size: 12px;">Click on Requirements, Design, or Tasks above</div>
+			<div class="workflow-steps" id="steps"></div>
+		</div>
+		
+		<div class="main-content">
+			<!-- Task List View -->
+			<div class="task-view" id="taskView">
+				<div class="empty-state">
+					<div class="empty-state-icon">📋</div>
+					<div>Loading workflow status...</div>
+				</div>
+			</div>
+			
+			<!-- Content View (Document Preview) -->
+			<div class="content-view hidden" id="contentView">
+				<div class="content-header">
+					<div class="content-header-left">
+						<button class="back-btn" onclick="showTaskView()">← Back</button>
+						<h2 class="content-title">
+							<span id="contentIcon">📄</span>
+							<span id="contentFileName">Document</span>
+						</h2>
+					</div>
+					<button class="btn btn-secondary" onclick="openInEditor()">📝 Open in Editor</button>
+				</div>
+				<div class="content-body" id="contentBody">
+					<div class="loading-state">Loading...</div>
 				</div>
 			</div>
 		</div>
@@ -653,6 +676,7 @@ export class SpecWorkflowPanelManager {
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
 		let currentFile = null;
+		let currentView = 'tasks'; // 'tasks' or 'content'
 		let workflowStatus = {};
 		let fileContents = {};
 		
@@ -666,7 +690,7 @@ export class SpecWorkflowPanelManager {
 				renderWorkflow(message.status, message.tasks);
 			} else if (message.type === 'specFileContent') {
 				fileContents[message.file] = message.content;
-				if (currentFile === message.file) {
+				if (currentFile === message.file && currentView === 'content') {
 					renderFileContent(message.file, message.content);
 				}
 			}
@@ -674,7 +698,7 @@ export class SpecWorkflowPanelManager {
 		
 		function renderWorkflow(status, tasks) {
 			const stepsContainer = document.getElementById('steps');
-			const taskList = document.getElementById('taskList');
+			const taskView = document.getElementById('taskView');
 			const runAllBtn = document.getElementById('runAllBtn');
 			
 			// Render steps
@@ -686,15 +710,15 @@ export class SpecWorkflowPanelManager {
 			
 			stepsContainer.innerHTML = steps.map((step, i) => {
 				const completed = status[step.key];
-				const isActive = currentFile === step.file;
+				const isActive = currentFile === step.file && currentView === 'content';
 				let cls = 'step';
 				if (completed) cls += ' completed';
 				if (isActive) cls += ' active';
 				if (!completed) cls += ' disabled';
 				return \`
 					\${i > 0 ? '<span class="arrow">→</span>' : ''}
-					<div class="\${cls}" onclick="viewFile('\${step.file}', \${completed})" title="\${completed ? 'View ' + step.file : 'Not created yet'}">
-						<span class="step-number">\${completed ? '✓' : i + 1}</span>
+					<div class="\${cls}" onclick="viewFile('\${step.file}', \${completed})" title="\${completed ? 'Click to view ' + step.name : 'Not created yet'}">
+						<span class="step-icon">\${step.icon}</span>
 						<span>\${step.name}</span>
 					</div>
 				\`;
@@ -703,50 +727,88 @@ export class SpecWorkflowPanelManager {
 			// Enable run all button if tasks exist
 			runAllBtn.disabled = !status.tasks;
 			
-			// Render tasks
-			if (tasks.length === 0) {
-				taskList.innerHTML = '<div class="empty-state">No tasks found. Complete the workflow first.</div>';
-				return;
-			}
-			
-			taskList.innerHTML = tasks.map(task => {
-				const statusIcon = task.status === 'done' ? '✓' : task.status === 'in-progress' ? '/' : '';
-				return \`
-					<div class="task-item \${task.status}">
-						<div class="task-checkbox">\${statusIcon}</div>
-						<div class="task-content">
-							<div class="task-title" title="\${task.title}">\${task.title}</div>
+			// Render tasks (only if we're in task view)
+			if (currentView === 'tasks') {
+				if (!tasks || tasks.length === 0) {
+					taskView.innerHTML = \`
+						<div class="empty-state">
+							<div class="empty-state-icon">📋</div>
+							<div>No tasks found</div>
+							<div style="margin-top: 8px; font-size: 12px; opacity: 0.7;">
+								Click on Requirements, Design, or Tasks above to view documents
+							</div>
 						</div>
-						\${task.complexity ? '<span class="task-complexity">' + task.complexity + '</span>' : ''}
-						\${task.status === 'pending' ? '<button class="task-btn" onclick="startTask(\\'' + task.id + '\\')">▶</button>' : ''}
-						\${task.status === 'in-progress' ? '<span class="task-complexity" style="background:#f59e0b">Running</span>' : ''}
-					</div>
-				\`;
-			}).join('');
+					\`;
+					return;
+				}
+				
+				taskView.innerHTML = tasks.map(task => {
+					const statusIcon = task.status === 'done' ? '✓' : task.status === 'in-progress' ? '⏳' : '';
+					return \`
+						<div class="task-item \${task.status}">
+							<div class="task-checkbox">\${statusIcon}</div>
+							<div class="task-content">
+								<div class="task-title">\${task.title}</div>
+							</div>
+							\${task.complexity ? '<span class="task-complexity">' + task.complexity + '</span>' : ''}
+							\${task.status === 'pending' ? '<button class="task-btn" onclick="startTask(\\'\'' + task.id + '\\'\\')">▶ Run</button>' : ''}
+							\${task.status === 'in-progress' ? '<span class="task-complexity" style="background:#f59e0b">Running...</span>' : ''}
+						</div>
+					\`;
+				}).join('');
+			}
 		}
 		
 		function viewFile(filename, exists) {
 			if (!exists) return;
 			currentFile = filename;
+			currentView = 'content';
+			
+			// Toggle views
+			document.getElementById('taskView').classList.add('hidden');
+			document.getElementById('contentView').classList.remove('hidden');
 			
 			// Update step highlights
-			const steps = document.querySelectorAll('.step');
-			steps.forEach(step => step.classList.remove('active'));
-			event.target.closest('.step')?.classList.add('active');
-			
-			// Show header
-			document.getElementById('contentHeader').style.display = 'flex';
+			updateStepHighlights();
 			
 			// Update title
 			const icons = { 'requirements.md': '📋', 'design.md': '🎨', 'tasks.md': '✅' };
+			const names = { 'requirements.md': 'Requirements', 'design.md': 'Design', 'tasks.md': 'Tasks' };
 			document.getElementById('contentIcon').textContent = icons[filename] || '📄';
-			document.getElementById('contentFileName').textContent = filename;
+			document.getElementById('contentFileName').textContent = names[filename] || filename;
 			
-			// Request file content
-			vscode.postMessage({ type: 'requestSpecFileContent', file: filename });
+			// Check if we already have the content cached
+			if (fileContents[filename]) {
+				renderFileContent(filename, fileContents[filename]);
+			} else {
+				document.getElementById('contentBody').innerHTML = '<div class="loading-state">Loading...</div>';
+				vscode.postMessage({ type: 'requestSpecFileContent', file: filename });
+			}
+		}
+		
+		function showTaskView() {
+			currentView = 'tasks';
+			currentFile = null;
 			
-			// Show loading state
-			document.getElementById('contentBody').innerHTML = '<div class="empty-state">Loading...</div>';
+			// Toggle views
+			document.getElementById('contentView').classList.add('hidden');
+			document.getElementById('taskView').classList.remove('hidden');
+			
+			// Update step highlights
+			updateStepHighlights();
+		}
+		
+		function updateStepHighlights() {
+			const steps = document.querySelectorAll('.step');
+			steps.forEach(step => {
+				step.classList.remove('active');
+				if (currentView === 'content' && currentFile) {
+					const stepFile = step.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+					if (stepFile === currentFile) {
+						step.classList.add('active');
+					}
+				}
+			});
 		}
 		
 		function renderFileContent(filename, content) {
@@ -756,8 +818,8 @@ export class SpecWorkflowPanelManager {
 				.replace(/^### (.+)$/gm, '<h3>$1</h3>')
 				.replace(/^## (.+)$/gm, '<h2>$1</h2>')
 				.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-				.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, '<pre>$1</pre>')
-				.replace(/\`([^\`]+)\`/g, '<code>$1</code>')
+				.replace(/\\\`\\\`\\\`([\\s\\S]*?)\\\`\\\`\\\`/g, '<pre>$1</pre>')
+				.replace(/\\\`([^\\\`]+)\\\`/g, '<code>$1</code>')
 				.replace(/^- \\[x\\] (.+)$/gim, '<li style="list-style:none;">✅ $1</li>')
 				.replace(/^- \\[\\/\\] (.+)$/gim, '<li style="list-style:none;">🔄 $1</li>')
 				.replace(/^- \\[ \\] (.+)$/gim, '<li style="list-style:none;">⬜ $1</li>')
@@ -774,10 +836,6 @@ export class SpecWorkflowPanelManager {
 			if (currentFile) {
 				vscode.postMessage({ type: 'openSpecFile', file: currentFile });
 			}
-		}
-		
-		function openFile(filename) {
-			vscode.postMessage({ type: 'openSpecFile', file: filename });
 		}
 		
 		function startTask(taskId) {
