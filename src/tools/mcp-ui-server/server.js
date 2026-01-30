@@ -219,6 +219,36 @@ const TOOLS = [
             required: ["stats"],
         },
     },
+    {
+        name: "render_mermaid",
+        description: "Render a Mermaid diagram (flowchart, sequence, gantt, class, state, etc). The diagram will be rendered as SVG.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                code: { type: "string", description: "Mermaid diagram code" },
+                title: { type: "string", description: "Optional title for the diagram" },
+                theme: {
+                    type: "string",
+                    enum: ["default", "dark", "forest", "neutral"],
+                    description: "Mermaid theme",
+                    default: "dark"
+                },
+            },
+            required: ["code"],
+        },
+    },
+    {
+        name: "render_markdown",
+        description: "Render Markdown content with proper formatting.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                content: { type: "string", description: "Markdown content" },
+                title: { type: "string", description: "Optional title" },
+            },
+            required: ["content"],
+        },
+    },
 ];
 // --- CSS Styles for UI components (optimized for VS Code dark theme) ---
 const getStyles = () => `
@@ -375,6 +405,56 @@ const getStyles = () => `
   .mcp-list-title { font-weight: 600; margin-bottom: 10px; color: #f0f0f0; }
   .mcp-list li { padding: 8px 0; color: #d0d0d0; border-bottom: 1px solid #3a3a3a; }
   .mcp-list li:last-child { border-bottom: none; }
+
+  /* Mermaid Diagrams */
+  .mcp-mermaid {
+    background: #1e1e1e;
+    border-radius: 12px;
+    border: 1px solid #3a3a3a;
+    padding: 16px;
+    margin: 12px 0;
+    overflow: auto;
+  }
+  .mcp-mermaid-title {
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #f0f0f0;
+    font-size: 15px;
+  }
+  .mcp-mermaid svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Markdown content */
+  .mcp-markdown {
+    background: #252525;
+    border-radius: 12px;
+    border: 1px solid #3a3a3a;
+    padding: 18px;
+    margin: 12px 0;
+    line-height: 1.7;
+    color: #d0d0d0;
+  }
+  .mcp-markdown-title {
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #f0f0f0;
+    font-size: 16px;
+    border-bottom: 1px solid #3a3a3a;
+    padding-bottom: 10px;
+  }
+  .mcp-markdown h1 { font-size: 1.5em; color: #f0f0f0; margin: 16px 0 12px; }
+  .mcp-markdown h2 { font-size: 1.3em; color: #e0e0e0; margin: 14px 0 10px; }
+  .mcp-markdown h3 { font-size: 1.1em; color: #d0d0d0; margin: 12px 0 8px; }
+  .mcp-markdown p { margin: 10px 0; }
+  .mcp-markdown code { background: #1e1e1e; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+  .mcp-markdown pre { background: #1e1e1e; padding: 12px; border-radius: 8px; overflow-x: auto; }
+  .mcp-markdown ul, .mcp-markdown ol { padding-left: 24px; margin: 10px 0; }
+  .mcp-markdown li { margin: 6px 0; }
+  .mcp-markdown blockquote { border-left: 3px solid #3b82f6; padding-left: 16px; margin: 12px 0; color: #909090; }
+  .mcp-markdown a { color: #3b82f6; text-decoration: none; }
+  .mcp-markdown a:hover { text-decoration: underline; }
 </style>
 `;
 // --- Render functions ---
@@ -531,6 +611,83 @@ function renderStats(args) {
     </div>
   `;
 }
+function renderMermaid(args) {
+    const { code, title, theme = "dark" } = args;
+    if (!code) {
+        return `
+      <div class="mcp-ui">
+        ${getStyles()}
+        <div style="color: #ff6b6b; padding: 8px;">Error: code is required</div>
+      </div>
+    `;
+    }
+    // Escape the code for safe embedding in HTML
+    const escapedCode = code
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    // Use a unique ID for this diagram
+    const diagramId = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `
+    <div class="mcp-ui">
+      ${getStyles()}
+      <div class="mcp-mermaid">
+        ${title ? `<div class="mcp-mermaid-title">${title}</div>` : ""}
+        <div id="${diagramId}" class="mermaid">
+${code}
+        </div>
+      </div>
+      <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+          startOnLoad: true,
+          theme: '${theme}',
+          securityLevel: 'loose',
+          flowchart: { curve: 'basis' }
+        });
+        mermaid.run({ nodes: [document.getElementById('${diagramId}')] });
+      </script>
+    </div>
+  `;
+}
+function renderMarkdown(args) {
+    const { content, title } = args;
+    if (!content) {
+        return `
+      <div class="mcp-ui">
+        ${getStyles()}
+        <div style="color: #ff6b6b; padding: 8px;">Error: content is required</div>
+      </div>
+    `;
+    }
+    // Simple markdown to HTML conversion
+    let html = content
+        // Headers
+        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+        // Bold and italic
+        .replace(/\*\*\*(.*?)\*\*\*/gim, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+        // Code
+        .replace(/`([^`]+)`/gim, '<code>$1</code>')
+        // Links
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/gim, '<a href="$2" target="_blank">$1</a>')
+        // Line breaks
+        .replace(/\n/gim, '<br>');
+    return `
+    <div class="mcp-ui">
+      ${getStyles()}
+      <div class="mcp-markdown">
+        ${title ? `<div class="mcp-markdown-title">${title}</div>` : ""}
+        ${html}
+      </div>
+    </div>
+  `;
+}
 function escapeHtml(text) {
     return text
         .replace(/&/g, "&amp;")
@@ -587,6 +744,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
             case "render_stats":
                 html = renderStats(args || {});
+                break;
+            case "render_mermaid":
+                html = renderMermaid(args || {});
+                break;
+            case "render_markdown":
+                html = renderMarkdown(args || {});
                 break;
             default:
                 throw new Error(`Unknown tool: ${name}`);
