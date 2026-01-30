@@ -3806,6 +3806,32 @@ export const webviewMessageHandler = async (
 			break
 		}
 
+		case "requestSpecFileContent": {
+			const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+			if (workspacePath && message.file) {
+				const fs = require("fs")
+				const filePath = path.join(workspacePath, ".specs", message.file)
+				if (fs.existsSync(filePath)) {
+					const content = fs.readFileSync(filePath, "utf-8")
+					await provider.postMessageToWebview({
+						type: "specFileContent",
+						file: message.file,
+						content: content,
+					})
+					// Also send to the Editor Panel if it's open
+					const panelManager = SpecWorkflowPanelManager.getInstance(provider)
+					if (panelManager.isOpen()) {
+						panelManager.sendMessage({
+							type: "specFileContent",
+							file: message.file,
+							content: content,
+						})
+					}
+				}
+			}
+			break
+		}
+
 		case "runAllSpecTasks": {
 			// Trigger TaskExecutor to run all tasks with Sentinel pipeline
 			const currentTask = provider.getCurrentTask()

@@ -22,6 +22,7 @@ interface SpecTask {
 
 export class SpecWorkflowPanelManager {
 	private static instances: WeakMap<ClineProvider, SpecWorkflowPanelManager> = new WeakMap()
+	private static fileWatchers: Map<string, vscode.FileSystemWatcher> = new Map()
 	private panel: vscode.WebviewPanel | undefined
 	private disposables: vscode.Disposable[] = []
 	private isReady: boolean = false
@@ -33,8 +34,127 @@ export class SpecWorkflowPanelManager {
 		if (!instance) {
 			instance = new SpecWorkflowPanelManager(provider)
 			SpecWorkflowPanelManager.instances.set(provider, instance)
+			// Set up file watcher for this instance
+			instance.setupFileWatcher()
 		}
 		return instance
+	}
+
+	/**
+	 * Initialize file watcher for a ClineProvider.
+	 * This should be called during extension activation to enable auto-open.
+	 */
+	public static initializeFileWatcher(provider: ClineProvider): void {
+		try {
+			const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+			if (!workspacePath) return
+
+			// Check if we already have a watcher for this workspace
+			if (SpecWorkflowPanelManager.fileWatchers.has(workspacePath)) {
+				console.log(`[SpecWorkflowPanel] File watcher already exists for ${workspacePath}`)
+				return
+			}
+
+			const specsPattern = new vscode.RelativePattern(workspacePath, ".specs/*.md")
+			const watcher = vscode.workspace.createFileSystemWatcher(specsPattern)
+
+			console.log(`[SpecWorkflowPanel] Setting up file watcher for ${workspacePath}`)
+
+			// When a spec file is created, auto-open the panel AND update chat sidebar
+			watcher.onDidCreate(async (uri) => {
+				try {
+					console.log(`[SpecWorkflowPanel] Spec file created: ${uri.fsPath}`)
+					// Get or create instance and show the panel
+					const instance = SpecWorkflowPanelManager.getInstance(provider)
+					await instance.show()
+					// Also refresh status to update chat sidebar immediately
+					await instance.refreshWorkflowStatus()
+				} catch (error) {
+					console.error(`[SpecWorkflowPanel] Error handling file create:`, error)
+				}
+			})
+
+			// When a spec file is changed, refresh the panel and chat sidebar
+			watcher.onDidChange(async () => {
+				try {
+					console.log(`[SpecWorkflowPanel] Spec file changed, refreshing status`)
+					const instance = SpecWorkflowPanelManager.instances.get(provider)
+					if (instance) {
+						await instance.refreshWorkflowStatus()
+					} else {
+						// Just broadcast status without creating a new instance
+						await SpecWorkflowPanelManager.broadcastSpecsStatus(provider)
+					}
+				} catch (error) {
+					console.error(`[SpecWorkflowPanel] Error handling file change:`, error)
+				}
+			})
+
+			// When a spec file is deleted, also update status
+			watcher.onDidDelete(async () => {
+				try {
+					console.log(`[SpecWorkflowPanel] Spec file deleted, refreshing status`)
+					const instance = SpecWorkflowPanelManager.instances.get(provider)
+					if (instance) {
+						await instance.refreshWorkflowStatus()
+					} else {
+						// Even without instance, send status update to chat sidebar
+						await SpecWorkflowPanelManager.broadcastSpecsStatus(provider)
+					}
+				} catch (error) {
+					console.error(`[SpecWorkflowPanel] Error handling file delete:`, error)
+				}
+			})
+
+			SpecWorkflowPanelManager.fileWatchers.set(workspacePath, watcher)
+			console.log(`[SpecWorkflowPanel] File watcher initialized for ${workspacePath}`)
+			
+			// Send initial status to chat sidebar (delayed to ensure webview is ready)
+			setTimeout(() => {
+				SpecWorkflowPanelManager.broadcastSpecsStatus(provider).catch(err => {
+					console.error(`[SpecWorkflowPanel] Error broadcasting initial status:`, err)
+				})
+			}, 1000)
+		} catch (error) {
+			console.error(`[SpecWorkflowPanel] Error initializing file watcher:`, error)
+		}
+	}
+
+	/**
+	 * Broadcast specs status to chat sidebar without requiring a panel instance
+	 */
+	private static async broadcastSpecsStatus(provider: ClineProvider): Promise<void> {
+		try {
+			const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+			if (!workspacePath) return
+
+			const fs = require("fs")
+			const specsDir = path.join(workspacePath, ".specs")
+
+			const status = {
+				requirements: fs.existsSync(path.join(specsDir, "requirements.md")),
+				design: fs.existsSync(path.join(specsDir, "design.md")),
+				tasks: fs.existsSync(path.join(specsDir, "tasks.md")),
+			}
+
+			// Use try-catch since postMessageToWebview may fail if webview is not ready
+			await provider.postMessageToWebview({
+				type: "specsStatus",
+				values: status,
+			})
+		} catch (error) {
+			// Silently ignore errors when webview is not ready
+			console.log(`[SpecWorkflowPanel] Could not broadcast specs status (webview may not be ready)`)
+		}
+	}
+
+	/**
+	 * Sets up a file watcher for the .specs directory to auto-open the panel
+	 * when spec files are created (instance method - now delegates to static)
+	 */
+	private setupFileWatcher(): void {
+		// Delegate to static method
+		SpecWorkflowPanelManager.initializeFileWatcher(this.provider)
 	}
 
 	public async show(): Promise<void> {
@@ -169,6 +289,12 @@ export class SpecWorkflowPanelManager {
 		return !!this.panel
 	}
 
+	public async sendMessage(message: any): Promise<void> {
+		if (this.panel && this.isReady) {
+			await this.panel.webview.postMessage(message)
+		}
+	}
+
 	public async toggle(): Promise<void> {
 		if (this.panel) {
 			this.dispose()
@@ -207,28 +333,46 @@ export class SpecWorkflowPanelManager {
 		:root {
 			--vscode-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 		}
+		* { box-sizing: border-box; }
 		body {
 			font-family: var(--vscode-font-family, sans-serif);
-			padding: 16px;
+			padding: 0;
+			margin: 0;
 			color: var(--vscode-foreground);
 			background: var(--vscode-editor-background);
+			height: 100vh;
+			overflow: hidden;
+		}
+		.container {
+			display: flex;
+			height: 100vh;
+		}
+		.left-panel {
+			width: 320px;
+			min-width: 280px;
+			border-right: 1px solid var(--vscode-panel-border);
+			display: flex;
+			flex-direction: column;
+			background: var(--vscode-sideBar-background);
+		}
+		.right-panel {
+			flex: 1;
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
 		}
 		.workflow-header {
-			display: flex;
-			align-items: center;
-			gap: 12px;
-			padding-bottom: 16px;
+			padding: 12px 16px;
 			border-bottom: 1px solid var(--vscode-panel-border);
-			margin-bottom: 16px;
 		}
 		.workflow-title {
-			font-size: 18px;
+			font-size: 16px;
 			font-weight: 600;
-			margin: 0;
+			margin: 0 0 12px 0;
 		}
 		.workflow-steps {
 			display: flex;
-			gap: 8px;
+			gap: 6px;
 			align-items: center;
 			flex-wrap: wrap;
 		}
@@ -236,11 +380,12 @@ export class SpecWorkflowPanelManager {
 			display: flex;
 			align-items: center;
 			gap: 6px;
-			padding: 6px 12px;
+			padding: 6px 10px;
 			border-radius: 6px;
 			background: var(--vscode-button-secondaryBackground);
 			cursor: pointer;
 			transition: all 0.15s;
+			font-size: 12px;
 		}
 		.step:hover {
 			background: var(--vscode-button-secondaryHoverBackground);
@@ -249,20 +394,23 @@ export class SpecWorkflowPanelManager {
 			background: var(--vscode-testing-iconPassed);
 			color: white;
 		}
+		.step.active {
+			outline: 2px solid var(--vscode-focusBorder);
+		}
 		.step.disabled {
 			opacity: 0.5;
 			cursor: not-allowed;
 		}
 		.step-number {
-			width: 20px;
-			height: 20px;
+			width: 18px;
+			height: 18px;
 			border-radius: 50%;
 			background: var(--vscode-badge-background);
 			color: var(--vscode-badge-foreground);
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			font-size: 11px;
+			font-size: 10px;
 			font-weight: 600;
 		}
 		.step.completed .step-number {
@@ -271,11 +419,13 @@ export class SpecWorkflowPanelManager {
 		}
 		.arrow {
 			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
 		}
 		.actions {
-			margin-left: auto;
+			padding: 12px 16px;
 			display: flex;
 			gap: 8px;
+			border-bottom: 1px solid var(--vscode-panel-border);
 		}
 		.btn {
 			padding: 6px 12px;
@@ -286,6 +436,8 @@ export class SpecWorkflowPanelManager {
 			display: flex;
 			align-items: center;
 			gap: 4px;
+			flex: 1;
+			justify-content: center;
 		}
 		.btn-primary {
 			background: var(--vscode-button-background);
@@ -303,26 +455,30 @@ export class SpecWorkflowPanelManager {
 			cursor: not-allowed;
 		}
 		.task-list {
-			margin-top: 16px;
+			flex: 1;
+			overflow-y: auto;
+			padding: 12px 16px;
 		}
 		.task-item {
 			display: flex;
 			align-items: center;
-			gap: 10px;
-			padding: 10px 12px;
+			gap: 8px;
+			padding: 8px 10px;
 			border-radius: 6px;
-			margin-bottom: 8px;
+			margin-bottom: 6px;
 			background: var(--vscode-list-hoverBackground);
+			font-size: 12px;
 		}
 		.task-checkbox {
-			width: 18px;
-			height: 18px;
+			width: 16px;
+			height: 16px;
 			border: 2px solid var(--vscode-checkbox-border);
 			border-radius: 4px;
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			font-size: 12px;
+			font-size: 10px;
+			flex-shrink: 0;
 		}
 		.task-item.done .task-checkbox {
 			background: var(--vscode-testing-iconPassed);
@@ -336,24 +492,28 @@ export class SpecWorkflowPanelManager {
 		}
 		.task-content {
 			flex: 1;
+			min-width: 0;
 		}
 		.task-title {
-			font-size: 13px;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
 		}
 		.task-item.done .task-title {
 			text-decoration: line-through;
 			opacity: 0.7;
 		}
 		.task-complexity {
-			font-size: 11px;
+			font-size: 10px;
 			padding: 2px 6px;
 			border-radius: 4px;
 			background: var(--vscode-badge-background);
 			color: var(--vscode-badge-foreground);
+			flex-shrink: 0;
 		}
 		.task-btn {
-			padding: 4px 8px;
-			font-size: 11px;
+			padding: 3px 6px;
+			font-size: 10px;
 			border-radius: 4px;
 			border: 1px solid var(--vscode-button-background);
 			background: transparent;
@@ -361,6 +521,7 @@ export class SpecWorkflowPanelManager {
 			cursor: pointer;
 			opacity: 0;
 			transition: opacity 0.15s;
+			flex-shrink: 0;
 		}
 		.task-item:hover .task-btn {
 			opacity: 1;
@@ -371,27 +532,129 @@ export class SpecWorkflowPanelManager {
 		}
 		.empty-state {
 			text-align: center;
-			padding: 32px;
+			padding: 24px;
 			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+		}
+		
+		/* Content Viewer Styles */
+		.content-header {
+			padding: 12px 16px;
+			border-bottom: 1px solid var(--vscode-panel-border);
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			background: var(--vscode-editor-background);
+		}
+		.content-title {
+			font-size: 14px;
+			font-weight: 600;
+			margin: 0;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.content-title-icon {
+			font-size: 16px;
+		}
+		.content-actions {
+			display: flex;
+			gap: 8px;
+		}
+		.content-body {
+			flex: 1;
+			overflow-y: auto;
+			padding: 16px;
+			font-size: 13px;
+			line-height: 1.6;
+		}
+		.content-body pre {
+			background: var(--vscode-textCodeBlock-background);
+			padding: 12px;
+			border-radius: 6px;
+			overflow-x: auto;
+			font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+			font-size: 12px;
+		}
+		.content-body h1, .content-body h2, .content-body h3 {
+			margin-top: 16px;
+			margin-bottom: 8px;
+			border-bottom: 1px solid var(--vscode-panel-border);
+			padding-bottom: 4px;
+		}
+		.content-body h1 { font-size: 20px; }
+		.content-body h2 { font-size: 16px; }
+		.content-body h3 { font-size: 14px; }
+		.content-body ul, .content-body ol {
+			padding-left: 24px;
+		}
+		.content-body li {
+			margin-bottom: 4px;
+		}
+		.content-body code {
+			background: var(--vscode-textCodeBlock-background);
+			padding: 2px 6px;
+			border-radius: 4px;
+			font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+			font-size: 12px;
+		}
+		.content-placeholder {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			height: 100%;
+			color: var(--vscode-descriptionForeground);
+			text-align: center;
+			padding: 32px;
+		}
+		.content-placeholder-icon {
+			font-size: 48px;
+			margin-bottom: 16px;
+			opacity: 0.5;
 		}
 	</style>
 </head>
 <body>
-	<div class="workflow-header">
-		<h1 class="workflow-title">📋 Spec Workflow</h1>
-		<div class="workflow-steps" id="steps"></div>
-		<div class="actions">
-			<button class="btn btn-secondary" onclick="updateSpecs()">🔄 Update</button>
-			<button class="btn btn-primary" id="runAllBtn" onclick="runAllTasks()" disabled>▶ Run All Tasks</button>
+	<div class="container">
+		<div class="left-panel">
+			<div class="workflow-header">
+				<h1 class="workflow-title">📋 Spec Workflow</h1>
+				<div class="workflow-steps" id="steps"></div>
+			</div>
+			<div class="actions">
+				<button class="btn btn-secondary" onclick="updateSpecs()">🔄 Update</button>
+				<button class="btn btn-primary" id="runAllBtn" onclick="runAllTasks()" disabled>▶ Run All</button>
+			</div>
+			<div class="task-list" id="taskList">
+				<div class="empty-state">Loading workflow status...</div>
+			</div>
 		</div>
-	</div>
-	
-	<div class="task-list" id="taskList">
-		<div class="empty-state">Loading workflow status...</div>
+		<div class="right-panel">
+			<div class="content-header" id="contentHeader" style="display: none;">
+				<h2 class="content-title">
+					<span class="content-title-icon" id="contentIcon">📄</span>
+					<span id="contentFileName">Select a file</span>
+				</h2>
+				<div class="content-actions">
+					<button class="btn btn-secondary" onclick="openInEditor()">📝 Open in Editor</button>
+				</div>
+			</div>
+			<div class="content-body" id="contentBody">
+				<div class="content-placeholder">
+					<div class="content-placeholder-icon">📁</div>
+					<div>Select a workflow step to view its content</div>
+					<div style="margin-top: 8px; font-size: 12px;">Click on Requirements, Design, or Tasks above</div>
+				</div>
+			</div>
+		</div>
 	</div>
 
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
+		let currentFile = null;
+		let workflowStatus = {};
+		let fileContents = {};
 		
 		// Notify ready
 		vscode.postMessage({ type: 'webviewDidLaunch' });
@@ -399,7 +662,13 @@ export class SpecWorkflowPanelManager {
 		window.addEventListener('message', event => {
 			const message = event.data;
 			if (message.type === 'specWorkflowUpdate') {
+				workflowStatus = message.status;
 				renderWorkflow(message.status, message.tasks);
+			} else if (message.type === 'specFileContent') {
+				fileContents[message.file] = message.content;
+				if (currentFile === message.file) {
+					renderFileContent(message.file, message.content);
+				}
 			}
 		});
 		
@@ -410,17 +679,21 @@ export class SpecWorkflowPanelManager {
 			
 			// Render steps
 			const steps = [
-				{ name: 'Requirements', key: 'requirements', file: 'requirements.md' },
-				{ name: 'Design', key: 'design', file: 'design.md' },
-				{ name: 'Tasks', key: 'tasks', file: 'tasks.md' }
+				{ name: 'Requirements', key: 'requirements', file: 'requirements.md', icon: '📋' },
+				{ name: 'Design', key: 'design', file: 'design.md', icon: '🎨' },
+				{ name: 'Tasks', key: 'tasks', file: 'tasks.md', icon: '✅' }
 			];
 			
 			stepsContainer.innerHTML = steps.map((step, i) => {
 				const completed = status[step.key];
-				const cls = completed ? 'step completed' : 'step disabled';
+				const isActive = currentFile === step.file;
+				let cls = 'step';
+				if (completed) cls += ' completed';
+				if (isActive) cls += ' active';
+				if (!completed) cls += ' disabled';
 				return \`
 					\${i > 0 ? '<span class="arrow">→</span>' : ''}
-					<div class="\${cls}" onclick="openFile('\${step.file}')" title="\${completed ? 'Open ' + step.file : 'Not created yet'}">
+					<div class="\${cls}" onclick="viewFile('\${step.file}', \${completed})" title="\${completed ? 'View ' + step.file : 'Not created yet'}">
 						<span class="step-number">\${completed ? '✓' : i + 1}</span>
 						<span>\${step.name}</span>
 					</div>
@@ -432,7 +705,7 @@ export class SpecWorkflowPanelManager {
 			
 			// Render tasks
 			if (tasks.length === 0) {
-				taskList.innerHTML = '<div class="empty-state">No tasks found. Complete Requirements → Design → Tasks workflow first.</div>';
+				taskList.innerHTML = '<div class="empty-state">No tasks found. Complete the workflow first.</div>';
 				return;
 			}
 			
@@ -442,14 +715,65 @@ export class SpecWorkflowPanelManager {
 					<div class="task-item \${task.status}">
 						<div class="task-checkbox">\${statusIcon}</div>
 						<div class="task-content">
-							<div class="task-title">\${task.title}</div>
+							<div class="task-title" title="\${task.title}">\${task.title}</div>
 						</div>
 						\${task.complexity ? '<span class="task-complexity">' + task.complexity + '</span>' : ''}
-						\${task.status === 'pending' ? '<button class="task-btn" onclick="startTask(\\'' + task.id + '\\')">▶ Start</button>' : ''}
-						\${task.status === 'in-progress' ? '<span class="task-complexity" style="background:#f59e0b">In Progress</span>' : ''}
+						\${task.status === 'pending' ? '<button class="task-btn" onclick="startTask(\\'' + task.id + '\\')">▶</button>' : ''}
+						\${task.status === 'in-progress' ? '<span class="task-complexity" style="background:#f59e0b">Running</span>' : ''}
 					</div>
 				\`;
 			}).join('');
+		}
+		
+		function viewFile(filename, exists) {
+			if (!exists) return;
+			currentFile = filename;
+			
+			// Update step highlights
+			const steps = document.querySelectorAll('.step');
+			steps.forEach(step => step.classList.remove('active'));
+			event.target.closest('.step')?.classList.add('active');
+			
+			// Show header
+			document.getElementById('contentHeader').style.display = 'flex';
+			
+			// Update title
+			const icons = { 'requirements.md': '📋', 'design.md': '🎨', 'tasks.md': '✅' };
+			document.getElementById('contentIcon').textContent = icons[filename] || '📄';
+			document.getElementById('contentFileName').textContent = filename;
+			
+			// Request file content
+			vscode.postMessage({ type: 'requestSpecFileContent', file: filename });
+			
+			// Show loading state
+			document.getElementById('contentBody').innerHTML = '<div class="empty-state">Loading...</div>';
+		}
+		
+		function renderFileContent(filename, content) {
+			const body = document.getElementById('contentBody');
+			// Simple markdown rendering
+			let html = content
+				.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+				.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+				.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+				.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, '<pre>$1</pre>')
+				.replace(/\`([^\`]+)\`/g, '<code>$1</code>')
+				.replace(/^- \\[x\\] (.+)$/gim, '<li style="list-style:none;">✅ $1</li>')
+				.replace(/^- \\[\\/\\] (.+)$/gim, '<li style="list-style:none;">🔄 $1</li>')
+				.replace(/^- \\[ \\] (.+)$/gim, '<li style="list-style:none;">⬜ $1</li>')
+				.replace(/^- (.+)$/gm, '<li>$1</li>')
+				.replace(/^\\d+\\. (.+)$/gm, '<li>$1</li>')
+				.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+				.replace(/\\*(.+?)\\*/g, '<em>$1</em>')
+				.replace(/\\n\\n/g, '</p><p>')
+				.replace(/\\n/g, '<br>');
+			body.innerHTML = '<p>' + html + '</p>';
+		}
+		
+		function openInEditor() {
+			if (currentFile) {
+				vscode.postMessage({ type: 'openSpecFile', file: currentFile });
+			}
 		}
 		
 		function openFile(filename) {

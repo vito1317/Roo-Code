@@ -103,6 +103,7 @@ import { readApiMessages, saveApiMessages, saveTaskMessages } from "../task-pers
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
+import { SpecWorkflowPanelManager } from "./SpecWorkflowPanelManager"
 import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 
@@ -932,6 +933,9 @@ export class ClineProvider
 		if (!currentTask || currentTask.abandoned || currentTask.abort) {
 			await this.removeClineFromStack()
 		}
+
+		// Initialize Spec Workflow file watcher to auto-open panel when spec files are created
+		SpecWorkflowPanelManager.initializeFileWatcher(this)
 	}
 
 	public async createTaskWithHistoryItem(

@@ -232,6 +232,24 @@ graph TD
 - ❌ 不要使用設計工具來顯示 MCP-UI 的回應結果
 - ❌ 不要在收到任何工具結果後用設計工具去「展示」那個結果
 
+## ⛔ 檔案創建限制 - 你只能創建 Markdown 檔案！
+
+**Architect 只能使用 write_to_file 創建以下類型的檔案：**
+- ✅ \`.specs/requirements.md\` - 需求規格書
+- ✅ \`.specs/design.md\` - 設計文檔
+- ✅ \`.specs/tasks.md\` - 任務清單
+- ✅ \`plan.md\` - 實作計畫
+- ✅ \`README.md\`, \`CHANGELOG.md\` 等文檔
+
+**絕對禁止創建以下類型的檔案（這是 Builder 的工作）：**
+- ❌ **任何原始碼檔案** (.php, .ts, .js, .py, .java, .go, .rs, .vue, .tsx, .jsx, etc.)
+- ❌ **配置檔案** (.json, .yaml, .yml, .xml, .env, composer.json, package.json, etc.)
+- ❌ **資料庫檔案** (migrations, seeders, factories, models, etc.)
+- ❌ **測試檔案** (.test.ts, .spec.ts, Test.php, etc.)
+- ❌ **任何不以 .md 結尾的檔案**
+
+⚠️ **如果你發現自己想要創建原始碼檔案，立即 STOP！使用 handoff_context 把任務交給 Builder！**
+
 **你的職責只是規劃，UI 設計由 Designer Agent 負責！**
 **如果你需要顯示任務狀態，使用 MCP-UI 工具，它會自動在聊天對話框中顯示！**
 **設計完成後使用 handoff_context 讓 Designer 接手，不要自己嘗試設計！**
@@ -281,43 +299,61 @@ graph TD
 
 ## UI 設計判斷 (非常重要！)
 
-在你的計畫中，你 **必須** 設置以下欄位：
-- **needsDesign**: 如果專案涉及任何使用者介面 (UI)，設置為 **true**
-- **hasUI**: 如果專案有前端界面，設置為 **true**
-- **useUIDesignCanvas**: **預設為 true**（使用內建的 UI Design Canvas）
-- **useFigma**: 只有當使用者 **明確要求** 使用 Figma 時才設置為 true
-- **usePenpot**: 只有當使用者 **明確要求** 使用 Penpot 時才設置為 true
+在你的計畫中，你 **必須** 設置以下欄位來決定是否需要 UI 設計：
 
-⚠️ **極度重要：你必須在 handoff_context 的 context_json 中包含這些欄位！
+### 需要 UI 設計的專案（needsDesign: true）：
+- 網頁應用程式 (web apps) 有前端介面
+- 行動應用程式 (mobile apps)
+- 桌面應用程式有 GUI
+- 任何有 HTML/CSS/按鈕/表單的專案
+- 使用者 **明確要求** 設計 UI 原型
 
-⚠️ **預設值原則 - UIDesignCanvas 是預設選項！**
-- 如果使用者沒有指定要用哪個設計工具 → 使用 \`useUIDesignCanvas: true\`
-- 如果使用者說「幫我設計一個...」→ 使用 \`useUIDesignCanvas: true, needsDesign: true, hasUI: true\`
-- 只有使用者說「請用 Figma」→ 才使用 \`useFigma: true, useUIDesignCanvas: false\`
-- 只有使用者說「請用 Penpot」→ 才使用 \`usePenpot: true, useUIDesignCanvas: false\`
+### 🚫 **不需要** UI 設計的專案（needsDesign: false, skipUIDesign: true）：
+- 純後端 API、GraphQL 服務
+- CLI 工具、命令列程式
+- 資料處理腳本、ETL 任務
+- 資料庫 schema 設計
+- 系統架構設計（無視覺 UI）
+- 修改現有程式碼（非新增 UI）
+- **使用者沒有提到需要畫 UI**
+- **使用者明確說「不用設計」、「不需要UI」等**
 
-📋 **正確的 handoff_context 範例（當需要設計時）：**
+⚠️ **預設原則更新：如果使用者沒有明確提到需要設計 UI，預設為 needsDesign: false！**
+
+### Handoff 欄位說明：
+- **needsDesign**: 是否需要設計階段（true/false）
+- **skipUIDesign**: 強制跳過 UI 繪製（true = 跳過）
+- **hasUI**: 專案最終是否有前端界面（不影響設計階段）
+- **useUIDesignCanvas**: 如果需要設計，使用內建 Canvas（預設）
+- **useFigma**: 只有使用者明確要求時才設為 true
+- **usePenpot**: 只有使用者明確要求時才設為 true
+
+📋 **不需要 UI 設計的 handoff 範例：**
+\`\`\`json
+{
+  "projectName": "數據處理 API",
+  "summary": "建立 REST API 服務",
+  "needsDesign": false,
+  "skipUIDesign": true,
+  "hasUI": false,
+  "tasks": [...]
+}
+\`\`\`
+
+📋 **需要 UI 設計的 handoff 範例：**
 \`\`\`json
 {
   "projectName": "運動App設計",
   "summary": "運動追蹤應用程式",
   "needsDesign": true,
+  "skipUIDesign": false,
   "hasUI": true,
   "useUIDesignCanvas": true,
-  "useFigma": false,
-  "usePenpot": false,
   "tasks": [...]
 }
 \`\`\`
 
-以下類型的專案需要設置 needsDesign: true：
-- 網頁應用程式 (web apps)
-- 行動應用程式 (mobile apps)
-- 工具應用、遊戲等有視覺界面的應用
-- 任何有 HTML/CSS/按鈕/表單的專案
-- 桌面應用程式 (desktop apps)
-
-只有純後端 API、CLI 工具、資料處理腳本等無 UI 的專案才設置 needsDesign: false。
+**只有**當 needsDesign: true 且 skipUIDesign: false 時，Designer 才會實際繪製 UI。
 
 ## 任務拆解原則
 
@@ -1153,6 +1189,48 @@ createdComponents 陣列必須包含實際創建的所有元素名稱。`,
 		const planUseUIDesignCanvas = architectPlan?.useUIDesignCanvas === true || architectPlan?.use_ui_design_canvas === true
 		const planUsePenpot = architectPlan?.usePenpot === true || architectPlan?.use_penpot === true
 		const planUseFigma = architectPlan?.useFigma === true || architectPlan?.use_figma === true
+		
+		// ⭐ Check if UI design is actually needed
+		const needsDesign = handoffContext?.needsDesign ?? architectPlan?.needsDesign ?? true
+		const skipUIDesign = handoffContext?.skipUIDesign === true || architectPlan?.skipUIDesign === true || needsDesign === false
+		
+		// If UI design is not needed, provide alternative instructions
+		if (skipUIDesign) {
+			console.log("[Designer] UI design not needed, skipping visual design phase")
+			return `## 🎨 設計階段 - 無需 UI 設計
+
+根據 Architect 的計畫，此專案**不需要視覺 UI 設計**。
+
+你的任務改為：
+
+### 1. 創建設計規格文件（可選）
+如果專案有任何架構或資料結構需要說明，創建 \`.specs/design-specs.md\` 文件，包含：
+- 系統架構圖（Mermaid）
+- 資料模型/Schema 定義
+- API 設計規格（如適用）
+
+### 2. 直接 Handoff 給 Builder
+使用以下格式進行 handoff：
+
+\`\`\`xml
+<handoff_context>
+<next_agent>sentinel-builder</next_agent>
+<context_json>{
+  "designSpecs": "design-specs.md",
+  "expectedElements": 0,
+  "createdComponents": [],
+  "noUIDesign": true,
+  "notes": "此專案不需要 UI 設計，直接進入開發階段"
+}</context_json>
+</handoff_context>
+\`\`\`
+
+### ⚠️ 注意事項
+- ❌ **不需要**使用 Figma/Penpot/UIDesignCanvas
+- ❌ **不需要**創建 15+ 個 UI 元素
+- ✅ 可以直接 handoff 給 Builder
+- ✅ expectedElements = 0 是允許的`
+		}
 
 		// Priority 1: Explicit design tool in context (set by StateMachine based on MCP connection)
 		if (context.designTool) {

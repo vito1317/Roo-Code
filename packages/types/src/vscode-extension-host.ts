@@ -116,6 +116,7 @@ export interface ExtensionMessage {
 		// Spec Mode types
 		| "specsStatus"
 		| "specTasksList"
+		| "specFileContent"
 	text?: string
 	html?: string // MCP-UI HTML output
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -235,6 +236,9 @@ export interface ExtensionMessage {
 		status: "pending" | "in-progress" | "done"
 		complexity?: string
 	}>
+	// For specFileContent: file name and content
+	file?: string
+	content?: string
 	aggregatedCosts?: {
 		// For taskWithAggregatedCosts response
 		totalCost: number
@@ -668,6 +672,7 @@ export interface WebviewMessage {
 		| "startSpecTask"
 		| "createSpecsFromPrompt"
 		| "openSpecWorkflowPanel"
+		| "requestSpecFileContent"
 	text?: string
 	agentSlug?: string // Agent slug for TTS voice selection (e.g., "sentinel-architect")
 	editedMessageContent?: string
