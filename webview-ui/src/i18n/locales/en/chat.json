@@ -28,7 +28,8 @@
 		"openInCloud": "Open task in Sentinel Code Cloud",
 		"openInCloudIntro": "Keep monitoring or interacting with Sentinel from anywhere. Scan, click or copy to open.",
 		"openApiHistory": "Open API History",
-		"openUiHistory": "Open UI History"
+		"openUiHistory": "Open UI History",
+		"backToParentTask": "Parent task"
 	},
 	"unpin": "Unpin",
 	"pin": "Pin",
@@ -51,13 +52,16 @@
 	"tokenProgress": {
 		"availableSpace": "Available space: {{amount}} tokens",
 		"tokensUsed": "Tokens used: {{used}} of {{total}}",
-		"reservedForResponse": "Reserved for model response: {{amount}} tokens"
+		"reservedForResponse": "Reserved for model response: {{amount}} tokens",
+		"tokensUsedLabel": "Tokens used",
+		"reservedForResponseLabel": "Reserved for response",
+		"availableSpaceLabel": "Available space"
 	},
 	"reject": {
 		"title": "Deny",
 		"tooltip": "Prevent this action from occurring"
 	},
-	"completeSubtaskAndReturn": "Complete Subtask and Return",
+	"completeSubtaskAndReturn": "Complete subtask and keep going",
 	"approve": {
 		"title": "Approve",
 		"tooltip": "Allow this action to happen"
@@ -202,6 +206,10 @@
 	"instructions": {
 		"wantsToFetch": "Sentinel wants to fetch detailed instructions to assist with the current task"
 	},
+	"skill": {
+		"wantsToLoad": "Roo wants to load a skill",
+		"didLoad": "Roo loaded a skill"
+	},
 	"fileOperations": {
 		"wantsToRead": "Sentinel wants to read this file",
 		"wantsToReadMultiple": "Sentinel wants to read multiple files",
@@ -279,12 +287,12 @@
 	},
 	"subtasks": {
 		"wantsToCreate": "Sentinel wants to create a new subtask in {{mode}} mode",
-		"wantsToFinish": "Sentinel wants to finish this subtask",
+		"wantsToFinish": "Sentinel wants to mark this as completed",
 		"newTaskContent": "Subtask Instructions",
-		"completionContent": "Subtask Completed",
-		"resultContent": "Subtask Results",
+		"resultContent": "Subtask completed",
 		"defaultResult": "Please continue to the next task.",
-		"completionInstructions": "Subtask completed! You can review the results and suggest any corrections or next steps. If everything looks good, confirm to return the result to the parent task."
+		"completionInstructions": "You can review the results and suggest any corrections or next steps. If everything looks good, confirm to return the result to the parent task.",
+		"goToSubtask": "View task"
 	},
 	"questions": {
 		"hasQuestion": "Sentinel has a question"
@@ -342,7 +350,7 @@
 		},
 		"release": {
 			"heading": "What's New:",
-			"intelligentContextCondensation": "Intelligent Context Condensing v2: A complete rework of the algorithm used to manage the context window. Now you can run tasks for longer without Roo getting dumber."
+			"smartCodeFolding": "Smart Code Folding: Context condensation now preserves a lightweight map of your files: function signatures, class declarations, and type definitions. This provides better continuity after condensing and smarter edits when referencing previous work."
 		},
 		"cloudAgents": {
 			"heading": "New in the Cloud:",
@@ -491,5 +499,8 @@
 		"serversPart_other": "{{count}} MCP servers",
 		"messageTemplate": "You have {{tools}} enabled via {{servers}}. Such a high number can confuse the model and lead to errors. Try to keep it below {{threshold}}.",
 		"openMcpSettings": "Open MCP Settings"
+	},
+	"readCommandOutput": {
+		"title": "Roo read command output"
 	}
 }

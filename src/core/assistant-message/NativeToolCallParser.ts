@@ -313,9 +313,22 @@ export class NativeToolCallParser {
 		return finalToolUse
 	}
 
+	private static coerceOptionalNumber(value: unknown): number | undefined {
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value
+		}
+		if (typeof value === "string") {
+			const n = Number(value)
+			if (Number.isFinite(n)) {
+				return n
+			}
+		}
+		return undefined
+	}
+
 	/**
 	 * Convert raw file entries from API (with line_ranges) to FileEntry objects
-	 * (with lineRanges). Handles multiple formats for compatibility:
+	 * (with lineRanges). Handles multiple formats for backward compatibility:
 	 *
 	 * New tuple format: { path: string, line_ranges: [[1, 50], [100, 150]] }
 	 * Object format: { path: string, line_ranges: [{ start: 1, end: 50 }] }
@@ -323,19 +336,21 @@ export class NativeToolCallParser {
 	 *
 	 * Returns: { path: string, lineRanges: [{ start: 1, end: 50 }] }
 	 */
-	private static convertFileEntries(files: any[]): FileEntry[] {
-		return files.map((file: any) => {
-			const entry: FileEntry = { path: file.path }
-			if (file.line_ranges && Array.isArray(file.line_ranges)) {
-				entry.lineRanges = file.line_ranges
-					.map((range: any) => {
+	private static convertFileEntries(files: unknown[]): FileEntry[] {
+		return files.map((file: unknown) => {
+			const f = file as Record<string, unknown>
+			const entry: FileEntry = { path: f.path as string }
+			if (f.line_ranges && Array.isArray(f.line_ranges)) {
+				entry.lineRanges = (f.line_ranges as unknown[])
+					.map((range: unknown) => {
 						// Handle tuple format: [start, end]
 						if (Array.isArray(range) && range.length >= 2) {
 							return { start: Number(range[0]), end: Number(range[1]) }
 						}
 						// Handle object format: { start: number, end: number }
 						if (typeof range === "object" && range !== null && "start" in range && "end" in range) {
-							return { start: Number(range.start), end: Number(range.end) }
+							const r = range as { start: unknown; end: unknown }
+							return { start: Number(r.start), end: Number(r.end) }
 						}
 						// Handle legacy string format: "1-50"
 						if (typeof range === "string") {
@@ -346,7 +361,7 @@ export class NativeToolCallParser {
 						}
 						return null
 					})
-					.filter(Boolean)
+					.filter((r): r is { start: number; end: number } => r !== null)
 			}
 			return entry
 		})
@@ -378,22 +393,62 @@ export class NativeToolCallParser {
 		// Build partial nativeArgs based on what we have so far
 		let nativeArgs: any = undefined
 
+		// Track if legacy format was used (for telemetry)
+		let usedLegacyFormat = false
+
 		switch (name) {
-			case "read_file": {
-				// Handle both array and stringified array from less capable models
-				let filesArray = partialArgs.files
-				if (typeof filesArray === "string") {
-					try {
-						filesArray = JSON.parse(filesArray)
-					} catch {
-						// If parsing fails, leave as string (will fail validation)
+			case "read_file":
+				// Check for legacy format first: { files: [...] }
+				// Handle both array and stringified array (some models double-stringify)
+				if (partialArgs.files !== undefined) {
+					let filesArray: unknown[] | null = null
+
+					if (Array.isArray(partialArgs.files)) {
+						filesArray = partialArgs.files
+					} else if (typeof partialArgs.files === "string") {
+						// Handle double-stringified case: files is a string containing JSON array
+						try {
+							const parsed = JSON.parse(partialArgs.files)
+							if (Array.isArray(parsed)) {
+								filesArray = parsed
+							}
+						} catch {
+							// Not valid JSON, ignore
+						}
+					}
+
+					if (filesArray && filesArray.length > 0) {
+						usedLegacyFormat = true
+						nativeArgs = {
+							files: this.convertFileEntries(filesArray),
+							_legacyFormat: true as const,
+						}
 					}
 				}
-				if (filesArray && Array.isArray(filesArray)) {
-					nativeArgs = { files: this.convertFileEntries(filesArray) }
+				// New format: { path: "...", mode: "..." }
+				if (!nativeArgs && partialArgs.path !== undefined) {
+					nativeArgs = {
+						path: partialArgs.path,
+						mode: partialArgs.mode,
+						offset: this.coerceOptionalNumber(partialArgs.offset),
+						limit: this.coerceOptionalNumber(partialArgs.limit),
+						indentation:
+							partialArgs.indentation && typeof partialArgs.indentation === "object"
+								? {
+										anchor_line: this.coerceOptionalNumber(partialArgs.indentation.anchor_line),
+										max_levels: this.coerceOptionalNumber(partialArgs.indentation.max_levels),
+										max_lines: this.coerceOptionalNumber(partialArgs.indentation.max_lines),
+										include_siblings: this.coerceOptionalBoolean(
+											partialArgs.indentation.include_siblings,
+										),
+										include_header: this.coerceOptionalBoolean(
+											partialArgs.indentation.include_header,
+										),
+									}
+								: undefined,
+					}
 				}
 				break
-			}
 
 			case "attempt_completion":
 				if (partialArgs.result) {
@@ -459,14 +514,6 @@ export class NativeToolCallParser {
 				}
 				break
 
-			case "fetch_instructions":
-				if (partialArgs.task !== undefined) {
-					nativeArgs = {
-						task: partialArgs.task,
-					}
-				}
-				break
-
 			case "generate_image":
 				if (partialArgs.prompt !== undefined || partialArgs.path !== undefined) {
 					nativeArgs = {
@@ -481,6 +528,15 @@ export class NativeToolCallParser {
 				if (partialArgs.command !== undefined) {
 					nativeArgs = {
 						command: partialArgs.command,
+						args: partialArgs.args,
+					}
+				}
+				break
+
+			case "skill":
+				if (partialArgs.skill !== undefined) {
+					nativeArgs = {
+						skill: partialArgs.skill,
 						args: partialArgs.args,
 					}
 				}
@@ -515,20 +571,10 @@ export class NativeToolCallParser {
 
 			case "use_mcp_tool":
 				if (partialArgs.server_name !== undefined || partialArgs.tool_name !== undefined) {
-					// Parse arguments if they're a string (model sometimes sends stringified JSON)
-					let parsedPartialMcpArgs = partialArgs.arguments
-					if (typeof partialArgs.arguments === "string") {
-						try {
-							parsedPartialMcpArgs = JSON.parse(partialArgs.arguments)
-						} catch {
-							// Keep as string if parsing fails (might be incomplete during streaming)
-							parsedPartialMcpArgs = partialArgs.arguments
-						}
-					}
 					nativeArgs = {
 						server_name: partialArgs.server_name,
 						tool_name: partialArgs.tool_name,
-						arguments: parsedPartialMcpArgs,
+						arguments: partialArgs.arguments,
 					}
 				}
 				break
@@ -598,80 +644,6 @@ export class NativeToolCallParser {
 				}
 				break
 
-			case "handoff_context": {
-				// Handle notes and context_json parameters during streaming
-				let contextJson =
-					partialArgs.context_json ||
-					partialArgs.contextJson ||
-					partialArgs.context_data ||
-					partialArgs.contextData
-				if (typeof contextJson === "object" && contextJson !== null) {
-					contextJson = JSON.stringify(contextJson)
-				}
-				nativeArgs = {
-					notes: partialArgs.notes,
-					context_json: contextJson,
-				}
-				break
-			}
-
-			case "start_background_service":
-				nativeArgs = {
-					service_type: partialArgs.service_type || partialArgs.serviceType,
-					port: partialArgs.port,
-					wait_ms: partialArgs.wait_ms || partialArgs.waitMs,
-				}
-				break
-
-			case "parallel_ui_tasks": {
-				let tasksArray = partialArgs.tasks
-				if (typeof tasksArray === "string") {
-					try {
-						tasksArray = JSON.parse(tasksArray)
-					} catch {
-						// Keep as string during streaming
-					}
-				}
-				nativeArgs = {
-					tasks: tasksArray,
-					containerFrame: partialArgs.containerFrame,
-				}
-				break
-			}
-
-			case "parallel_mcp_calls": {
-				let callsArray = partialArgs.calls
-				if (typeof callsArray === "string") {
-					try {
-						callsArray = JSON.parse(callsArray)
-					} catch {
-						// Keep as string during streaming
-					}
-				}
-				nativeArgs = {
-					server: partialArgs.server || "figma-write",
-					calls: callsArray,
-				}
-				break
-			}
-
-			case "adjust_layout": {
-				nativeArgs = {
-					layout: partialArgs.layout || "grid",
-					columns: partialArgs.columns,
-					gap: partialArgs.gap,
-					gapX: partialArgs.gapX,
-					gapY: partialArgs.gapY,
-					startX: partialArgs.startX,
-					startY: partialArgs.startY,
-					within: partialArgs.within,
-					nodeIds: partialArgs.nodeIds,
-					excludeTypes: partialArgs.excludeTypes,
-					sortBy: partialArgs.sortBy,
-				}
-				break
-			}
-
 			default:
 				break
 		}
@@ -687,6 +659,11 @@ export class NativeToolCallParser {
 		// Preserve original name for API history when an alias was used
 		if (originalName) {
 			result.originalName = originalName
+		}
+
+		// Track legacy format usage for telemetry
+		if (usedLegacyFormat) {
+			result.usedLegacyFormat = true
 		}
 
 		return result
@@ -735,13 +712,6 @@ export class NativeToolCallParser {
 			const params: Partial<Record<ToolParamName, string>> = {}
 
 			for (const [key, value] of Object.entries(args)) {
-				// Skip complex parameters that have been migrated to nativeArgs.
-				// For read_file, the 'files' parameter is a FileEntry[] array that can't be
-				// meaningfully stringified. The properly typed data is in nativeArgs instead.
-				if (resolvedName === "read_file" && key === "files") {
-					continue
-				}
-
 				// Validate parameter name
 				if (!toolParamNames.includes(key as ToolParamName) && !customToolRegistry.has(resolvedName)) {
 					console.warn(`Unknown parameter '${key}' for tool '${resolvedName}'`)
@@ -759,22 +729,60 @@ export class NativeToolCallParser {
 			// nativeArgs object. If validation fails, we treat the tool call as invalid and fail fast.
 			let nativeArgs: NativeArgsFor<TName> | undefined = undefined
 
+			// Track if legacy format was used (for telemetry)
+			let usedLegacyFormat = false
+
 			switch (resolvedName) {
-				case "read_file": {
-					// Handle both array and stringified array from less capable models
-					let filesArray = args.files
-					if (typeof filesArray === "string") {
-						try {
-							filesArray = JSON.parse(filesArray)
-						} catch {
-							// If parsing fails, leave as string (will fail validation)
+				case "read_file":
+					// Check for legacy format first: { files: [...] }
+					// Handle both array and stringified array (some models double-stringify)
+					if (args.files !== undefined) {
+						let filesArray: unknown[] | null = null
+
+						if (Array.isArray(args.files)) {
+							filesArray = args.files
+						} else if (typeof args.files === "string") {
+							// Handle double-stringified case: files is a string containing JSON array
+							try {
+								const parsed = JSON.parse(args.files)
+								if (Array.isArray(parsed)) {
+									filesArray = parsed
+								}
+							} catch {
+								// Not valid JSON, ignore
+							}
+						}
+
+						if (filesArray && filesArray.length > 0) {
+							usedLegacyFormat = true
+							nativeArgs = {
+								files: this.convertFileEntries(filesArray),
+								_legacyFormat: true as const,
+							} as NativeArgsFor<TName>
 						}
 					}
-					if (filesArray && Array.isArray(filesArray)) {
-						nativeArgs = { files: this.convertFileEntries(filesArray) } as NativeArgsFor<TName>
+					// New format: { path: "...", mode: "..." }
+					if (!nativeArgs && args.path !== undefined) {
+						nativeArgs = {
+							path: args.path,
+							mode: args.mode,
+							offset: this.coerceOptionalNumber(args.offset),
+							limit: this.coerceOptionalNumber(args.limit),
+							indentation:
+								args.indentation && typeof args.indentation === "object"
+									? {
+											anchor_line: this.coerceOptionalNumber(args.indentation.anchor_line),
+											max_levels: this.coerceOptionalNumber(args.indentation.max_levels),
+											max_lines: this.coerceOptionalNumber(args.indentation.max_lines),
+											include_siblings: this.coerceOptionalBoolean(
+												args.indentation.include_siblings,
+											),
+											include_header: this.coerceOptionalBoolean(args.indentation.include_header),
+										}
+									: undefined,
+						} as NativeArgsFor<TName>
 					}
 					break
-				}
 
 				case "attempt_completion":
 					if (args.result) {
@@ -840,14 +848,6 @@ export class NativeToolCallParser {
 					}
 					break
 
-				case "fetch_instructions":
-					if (args.task !== undefined) {
-						nativeArgs = {
-							task: args.task,
-						} as NativeArgsFor<TName>
-					}
-					break
-
 				case "generate_image":
 					if (args.prompt !== undefined && args.path !== undefined) {
 						nativeArgs = {
@@ -862,6 +862,15 @@ export class NativeToolCallParser {
 					if (args.command !== undefined) {
 						nativeArgs = {
 							command: args.command,
+							args: args.args,
+						} as NativeArgsFor<TName>
+					}
+					break
+
+				case "skill":
+					if (args.skill !== undefined) {
+						nativeArgs = {
+							skill: args.skill,
 							args: args.args,
 						} as NativeArgsFor<TName>
 					}
@@ -894,6 +903,17 @@ export class NativeToolCallParser {
 					}
 					break
 
+				case "read_command_output":
+					if (args.artifact_id !== undefined) {
+						nativeArgs = {
+							artifact_id: args.artifact_id,
+							search: args.search,
+							offset: args.offset,
+							limit: args.limit,
+						} as NativeArgsFor<TName>
+					}
+					break
+
 				case "write_to_file":
 					if (args.path !== undefined && args.content !== undefined) {
 						nativeArgs = {
@@ -905,20 +925,10 @@ export class NativeToolCallParser {
 
 				case "use_mcp_tool":
 					if (args.server_name !== undefined && args.tool_name !== undefined) {
-						// Parse arguments if they're a string (model sometimes sends stringified JSON)
-						let parsedMcpArgs = args.arguments
-						if (typeof args.arguments === "string") {
-							try {
-								parsedMcpArgs = JSON.parse(args.arguments)
-							} catch {
-								// Keep as string if parsing fails, UseMcpToolTool will handle the error
-								parsedMcpArgs = args.arguments
-							}
-						}
 						nativeArgs = {
 							server_name: args.server_name,
 							tool_name: args.tool_name,
-							arguments: parsedMcpArgs,
+							arguments: args.arguments,
 						} as NativeArgsFor<TName>
 					}
 					break
@@ -988,104 +998,6 @@ export class NativeToolCallParser {
 					}
 					break
 
-				case "parallel_ui_tasks": {
-					// Handle both array and stringified array from less capable models
-					let tasksArray = args.tasks
-					if (typeof tasksArray === "string") {
-						try {
-							tasksArray = JSON.parse(tasksArray)
-						} catch {
-							// If parsing fails, leave as string (will fail validation)
-						}
-					}
-					if (tasksArray && Array.isArray(tasksArray)) {
-						nativeArgs = {
-							tasks: tasksArray,
-							containerFrame: args.containerFrame,
-						} as unknown as NativeArgsFor<TName>
-					}
-					break
-				}
-
-				case "parallel_mcp_calls": {
-					// Handle both array and stringified array
-					// The tool handler (ParallelMcpCallsTool) will do final parsing
-					let callsValue = args.calls
-					if (typeof callsValue === "string") {
-						try {
-							// Try to parse as JSON
-							callsValue = JSON.parse(callsValue)
-						} catch {
-							// Try using partial-json parser for malformed JSON
-							try {
-								callsValue = parseJSON(callsValue)
-							} catch {
-								// Keep as string - let the tool handler deal with it
-							}
-						}
-					}
-					// Convert to string for the tool handler
-					// Handle undefined case: if calls is not provided, pass empty string
-					// so the tool handler can report the missing parameter correctly
-					let callsString: string
-					if (callsValue === undefined || callsValue === null) {
-						callsString = "" // Will trigger "missing parameter" error in tool handler
-					} else if (typeof callsValue === "string") {
-						callsString = callsValue
-					} else {
-						callsString = JSON.stringify(callsValue)
-					}
-					// Always set nativeArgs - let the tool handler validate
-					nativeArgs = {
-						server: args.server || "figma-write",
-						calls: callsString,
-					} as unknown as NativeArgsFor<TName>
-					break
-				}
-
-				case "handoff_context": {
-					// Handle notes and context_json parameters
-					// context_json can be a string (stringified JSON) or already parsed object
-					let contextJson =
-						args.context_json || args.contextJson || args.context_data || args.contextData || "{}"
-					if (typeof contextJson === "object") {
-						contextJson = JSON.stringify(contextJson)
-					}
-					nativeArgs = {
-						notes: args.notes || "",
-						context_json: contextJson,
-					} as unknown as NativeArgsFor<TName>
-					break
-				}
-
-				case "start_background_service": {
-					// Handle start_background_service parameters
-					nativeArgs = {
-						service_type: args.service_type || args.serviceType || "",
-						port: args.port,
-						wait_ms: args.wait_ms || args.waitMs,
-					} as unknown as NativeArgsFor<TName>
-					break
-				}
-
-				case "adjust_layout": {
-					// Handle adjust_layout parameters - all are strings
-					nativeArgs = {
-						layout: args.layout || "grid",
-						columns: args.columns,
-						gap: args.gap,
-						gapX: args.gapX,
-						gapY: args.gapY,
-						startX: args.startX,
-						startY: args.startY,
-						within: args.within,
-						nodeIds: args.nodeIds,
-						excludeTypes: args.excludeTypes,
-						sortBy: args.sortBy,
-					} as unknown as NativeArgsFor<TName>
-					break
-				}
-
 				default:
 					if (customToolRegistry.has(resolvedName)) {
 						nativeArgs = args as NativeArgsFor<TName>
@@ -1115,6 +1027,11 @@ export class NativeToolCallParser {
 			// Preserve original name for API history when an alias was used
 			if (toolCall.name !== resolvedName) {
 				result.originalName = toolCall.name
+			}
+
+			// Track legacy format usage for telemetry
+			if (usedLegacyFormat) {
+				result.usedLegacyFormat = true
 			}
 
 			return result

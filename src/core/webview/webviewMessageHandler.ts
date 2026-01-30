@@ -32,6 +32,7 @@ import { ClineProvider } from "./ClineProvider"
 import { BrowserSessionPanelManager } from "./BrowserSessionPanelManager"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
+import { handleRequestSkills, handleCreateSkill, handleDeleteSkill, handleOpenSkillFile } from "./skillsMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
@@ -640,10 +641,6 @@ export const webviewMessageHandler = async (
 					} else if (key === "terminalZdotdir") {
 						if (value !== undefined) {
 							Terminal.setTerminalZdotdir(value as boolean)
-						}
-					} else if (key === "terminalCompressProgressBar") {
-						if (value !== undefined) {
-							Terminal.setCompressProgressBar(value as boolean)
 						}
 					} else if (key === "mcpEnabled") {
 						newValue = value ?? true
@@ -1615,10 +1612,6 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
-		case "enableMcpServerCreation":
-			await updateGlobalState("enableMcpServerCreation", message.bool ?? true)
-			await provider.postStateToWebview()
-			break
 		case "remoteControlEnabled":
 			try {
 				await CloudService.instance.updateUserSettings({ extensionBridgeEnabled: message.bool ?? false })
@@ -2425,10 +2418,9 @@ export const webviewMessageHandler = async (
 					const yamlContent = await fs.readFile(fileUri[0].fsPath, "utf-8")
 
 					// Import the mode with the specified source level
-					const result = await provider.customModesManager.importModeWithRules(
-						yamlContent,
-						message.source || "project", // Default to project if not specified
-					)
+					// Note: "built-in" is not a valid source for importing modes
+					const importSource = message.source === "global" ? "global" : "project"
+					const result = await provider.customModesManager.importModeWithRules(yamlContent, importSource)
 
 					if (result.success) {
 						// Update state after importing
@@ -3151,6 +3143,22 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
+		case "requestSkills": {
+			await handleRequestSkills(provider)
+			break
+		}
+		case "createSkill": {
+			await handleCreateSkill(provider, message)
+			break
+		}
+		case "deleteSkill": {
+			await handleDeleteSkill(provider, message)
+			break
+		}
+		case "openSkillFile": {
+			await handleOpenSkillFile(provider, message)
+			break
+		}
 		case "openCommandFile": {
 			try {
 				if (message.text) {
@@ -3724,6 +3732,34 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : String(error)
 				await provider.postMessageToWebview({ type: "worktreeResult", success: false, text: errorMessage })
+			}
+
+			break
+		}
+
+		case "browseForWorktreePath": {
+			try {
+				const options: vscode.OpenDialogOptions = {
+					canSelectFiles: false,
+					canSelectFolders: true,
+					canSelectMany: false,
+					openLabel: t("worktrees:selectWorktreeLocation"),
+					title: t("worktrees:selectFolderForWorktree"),
+					defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri
+						? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, "..")
+						: undefined,
+				}
+
+				const result = await vscode.window.showOpenDialog(options)
+				if (result && result[0]) {
+					await provider.postMessageToWebview({
+						type: "folderSelected",
+						path: result[0].fsPath,
+					})
+				}
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				provider.log(`Error opening folder picker: ${errorMessage}`)
 			}
 
 			break
