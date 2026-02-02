@@ -335,10 +335,17 @@ export class SpecWorkflowPanelManager {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i]
 			
+			// Enhanced debug: log lines that contain TASK
+			if (line.includes('TASK-') || line.includes('task-')) {
+				console.log(`[SpecWorkflowPanelManager] Line ${i} contains TASK: "${line.substring(0, 80)}"`)
+				const testMatch = line.match(taskHeaderRegex)
+				console.log(`[SpecWorkflowPanelManager] Regex match result:`, testMatch)
+			}
+			
 			// Check for TASK-XXX header format
 			const headerMatch = line.match(taskHeaderRegex)
 			if (headerMatch) {
-				console.log(`[SpecWorkflowPanelManager] Found task header: ${line.substring(0, 50)}...`)
+				console.log(`[SpecWorkflowPanelManager] ✅ Found task header: ${line.substring(0, 50)}...`)
 				// Save previous task if exists
 				if (currentTask) {
 					if (currentSection && sectionContent.length > 0) {

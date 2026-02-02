@@ -3896,54 +3896,68 @@ export const webviewMessageHandler = async (
 				}
 				
 				// Create individual sub-tasks for each pending task
-				const firstTask = pendingTasks[0]
-				const firstTaskId = firstTask[1]
-				const firstTitle = firstTask[2].replace(/\s*\(complexity:\s*(low|medium|high)\)/i, "").trim()
-				
-				// Create prompt for just the first task
-				const firstTaskPrompt = `# 🎯 執行 Spec 任務: ${firstTaskId}
+				// Build the sub-task creation instruction for Spec Mode
+				const subTaskCreationPrompt = `# 🚀 批次建立 Spec 子任務
 
-## 任務資訊
-- **任務 ID**: ${firstTaskId}
-- **標題**: ${firstTitle}
-- **複雜度**: ${firstTask[3] || "medium"}
-
----
-
-## 📋 執行指示
-
-1. **讀取 .specs/tasks.md** 找到 ${firstTaskId} 的完整內容
-2. **讀取 .specs/requirements.md** 了解技術堆疊規格
-3. **依照任務描述執行**
-4. **完成後更新 tasks.md** 將 ${firstTaskId} 狀態改為 \`[x]\`
-
-## 🔴 重要：Framework 優先！
-
-如果任務涉及建立專案，必須先確認 requirements.md 中指定的 Framework，
-然後使用正確的指令建立（如 \`composer create-project laravel/laravel .\`）。
-
----
-
-## 📎 剩餘待執行任務（共 ${pendingTasks.length} 個）
+## 📋 任務清單（共 ${pendingTasks.length} 個待執行）
 
 ${taskList}
 
-**🚀 請先完成 ${firstTaskId}，後續任務將在 Spec Workflow Panel 中逐一啟動。**`
+---
 
-				// Switch to Spec mode and create the first task
+## 🎯 執行指示
+
+**你必須為上述每個待執行任務分別建立獨立的子任務。**
+
+請依照以下步驟執行：
+
+1. **讀取 .specs/tasks.md** 獲取每個任務的完整描述
+2. **讀取 .specs/requirements.md** 了解專案技術堆疊
+3. **為每個任務建立子任務** 使用 \`new_task\` 工具
+
+### 子任務建立格式
+
+對於每個 TASK-XXX，使用 \`new_task\` 工具建立子任務，提示詞格式如下：
+
+\`\`\`
+執行 Spec 任務: TASK-XXX
+
+請完成以下任務：
+1. 讀取 .specs/tasks.md 中 TASK-XXX 的完整內容
+2. 依照任務描述執行實作
+3. 完成後更新 tasks.md 將 TASK-XXX 狀態改為 [x]
+
+重要：如果是建立專案框架任務，必須使用 requirements.md 中指定的 Framework 指令。
+\`\`\`
+
+### 🔴 重要規則
+
+- **依序建立**：先建立 TASK-001，再建立 TASK-002，依此類推
+- **一個任務一個子任務**：每個 TASK 都要有獨立的子任務
+- **不要直接執行**：你的任務是「建立子任務」，不是「執行任務」
+- **使用 new_task 工具**：這是建立子任務的唯一方式
+
+---
+
+請開始為 ${pendingTasks.length} 個任務建立子任務。`
+
+				// Switch to Spec mode and send the sub-task creation instruction
 				await provider.setMode("spec")
-				await provider.createTask(firstTaskPrompt, [])
+				
+				// Create new chat and send the orchestration prompt
 				await provider.postMessageToWebview({ type: "invoke", invoke: "newChat" })
 				
-				// Show info about remaining tasks
-				if (pendingTasks.length > 1) {
-					vscode.window.showInformationMessage(
-						`已建立 ${firstTaskId} 子任務。完成後請從 Spec Workflow Panel 點擊 "Start" 執行下一個任務。`,
-						"了解"
-					)
-				}
+				// Wait for new chat to initialize
+				await new Promise(resolve => setTimeout(resolve, 300))
 				
-				console.log(`[runAllSpecTasks] Created sub-task for ${firstTaskId}, ${pendingTasks.length - 1} tasks remaining`)
+				// Send the sub-task creation instruction
+				await provider.postMessageToWebview({ 
+					type: "invoke", 
+					invoke: "sendMessage",
+					text: subTaskCreationPrompt
+				})
+				
+				console.log(`[runAllSpecTasks] Sent sub-task creation instruction for ${pendingTasks.length} tasks`)
 			} catch (error) {
 				console.error("[runAllSpecTasks] Error:", error)
 				vscode.window.showErrorMessage(`Failed to create sub-tasks: ${error instanceof Error ? error.message : String(error)}`)
@@ -4114,7 +4128,7 @@ ${taskList}
 你現在以 **開發者 (Code)** 角色執行此任務。
 專注於：撰寫程式碼、創建檔案、實作功能。`
 				
-				const subTaskPrompt = `# 🎯 執行 Spec 任務
+				const subTaskPrompt = `# 🎯 建立子任務執行 Spec 任務
 
 **偵測到的任務類型**: ${modeDescription}
 
@@ -4128,20 +4142,35 @@ ${taskSection}
 
 ---
 
-## 執行指示
+## 🔴 執行指示
 
-1. **仔細閱讀** 上述任務描述、驗收標準和涉及的檔案
-2. **依據角色執行** - ${targetMode === "architect" ? "分析並產出設計文件" : "創建或修改必要的檔案"}
-3. **驗證結果** - 確保符合驗收標準
-4. **回報完成** - 說明已完成的工作
+**請使用 \`new_task\` 工具建立一個子任務來執行此任務。**
 
-請開始執行！`
+子任務提示詞應包含：
+1. 任務描述：${taskId} 的完整內容
+2. 執行模式：${targetMode === "architect" ? "分析並產出設計文件" : "創建或修改必要的檔案"}
+3. 驗證標準：確保符合驗收標準
+4. 完成後更新 tasks.md 將此任務標記為完成
 
-				// Create a new task with this prompt
-				await provider.createTask(subTaskPrompt, [])
+**不要直接執行這個任務，請用 new_task 建立子任務！**`
+
+				// Switch to Spec mode first (to handle sub-task creation)
+				await provider.setMode("spec")
+				
+				// Create new chat and send prompt to Spec Mode
 				await provider.postMessageToWebview({ type: "invoke", invoke: "newChat" })
 				
-				console.log(`[startSpecTask] Created sub-task for ${taskId} in ${targetMode} mode`)
+				// Wait for new chat to initialize
+				await new Promise(resolve => setTimeout(resolve, 300))
+				
+				// Send the sub-task creation instruction
+				await provider.postMessageToWebview({ 
+					type: "invoke", 
+					invoke: "sendMessage",
+					text: subTaskPrompt
+				})
+				
+				console.log(`[startSpecTask] Sent sub-task creation instruction for ${taskId} to Spec Mode`)
 				
 			} catch (error) {
 				console.error("[startSpecTask] Error creating sub-task:", error)
