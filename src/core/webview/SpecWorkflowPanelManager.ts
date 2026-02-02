@@ -320,8 +320,14 @@ export class SpecWorkflowPanelManager {
 		const lines = content.split("\n")
 		let taskCounter = 0
 
-		// Try parsing TASK-XXX header format first (e.g., "### TASK-001: Title (complexity: low)")
-		const taskHeaderRegex = /^#{1,3}\s*TASK-(\d+):\s*(.+?)(?:\s*\(complexity:\s*(low|medium|high)\))?$/i
+		console.log(`[SpecWorkflowPanelManager] Parsing tasks from markdown, ${lines.length} lines`)
+
+		// Try parsing TASK-XXX header format with flexible patterns:
+		// - "### TASK-001: Title (complexity: medium)"
+		// - "### TASK-001: Title (complexity: medium) [ ]"
+		// - "### TASK-001: Title [x]" 
+		// - "TASK-001: Title (complexity: medium)"
+		const taskHeaderRegex = /^(?:#{1,3}\s+)?TASK-(\d+)[:\s]+(.+?)(?:\s*\(complexity:\s*(low|medium|high)\))?(?:\s*\[([ x/])\])?$/i
 		let currentTask: SpecTask | null = null
 		let currentSection = ""
 		let sectionContent: string[] = []
@@ -332,6 +338,7 @@ export class SpecWorkflowPanelManager {
 			// Check for TASK-XXX header format
 			const headerMatch = line.match(taskHeaderRegex)
 			if (headerMatch) {
+				console.log(`[SpecWorkflowPanelManager] Found task header: ${line.substring(0, 50)}...`)
 				// Save previous task if exists
 				if (currentTask) {
 					if (currentSection && sectionContent.length > 0) {
@@ -342,13 +349,17 @@ export class SpecWorkflowPanelManager {
 
 				taskCounter++
 				const taskId = headerMatch[1]
-				const title = headerMatch[2].trim()
+				let title = headerMatch[2].trim()
 				const complexity = headerMatch[3]?.toLowerCase()
+				const statusChar = headerMatch[4]?.toLowerCase()
+				
+				// Remove trailing status checkbox if it was matched inline
+				title = title.replace(/\s*\[([ x/])\]\s*$/i, "").trim()
 
 				currentTask = {
 					id: `TASK-${taskId.padStart(3, "0")}`,
 					title: title,
-					status: "pending",
+					status: statusChar === "x" ? "done" : statusChar === "/" ? "in-progress" : "pending",
 					complexity: complexity,
 				}
 				currentSection = ""
@@ -436,7 +447,7 @@ export class SpecWorkflowPanelManager {
 				}
 			}
 		}
-
+		console.log(`[SpecWorkflowPanelManager] Parsed ${tasks.length} tasks from markdown`)
 		return tasks
 	}
 
@@ -992,6 +1003,7 @@ export class SpecWorkflowPanelManager {
 		let currentView = 'tasks'; // 'tasks' or 'content'
 		let workflowStatus = {};
 		let fileContents = {};
+		let cachedTasks = []; // Store parsed tasks for rendering
 		
 		// Initialize Mermaid with dark theme
 		if (typeof mermaid !== 'undefined') {
@@ -1077,91 +1089,109 @@ export class SpecWorkflowPanelManager {
 				el.addEventListener('click', function() {
 					const file = this.getAttribute('data-file');
 					const exists = this.getAttribute('data-exists') === 'true';
-					viewFile(file, exists);
+					// Special handling for tasks.md - show parsed task view instead of markdown
+					if (file === 'tasks.md' && exists) {
+						showTaskView();
+					} else {
+						viewFile(file, exists);
+					}
 				});
 			});
 			
 			// Enable run all button if tasks exist
 			runAllBtn.disabled = !status.tasks;
 			
+			// Store tasks in cache for later rendering
+			cachedTasks = tasks || [];
+			
 			// Render tasks (only if we're in task view)
 			if (currentView === 'tasks') {
-				if (!tasks || tasks.length === 0) {
-					taskView.innerHTML = \`
-						<div class="empty-state">
-							<div class="empty-state-icon">📋</div>
-							<div>No tasks found</div>
-							<div style="margin-top: 8px; font-size: 12px; opacity: 0.7;">
-								Click on Requirements, Design, or Tasks above to view documents
-							</div>
+				renderTasks();
+			}
+		}
+		
+		// Separate function to render tasks from cachedTasks
+		function renderTasks() {
+			const taskView = document.getElementById('taskView');
+			if (!taskView) return;
+			
+			console.log('[SpecWorkflowPanel] renderTasks called, cachedTasks:', cachedTasks?.length || 0);
+			
+			if (!cachedTasks || cachedTasks.length === 0) {
+				taskView.innerHTML = \`
+					<div class="empty-state">
+						<div class="empty-state-icon">📋</div>
+						<div>No tasks found</div>
+						<div style="margin-top: 8px; font-size: 12px; opacity: 0.7;">
+							Click on Requirements, Design, or Tasks above to view documents
 						</div>
-					\`;
-					return;
+					</div>
+				\`;
+				return;
+			}
+			
+			taskView.innerHTML = cachedTasks.map(task => {
+				const statusIcon = task.status === 'done' ? '✓' : task.status === 'in-progress' ? '⏳' : '';
+				const hasDetails = task.description || task.files || task.acceptance;
+				
+				// Build details section HTML if task has details
+				let detailsHtml = '';
+				if (hasDetails) {
+					detailsHtml += '<div class="task-details" id="details-' + task.id + '">';
+					if (task.description) {
+						detailsHtml += '<div class="task-details-section"><h4>📝 描述</h4><p>' + task.description + '</p></div>';
+					}
+					if (task.files && task.files.length > 0) {
+						detailsHtml += '<div class="task-details-section"><h4>📁 涉及檔案</h4><ul>';
+						task.files.forEach(function(f) { detailsHtml += '<li><code>' + f + '</code></li>'; });
+						detailsHtml += '</ul></div>';
+					}
+					if (task.acceptance && task.acceptance.length > 0) {
+						detailsHtml += '<div class="task-details-section"><h4>✅ 驗收標準</h4><ul>';
+						task.acceptance.forEach(function(a) { detailsHtml += '<li>' + a + '</li>'; });
+						detailsHtml += '</ul></div>';
+					}
+					if (task.dependencies) {
+						detailsHtml += '<div class="task-details-section"><h4>🔗 依賴</h4><p>' + task.dependencies + '</p></div>';
+					}
+					detailsHtml += '</div>';
 				}
 				
-				taskView.innerHTML = tasks.map(task => {
-					const statusIcon = task.status === 'done' ? '✓' : task.status === 'in-progress' ? '⏳' : '';
-					const hasDetails = task.description || task.files || task.acceptance;
-					
-					// Build details section HTML if task has details
-					let detailsHtml = '';
-					if (hasDetails) {
-						detailsHtml += '<div class="task-details" id="details-' + task.id + '">';
-						if (task.description) {
-							detailsHtml += '<div class="task-details-section"><h4>📝 描述</h4><p>' + task.description + '</p></div>';
-						}
-						if (task.files && task.files.length > 0) {
-							detailsHtml += '<div class="task-details-section"><h4>📁 涉及檔案</h4><ul>';
-							task.files.forEach(function(f) { detailsHtml += '<li><code>' + f + '</code></li>'; });
-							detailsHtml += '</ul></div>';
-						}
-						if (task.acceptance && task.acceptance.length > 0) {
-							detailsHtml += '<div class="task-details-section"><h4>✅ 驗收標準</h4><ul>';
-							task.acceptance.forEach(function(a) { detailsHtml += '<li>' + a + '</li>'; });
-							detailsHtml += '</ul></div>';
-						}
-						if (task.dependencies) {
-							detailsHtml += '<div class="task-details-section"><h4>🔗 依賴</h4><p>' + task.dependencies + '</p></div>';
-						}
-						detailsHtml += '</div>';
-					}
-					
-						return \`
-						<div class="task-item \${task.status}" data-task-id="\${task.id}">
-							<div class="task-checkbox">\${statusIcon}</div>
-							\${hasDetails ? '<button class="task-expand-btn" data-target="details-' + task.id + '">▶</button>' : ''}
-							<div class="task-content">
-								<div class="task-title">\${task.title}</div>
-								\${detailsHtml}
-							</div>
-							\${task.complexity ? '<span class="task-complexity">' + task.complexity + '</span>' : ''}
-							\${task.status === 'in-progress' ? '<span class="task-complexity" style="background:#f59e0b">Running...</span>' : ''}
-							<button class="task-btn" data-task-id="\${task.id}">\${task.status === 'done' ? '🔄 Re-run' : '▶ Run'}</button>
+					return \`
+					<div class="task-item \${task.status}" data-task-id="\${task.id}">
+						<div class="task-checkbox">\${statusIcon}</div>
+						\${hasDetails ? '<button class="task-expand-btn" data-target="details-' + task.id + '">▶</button>' : ''}
+						<div class="task-content">
+							<div class="task-title">\${task.title}</div>
+							\${detailsHtml}
 						</div>
-					\`;
-				}).join('');
-				
-				// Add click event listeners for task buttons (CSP-compliant)
-				taskView.querySelectorAll('.task-btn').forEach(btn => {
-					btn.addEventListener('click', function() {
-						const taskId = this.getAttribute('data-task-id');
-						startTask(taskId);
-					});
+						\${task.complexity ? '<span class="task-complexity">' + task.complexity + '</span>' : ''}
+						\${task.status === 'in-progress' ? '<span class="task-complexity" style="background:#f59e0b">Running...</span>' : ''}
+						<button class="task-btn" data-task-id="\${task.id}">\${task.status === 'done' ? '🔄 Re-run' : '▶ Run'}</button>
+					</div>
+				\`;
+			}).join('');
+			
+			// Add click event listeners for task buttons (CSP-compliant)
+			taskView.querySelectorAll('.task-btn').forEach(btn => {
+				btn.addEventListener('click', function() {
+					const taskId = this.getAttribute('data-task-id');
+					startTask(taskId);
 				});
-				
-				// Add click event listeners for expand buttons
-				taskView.querySelectorAll('.task-expand-btn').forEach(btn => {
-					btn.addEventListener('click', function(e) {
-						e.stopPropagation();
-						const targetId = this.getAttribute('data-target');
-						const details = document.getElementById(targetId);
-						if (details) {
-							this.classList.toggle('expanded');
-							details.classList.toggle('visible');
-						}
-					});
+			});
+			
+			// Add click event listeners for expand buttons
+			taskView.querySelectorAll('.task-expand-btn').forEach(btn => {
+				btn.addEventListener('click', function(e) {
+					e.stopPropagation();
+					const targetId = this.getAttribute('data-target');
+					const details = document.getElementById(targetId);
+					if (details) {
+						this.classList.toggle('expanded');
+						details.classList.toggle('visible');
+					}
 				});
-			}
+			});
 		}
 		
 		function viewFile(filename, exists) {
@@ -1201,6 +1231,9 @@ export class SpecWorkflowPanelManager {
 			
 			// Update step highlights
 			updateStepHighlights();
+			
+			// Render tasks list
+			renderTasks();
 		}
 		
 		function updateStepHighlights() {

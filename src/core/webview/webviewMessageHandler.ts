@@ -3833,16 +3833,120 @@ export const webviewMessageHandler = async (
 		}
 
 		case "runAllSpecTasks": {
-			// Trigger TaskExecutor to run all tasks with Sentinel pipeline
-			const currentTask = provider.getCurrentTask()
-			if (currentTask) {
-				// Send message to start running all tasks
-				await currentTask.say("text", "🚀 Starting Spec Mode task execution pipeline...\n\nI will now execute all tasks from `tasks.md` in sequence, using the Sentinel multi-agent pipeline for each task.")
-			} else {
-				// No active task - prompt user to start a task first
-				vscode.window.showInformationMessage(
-					t("common:info.start_chat_first") || "Please start a chat first, then use this button to run all spec tasks."
+			// Parse all tasks from tasks.md and create a batch execution plan
+			try {
+				const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+				if (!workspacePath) {
+					vscode.window.showErrorMessage("No workspace folder found")
+					break
+				}
+				
+				const specsDir = path.join(workspacePath, ".specs")
+				const tasksPath = path.join(specsDir, "tasks.md")
+				
+				const fs = require("fs")
+				if (!fs.existsSync(tasksPath)) {
+					vscode.window.showErrorMessage("tasks.md not found in .specs directory")
+					break
+				}
+				
+				const tasksContent = fs.readFileSync(tasksPath, "utf-8")
+				
+				// Parse all TASK-XXX entries (with or without # prefix)
+				const taskMatches = [...tasksContent.matchAll(/^(?:#{1,3}\s+)?(TASK-\d+)[:\s]+(.+?)(?:\s*\(complexity:\s*(low|medium|high)\))?(?:\s*\[([ x/])\])?$/gmi)]
+				
+				if (taskMatches.length === 0) {
+					vscode.window.showWarningMessage("No tasks found in tasks.md")
+					break
+				}
+				
+				// Filter to pending tasks only
+				const pendingTasks = taskMatches.filter(match => {
+					const statusChar = match[4]?.toLowerCase()
+					return statusChar !== "x" // Not completed
+				})
+				
+				if (pendingTasks.length === 0) {
+					vscode.window.showInformationMessage("All tasks are already completed! ✅")
+					break
+				}
+				
+				// Build task list for display
+				const taskList = pendingTasks.map((match, idx) => {
+					const taskId = match[1]
+					const title = match[2].replace(/\s*\(complexity:\s*(low|medium|high)\)/i, "").trim()
+					const complexity = match[3] || "medium"
+					return `${idx + 1}. **${taskId}**: ${title} (complexity: ${complexity})`
+				}).join("\n")
+				
+				// Show confirmation with task list
+				const confirm = await vscode.window.showQuickPick(
+					[
+						{ label: `$(play) 建立 ${pendingTasks.length} 個子任務`, value: "start" },
+						{ label: "$(x) 取消", value: "cancel" },
+					],
+					{
+						title: "批次建立 Spec 子任務",
+						placeHolder: `將建立 ${pendingTasks.length} 個獨立子任務...`,
+					}
 				)
+				
+				if (confirm?.value !== "start") {
+					break
+				}
+				
+				// Create individual sub-tasks for each pending task
+				const firstTask = pendingTasks[0]
+				const firstTaskId = firstTask[1]
+				const firstTitle = firstTask[2].replace(/\s*\(complexity:\s*(low|medium|high)\)/i, "").trim()
+				
+				// Create prompt for just the first task
+				const firstTaskPrompt = `# 🎯 執行 Spec 任務: ${firstTaskId}
+
+## 任務資訊
+- **任務 ID**: ${firstTaskId}
+- **標題**: ${firstTitle}
+- **複雜度**: ${firstTask[3] || "medium"}
+
+---
+
+## 📋 執行指示
+
+1. **讀取 .specs/tasks.md** 找到 ${firstTaskId} 的完整內容
+2. **讀取 .specs/requirements.md** 了解技術堆疊規格
+3. **依照任務描述執行**
+4. **完成後更新 tasks.md** 將 ${firstTaskId} 狀態改為 \`[x]\`
+
+## 🔴 重要：Framework 優先！
+
+如果任務涉及建立專案，必須先確認 requirements.md 中指定的 Framework，
+然後使用正確的指令建立（如 \`composer create-project laravel/laravel .\`）。
+
+---
+
+## 📎 剩餘待執行任務（共 ${pendingTasks.length} 個）
+
+${taskList}
+
+**🚀 請先完成 ${firstTaskId}，後續任務將在 Spec Workflow Panel 中逐一啟動。**`
+
+				// Switch to Spec mode and create the first task
+				await provider.setMode("spec")
+				await provider.createTask(firstTaskPrompt, [])
+				await provider.postMessageToWebview({ type: "invoke", invoke: "newChat" })
+				
+				// Show info about remaining tasks
+				if (pendingTasks.length > 1) {
+					vscode.window.showInformationMessage(
+						`已建立 ${firstTaskId} 子任務。完成後請從 Spec Workflow Panel 點擊 "Start" 執行下一個任務。`,
+						"了解"
+					)
+				}
+				
+				console.log(`[runAllSpecTasks] Created sub-task for ${firstTaskId}, ${pendingTasks.length - 1} tasks remaining`)
+			} catch (error) {
+				console.error("[runAllSpecTasks] Error:", error)
+				vscode.window.showErrorMessage(`Failed to create sub-tasks: ${error instanceof Error ? error.message : String(error)}`)
 			}
 			break
 		}
@@ -3934,8 +4038,8 @@ export const webviewMessageHandler = async (
 				
 				const tasksContent = fs.readFileSync(tasksPath, "utf-8")
 				
-				// Find the specific task section
-				const taskIdPattern = new RegExp(`^## (${taskId}:.*)$`, "m")
+				// Find the specific task section (supports both ## and ### format)
+				const taskIdPattern = new RegExp(`^#{2,3}\\s+${taskId}[:\\s]+(.*)`, "mi")
 				const taskMatch = tasksContent.match(taskIdPattern)
 				
 				if (!taskMatch) {
@@ -3945,7 +4049,7 @@ export const webviewMessageHandler = async (
 				
 				// Extract task section content (from task header to next task header or end)
 				const taskStartIndex = tasksContent.indexOf(taskMatch[0])
-				const nextTaskMatch = tasksContent.slice(taskStartIndex + taskMatch[0].length).match(/^## TASK-\d+:/m)
+				const nextTaskMatch = tasksContent.slice(taskStartIndex + taskMatch[0].length).match(/^#{2,3}\s+TASK-\d+[:\s]/mi)
 				const taskEndIndex = nextTaskMatch 
 					? taskStartIndex + taskMatch[0].length + tasksContent.slice(taskStartIndex + taskMatch[0].length).indexOf(nextTaskMatch[0])
 					: tasksContent.length
