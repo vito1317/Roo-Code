@@ -75,7 +75,23 @@ ${statusIndicators[2]} Tasks         ${status.tasksExists ? "(.specs/tasks.md)" 
 \`\`\`
 
 **Current Phase: ${phase.toUpperCase()}**
+
+---
+
+## ⚠️ 重要規則 - DO NOT DELEGATE!
+
+**你正在 Spec Mode 中工作。你必須親自處理所有工作！**
+
+- ❌ **禁止使用 \`new_task\` 工具** 建立子任務或委派給其他模式
+- ❌ **禁止切換到 Architect / Code / Designer 模式** 來處理 spec 檔案
+- ✅ **你必須親自建立** \`.specs/requirements.md\`、\`.specs/design.md\`、\`.specs/tasks.md\`
+- ✅ **使用 \`write_to_file\` 工具** 直接建立這些檔案
+
+**原因**：Spec Mode 的目的是收集需求、設計架構、分解任務。這些都是你在 Spec Mode 中的職責，不應交給其他 agent。
+
+---
 `
+
 
 	switch (phase) {
 		case "requirements":
