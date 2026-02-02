@@ -1109,7 +1109,9 @@ export class SpecWorkflowPanelManager {
 			runAllBtn.disabled = !status.tasks;
 			
 			// Store tasks in cache for later rendering
+			console.log('[SpecWorkflowPanel] renderWorkflow received tasks:', tasks?.length || 0, 'currentView:', currentView);
 			cachedTasks = tasks || [];
+			console.log('[SpecWorkflowPanel] cachedTasks now:', cachedTasks.length);
 			
 			// Render tasks (only if we're in task view)
 			if (currentView === 'tasks') {
@@ -1229,6 +1231,7 @@ export class SpecWorkflowPanelManager {
 		}
 		
 		function showTaskView() {
+			console.log('[SpecWorkflowPanel] showTaskView called, cachedTasks length:', cachedTasks?.length || 0);
 			currentView = 'tasks';
 			currentFile = null;
 			
