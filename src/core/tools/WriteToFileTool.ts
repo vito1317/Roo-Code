@@ -149,16 +149,99 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 							// Detect which spec file and switch to correct step
 							const fileName = path.basename(relPath)
 							let step: "requirements" | "design" | "tasks" | null = null
-							if (fileName === "requirements.md") step = "requirements"
-							else if (fileName === "design.md") step = "design"
-							else if (fileName === "tasks.md") step = "tasks"
+							let nextPhase: { name: string; file: string } | null = null
+							
+							if (fileName === "requirements.md") {
+								step = "requirements"
+								nextPhase = { name: "Design", file: "design.md" }
+							} else if (fileName === "design.md") {
+								step = "design"
+								nextPhase = { name: "Tasks", file: "tasks.md" }
+							} else if (fileName === "tasks.md") {
+								step = "tasks"
+								nextPhase = null  // No next phase after tasks
+							}
 							
 							if (step) {
 								await panelManager.showAndSwitchToStep(step)
 							} else {
 								await panelManager.show()
 							}
+							
+							// Show spec file created message
 							await task.say("text", `📋 **Spec file created:** \`${relPath}\` - Spec Workflow Panel is now open.`)
+							
+							// ========== AUTO-HANDOFF LOGIC ==========
+							// After creating requirements.md or design.md, offer to continue to next phase
+							if (nextPhase) {
+								// Ask user if they want to continue to next phase
+								const handoffMessage = `
+## ✅ ${step === "requirements" ? "需求文件" : "設計文件"}已完成！
+
+\`${relPath}\` 已成功建立。
+
+**您想要繼續進行下一階段嗎？**
+
+下一階段：**${nextPhase.name}** (建立 \`.specs/${nextPhase.file}\`)
+
+請選擇：
+- 按「繼續」自動進入下一階段
+- 按「結束」完成此任務
+`
+								// Use askResponse to get user confirmation
+								const { response, text: userFeedback } = await task.ask(
+									"followup",
+									JSON.stringify({
+										question: handoffMessage,
+										suggest: nextPhase ? ["繼續下一階段", "結束"] : undefined,
+									}),
+									false,
+								)
+								
+								if (response === "yesButtonClicked" || 
+									(userFeedback && (userFeedback.includes("繼續") || userFeedback.toLowerCase().includes("continue") || userFeedback.toLowerCase().includes("yes")))) {
+									// User wants to continue to next phase
+									const nextStepPrompt = step === "requirements" 
+										? `# 🎨 繼續 Spec 工作流程 - 設計階段
+
+請進入 **Design 設計階段**：
+
+1. **閱讀** \`.specs/requirements.md\` 了解需求
+2. **建立** \`.specs/design.md\` 包含：
+   - 系統架構設計 (附 Mermaid 圖)
+   - 資料模型/資料庫設計
+   - API 設計 (如適用)
+   - UI/UX 規劃 (如適用)
+   - 技術選型決策
+
+請開始設計！`
+										: `# ✅ 繼續 Spec 工作流程 - 任務分解階段
+
+請進入 **Tasks 任務分解階段**：
+
+1. **閱讀** \`.specs/requirements.md\` 和 \`.specs/design.md\`
+2. **建立** \`.specs/tasks.md\` 包含：
+   - 細分的執行任務清單
+   - 每個任務的驗收標準
+   - 相關檔案路徑
+   - 任務優先順序和依賴關係
+
+請開始分解任務！`
+									
+									// Continue the conversation with next phase prompt
+									await task.say("text", `🔄 **進入下一階段**: ${nextPhase.name}`)
+									
+									// Inject the next phase prompt into the conversation
+									// This will be picked up by the agent to continue
+									await task.say("user_feedback", nextStepPrompt)
+									
+									console.log(`[WriteToFileTool] Auto-handoff triggered: ${step} → ${nextPhase.name}`)
+								} else {
+									// User chose to end
+									await task.say("text", `✅ **${step === "requirements" ? "需求" : "設計"}階段完成！** 任務已結束。您可以稍後從 Spec Workflow Panel 繼續。`)
+									console.log(`[WriteToFileTool] User chose to end after ${step}`)
+								}
+							}
 						}
 					} else {
 						// For non-specs .md files, use Markdown preview
