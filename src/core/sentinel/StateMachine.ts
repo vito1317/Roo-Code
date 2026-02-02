@@ -290,8 +290,16 @@ export class SentinelStateMachine {
 		{
 			from: AgentState.QA_ENGINEER,
 			to: AgentState.ARCHITECT_REVIEW_TESTS,
-			condition: (ctx) => ctx?.qaAuditContext !== undefined,
+			condition: (ctx) => ctx?.qaAuditContext !== undefined && ctx?.qaAuditContext?.testsPassed !== false,
 			label: "Testing complete, Architect reviews",
+		},
+
+		// QA finds issues → Return directly to Builder to fix
+		{
+			from: AgentState.QA_ENGINEER,
+			to: AgentState.BUILDER,
+			condition: (ctx) => ctx?.qaAuditContext?.testsPassed === false,
+			label: "Tests failed, return to Builder to fix",
 		},
 
 		// Architect approves tests → Sentinel security audit
@@ -870,10 +878,16 @@ export class SentinelStateMachine {
 
 			// Phase 3b: Architect reviews tests → Sentinel (auto-approve unless rejected OR tests failed)
 			case AgentState.ARCHITECT_REVIEW_TESTS: {
-				// Method 1: Explicit rejection from architect
+				// Method 1: Explicit rejection from architect - now goes DIRECTLY to Builder
 				if (handoffData.architectReviewTests?.approved === false) {
-					console.log("[SentinelFSM] Architect rejected tests - returning to Architect for re-planning")
-					return AgentState.ARCHITECT // Re-plan before Builder
+					console.log("[SentinelFSM] Architect rejected tests - returning to Builder with issues to fix")
+					// Pass the rejection notes to Builder
+					if (this.currentContext && handoffData.previousAgentNotes) {
+						this.currentContext.previousAgentNotes = 
+							(this.currentContext.previousAgentNotes || "") +
+							"\n\n**Architect Test Review Feedback:**\n" + handoffData.previousAgentNotes
+					}
+					return AgentState.BUILDER // Direct to Builder, not Architect
 				}
 				// Method 2: Check if QA tests actually failed (from context)
 				if (this.currentContext?.qaAuditContext?.testsPassed === false) {
@@ -882,10 +896,16 @@ export class SentinelStateMachine {
 				}
 				// Method 3: Check for failure keywords in current handoff notes
 				const reviewNotes = handoffData.previousAgentNotes?.toLowerCase() || ""
-				const testFailIndicators = ["tests: failed", "test failed", "tests failed", "critical issue", "❌"]
+				const testFailIndicators = ["tests: failed", "test failed", "tests failed", "critical issue", "❌", "needs fix", "need to fix", "bug found", "issue found"]
 				const hasTestFailure = testFailIndicators.some(indicator => reviewNotes.includes(indicator))
 				if (hasTestFailure) {
 					console.log("[SentinelFSM] Test failure detected in review notes - returning to Builder")
+					// Pass issue details to Builder
+					if (this.currentContext && handoffData.previousAgentNotes) {
+						this.currentContext.previousAgentNotes = 
+							(this.currentContext.previousAgentNotes || "") +
+							"\n\n**Issues to Fix:**\n" + handoffData.previousAgentNotes
+					}
 					return AgentState.BUILDER
 				}
 				return AgentState.SENTINEL

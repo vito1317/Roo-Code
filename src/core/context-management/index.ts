@@ -22,8 +22,9 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 /**
  * Default percentage of the context window to use as a buffer when deciding when to truncate.
  * Used by Context Management to determine when to trigger condensation or (fallback) sliding window truncation.
+ * Increased from 0.1 to 0.15 to account for system prompt tokens and tool definitions not included in contextTokens.
  */
-export const TOKEN_BUFFER_PERCENTAGE = 0.1
+export const TOKEN_BUFFER_PERCENTAGE = 0.15
 
 /**
  * Counts tokens for user content using the provider's token counting implementation.

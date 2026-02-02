@@ -3909,18 +3909,139 @@ export const webviewMessageHandler = async (
 
 
 		case "startSpecTask": {
-			// Start a specific task via Sentinel pipeline
-			const currentTask = provider.getCurrentTask()
+			// Create a new sub-task for executing this specific spec task
+			// with dynamic mode routing based on task type
 			const taskId = message.taskId
 			if (!taskId) break
 			
-			if (currentTask) {
-				await currentTask.say("text", `▶ Starting task **${taskId}** via Sentinel pipeline...\n\nThe task will go through: Architect → Designer → Builder → QA → Security`)
-			} else {
-				// No active task - prompt user to start a task first
-				vscode.window.showInformationMessage(
-					t("common:info.start_chat_first") || `Please start a chat first, then use this button to run task ${taskId}.`
-				)
+			try {
+				// Read task details from tasks.md
+				const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+				if (!workspacePath) {
+					vscode.window.showErrorMessage("No workspace folder found")
+					break
+				}
+				
+				const specsDir = path.join(workspacePath, ".specs")
+				const tasksPath = path.join(specsDir, "tasks.md")
+				
+				// Parse tasks.md to get task details
+				const fs = require("fs")
+				if (!fs.existsSync(tasksPath)) {
+					vscode.window.showErrorMessage("tasks.md not found in .specs directory")
+					break
+				}
+				
+				const tasksContent = fs.readFileSync(tasksPath, "utf-8")
+				
+				// Find the specific task section
+				const taskIdPattern = new RegExp(`^## (${taskId}:.*)$`, "m")
+				const taskMatch = tasksContent.match(taskIdPattern)
+				
+				if (!taskMatch) {
+					vscode.window.showErrorMessage(`Task ${taskId} not found in tasks.md`)
+					break
+				}
+				
+				// Extract task section content (from task header to next task header or end)
+				const taskStartIndex = tasksContent.indexOf(taskMatch[0])
+				const nextTaskMatch = tasksContent.slice(taskStartIndex + taskMatch[0].length).match(/^## TASK-\d+:/m)
+				const taskEndIndex = nextTaskMatch 
+					? taskStartIndex + taskMatch[0].length + tasksContent.slice(taskStartIndex + taskMatch[0].length).indexOf(nextTaskMatch[0])
+					: tasksContent.length
+				
+				const taskSection = tasksContent.slice(taskStartIndex, taskEndIndex).trim()
+				
+				// ========== DYNAMIC MODE ROUTING ==========
+				// Detect task type from content keywords
+				const taskContentLower = taskSection.toLowerCase()
+				
+				// Analysis/Design keywords (routes to Architect mode)
+				const analysisKeywords = [
+					"分析", "規劃", "設計", "架構", "研究", "評估",
+					"analyze", "analyse", "plan", "planning", "design", "architecture",
+					"research", "evaluate", "review", "assess", "study", "investigate"
+				]
+				
+				// Implementation keywords (routes to Code mode)
+				const implementKeywords = [
+					"實作", "建立", "創建", "開發", "撰寫", "編寫", "修改", "新增", "刪除", "修復",
+					"implement", "create", "build", "develop", "write", "code", "coding",
+					"modify", "add", "delete", "fix", "refactor", "update"
+				]
+				
+				// Testing keywords (routes to Code mode with QA focus)
+				const testingKeywords = [
+					"測試", "驗證", "檢驗", "單元測試",
+					"test", "testing", "verify", "validate", "qa", "unit test", "integration test"
+				]
+				
+				// Determine task type
+				let targetMode = "code"  // Default to code mode
+				let modeDescription = "實作模式 (Code)"
+				
+				const hasAnalysisKeywords = analysisKeywords.some(kw => taskContentLower.includes(kw))
+				const hasImplementKeywords = implementKeywords.some(kw => taskContentLower.includes(kw))
+				const hasTestingKeywords = testingKeywords.some(kw => taskContentLower.includes(kw))
+				
+				// Priority: If task mentions analysis/design AND NOT implementation, use Architect
+				if (hasAnalysisKeywords && !hasImplementKeywords) {
+					targetMode = "architect"
+					modeDescription = "架構師模式 (Architect)"
+				} else if (hasTestingKeywords && !hasImplementKeywords) {
+					targetMode = "code"  // Use code mode but add testing focus
+					modeDescription = "實作模式 (Code) - 測試導向"
+				}
+				// Otherwise default to code mode for implementation
+				
+				console.log(`[startSpecTask] Task ${taskId} detected as type: ${targetMode}, keywords: analysis=${hasAnalysisKeywords}, implement=${hasImplementKeywords}, testing=${hasTestingKeywords}`)
+				
+				// Switch to the detected mode
+				await provider.setMode(targetMode)
+				
+				// Build mode-specific prompt with dynamic instructions
+				const modeInstructions = targetMode === "architect" 
+					? `## 📐 架構師模式啟動
+
+你現在以 **架構師 (Architect)** 角色執行此任務。
+專注於：分析、規劃、設計架構，產出文件而非直接編碼。`
+					: `## 💻 實作模式啟動
+
+你現在以 **開發者 (Code)** 角色執行此任務。
+專注於：撰寫程式碼、創建檔案、實作功能。`
+				
+				const subTaskPrompt = `# 🎯 執行 Spec 任務
+
+**偵測到的任務類型**: ${modeDescription}
+
+${modeInstructions}
+
+---
+
+## 任務內容
+
+${taskSection}
+
+---
+
+## 執行指示
+
+1. **仔細閱讀** 上述任務描述、驗收標準和涉及的檔案
+2. **依據角色執行** - ${targetMode === "architect" ? "分析並產出設計文件" : "創建或修改必要的檔案"}
+3. **驗證結果** - 確保符合驗收標準
+4. **回報完成** - 說明已完成的工作
+
+請開始執行！`
+
+				// Create a new task with this prompt
+				await provider.createTask(subTaskPrompt, [])
+				await provider.postMessageToWebview({ type: "invoke", invoke: "newChat" })
+				
+				console.log(`[startSpecTask] Created sub-task for ${taskId} in ${targetMode} mode`)
+				
+			} catch (error) {
+				console.error("[startSpecTask] Error creating sub-task:", error)
+				vscode.window.showErrorMessage(`Failed to create sub-task: ${error instanceof Error ? error.message : String(error)}`)
 			}
 			break
 		}

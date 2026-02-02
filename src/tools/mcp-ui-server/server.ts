@@ -719,38 +719,13 @@ function renderMermaid(args: any): string {
     `;
   }
 
-  // Escape the code for safe embedding in HTML
-  const escapedCode = code
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
-  // Use a unique ID for this diagram
-  const diagramId = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-  return `
-    <div class="mcp-ui">
-      ${getStyles()}
-      <div class="mcp-mermaid">
-        ${title ? `<div class="mcp-mermaid-title">${title}</div>` : ""}
-        <div id="${diagramId}" class="mermaid">
+  // Return Markdown format with mermaid code block
+  // This will be properly rendered by the webview's MermaidBlock component
+  const titleSection = title ? `**${title}**\n\n` : "";
+  
+  return `${titleSection}\`\`\`mermaid
 ${code}
-        </div>
-      </div>
-      <script type="module">
-        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({
-          startOnLoad: true,
-          theme: '${theme}',
-          securityLevel: 'loose',
-          flowchart: { curve: 'basis' }
-        });
-        mermaid.run({ nodes: [document.getElementById('${diagramId}')] });
-      </script>
-    </div>
-  `;
+\`\`\``;
 }
 
 function renderMarkdown(args: any): string {

@@ -64,6 +64,34 @@ export const UIDesignCanvasPreview: React.FC<UIDesignCanvasPreviewProps> = ({
 	// MCP-UI HTML output state
 	const [mcpUiHtml, setMcpUiHtml] = useState<string | null>(null)
 	const mcpUiPreviewRef = useRef<HTMLDivElement>(null)
+	const [mermaidLoaded, setMermaidLoaded] = useState(false)
+
+	// Load Mermaid library dynamically
+	useEffect(() => {
+		if (typeof window !== "undefined" && !(window as any).mermaid) {
+			const script = document.createElement("script")
+			script.src = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
+			script.async = true
+			script.onload = () => {
+				;(window as any).mermaid.initialize({
+					startOnLoad: false,
+					theme: "dark",
+					themeVariables: {
+						primaryColor: "#4a9eff",
+						primaryTextColor: "#fff",
+						primaryBorderColor: "#7c8eaa",
+						lineColor: "#8b949e",
+						secondaryColor: "#2d333b",
+						tertiaryColor: "#1e1e1e",
+					},
+				})
+				setMermaidLoaded(true)
+			}
+			document.head.appendChild(script)
+		} else if ((window as any).mermaid) {
+			setMermaidLoaded(true)
+		}
+	}, [])
 
 	// Show when Sentinel is enabled (any agent) - we want to show the design progress
 	const isSentinelEnabled = sentinelAgentState?.enabled === true
@@ -153,7 +181,15 @@ export const UIDesignCanvasPreview: React.FC<UIDesignCanvasPreviewProps> = ({
 		const handleMessage = (event: MessageEvent) => {
 			const message = event.data
 			if (message.type === "mcpUiHtml") {
-				setMcpUiHtml(message.html)
+				// Process Mermaid code blocks before setting HTML
+				let processedHtml = message.html
+				// Add mermaid-block class to code blocks containing mermaid diagrams
+				const mermaidKeywords = ["graph", "flowchart", "sequenceDiagram", "classDiagram", "stateDiagram", "erDiagram", "journey", "gantt", "pie", "quadrantChart", "requirementDiagram", "gitGraph", "mindmap", "timeline"]
+				mermaidKeywords.forEach((keyword) => {
+					const regex = new RegExp(`<pre[^>]*>\\s*(${keyword}[\\s\\S]*?)</pre>`, "gi")
+					processedHtml = processedHtml.replace(regex, `<div class="mermaid" data-mermaid-content="$1">$1</div>`)
+				})
+				setMcpUiHtml(processedHtml)
 				console.log("[UIDesignCanvasPreview] Received MCP-UI HTML")
 			} else if (message.type === "clearMcpUiHtml") {
 				setMcpUiHtml(null)
@@ -163,6 +199,26 @@ export const UIDesignCanvasPreview: React.FC<UIDesignCanvasPreviewProps> = ({
 		window.addEventListener("message", handleMessage)
 		return () => window.removeEventListener("message", handleMessage)
 	}, [])
+
+	// Render Mermaid diagrams after HTML is set
+	useEffect(() => {
+		if (mcpUiHtml && mermaidLoaded && mcpUiPreviewRef.current) {
+			const mermaidElements = mcpUiPreviewRef.current.querySelectorAll(".mermaid:not(.mermaid-rendered)")
+			mermaidElements.forEach(async (el, index) => {
+				try {
+					const content = el.getAttribute("data-mermaid-content") || el.textContent || ""
+					if (content && (window as any).mermaid) {
+						const id = `mermaid-preview-${index}-${Date.now()}`
+						const result = await (window as any).mermaid.render(id, content)
+						el.innerHTML = result.svg
+						el.classList.add("mermaid-rendered")
+					}
+				} catch (err) {
+					console.error("[UIDesignCanvasPreview] Mermaid render error:", err)
+				}
+			})
+		}
+	}, [mcpUiHtml, mermaidLoaded])
 
 	// Calculate element count early for visibility check
 	const elementCount = design?.elements?.length || 0

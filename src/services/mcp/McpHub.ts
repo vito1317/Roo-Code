@@ -245,13 +245,49 @@ export class McpHub {
 		this.watchMcpSettingsFile()
 		this.watchProjectMcpFile().catch(console.error)
 		this.setupWorkspaceFoldersWatcher()
-		this.initializeGlobalMcpServers()
-		this.initializeProjectMcpServers()
-		this.initializeBuiltInFigmaWriteServer(provider)
-		this.initializeBuiltInTalkToFigmaServer()
-		this.initializeBuiltInPenpotServer()
-		this.initializeBuiltInUIDesignCanvasServer()
-		this.initializeBuiltInMcpUiServer()
+		// Initialize all MCP servers sequentially to prevent Extension Host crashes
+		this.initializeAllServers(provider).catch((error) => {
+			console.error("[McpHub] Error initializing servers:", error)
+		})
+	}
+
+	/**
+	 * Initialize all MCP servers sequentially with delays to prevent resource contention
+	 * This prevents Extension Host crashes (Exit Code: 9) caused by concurrent startup
+	 */
+	private async initializeAllServers(provider: ClineProvider): Promise<void> {
+		const startupDelay = () => new Promise<void>((resolve) => setTimeout(resolve, 500))
+
+		// Track memory usage during initialization
+		const logMemory = (phase: string) => {
+			const mem = process.memoryUsage()
+			console.log(`[McpHub] ${phase} - Memory: RSS=${Math.round(mem.rss/1024/1024)}MB, Heap=${Math.round(mem.heapUsed/1024/1024)}/${Math.round(mem.heapTotal/1024/1024)}MB`)
+		}
+
+		logMemory('Before init')
+		console.log("[McpHub] Starting sequential MCP server initialization...")
+
+		// Initialize config-based servers first
+		await this.initializeGlobalMcpServers()
+		await this.initializeProjectMcpServers()
+
+		// Initialize built-in servers with delays between each
+		await this.initializeBuiltInFigmaWriteServer(provider)
+		await startupDelay()
+
+		await this.initializeBuiltInTalkToFigmaServer()
+		await startupDelay()
+
+		await this.initializeBuiltInPenpotServer()
+		await startupDelay()
+
+		await this.initializeBuiltInUIDesignCanvasServer()
+		await startupDelay()
+
+		await this.initializeBuiltInMcpUiServer()
+
+		logMemory('After all MCP servers init')
+		console.log("[McpHub] All MCP servers initialized successfully")
 	}
 	/**
 	 * Registers a client (e.g., ClineProvider) using this hub.

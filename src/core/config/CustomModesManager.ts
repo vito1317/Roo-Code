@@ -393,7 +393,8 @@ export class CustomModesManager {
 		// Cache is valid if: within TTL AND MCP status hasn't changed
 		const now = Date.now()
 		const mcpStatusUnchanged = currentMcpStatus === this.cachedMcpStatus
-
+		
+		// NOTE: Removed verbose console.log to prevent I/O overhead during high-frequency calls
 		if (this.cachedModes && now - this.cachedAt < CustomModesManager.cacheTTL && mcpStatusUnchanged) {
 			return this.cachedModes
 		}
@@ -438,7 +439,12 @@ export class CustomModesManager {
 				.map((mode) => ({ ...mode, source: "global" as const })),
 		]
 
-		await this.context.globalState.update("customModes", mergedModes)
+		// Only update globalState if modes have actually changed (reduces I/O overhead)
+		const cachedModeSlugs = this.cachedModes?.map(m => m.slug).join(',') ?? ''
+		const newModeSlugs = mergedModes.map(m => m.slug).join(',')
+		if (cachedModeSlugs !== newModeSlugs) {
+			await this.context.globalState.update("customModes", mergedModes)
+		}
 
 		this.cachedModes = mergedModes
 		this.cachedAt = now

@@ -6,12 +6,12 @@
  */
 
 export const ARCHITECT_PHASE_PROMPTS = {
-	// Phase 1: Initial planning - create plan.md with Mermaid diagrams
+	// Phase 1: Initial planning - create project-plan.md with Mermaid diagrams
 	planning: `**PHASE 1: PLANNING** (Current Phase)
 
 Your task is to create a comprehensive implementation plan.
 
-**REQUIRED OUTPUT: Create \`plan.md\` with:**
+**REQUIRED OUTPUT: Create \`project-plan.md\` with:**
 1. **Architecture Overview** - Mermaid diagram showing component structure
 2. **User Flow** - Mermaid flowchart for user interactions
 3. **Acceptance Criteria** - Checklist of requirements
@@ -24,7 +24,7 @@ graph TD
     B --> C[Output]
 \`\`\`
 
-**After creating plan.md:**
+**After creating project-plan.md:**
 Use \`attempt_completion\` to hand off to Builder for implementation.
 
 **IMPORTANT:** Focus ONLY on planning. Do NOT write any implementation code.`,
@@ -34,9 +34,18 @@ Use \`attempt_completion\` to hand off to Builder for implementation.
 
 Builder has completed implementation. Your task is to verify the work.
 
-🚨 **MANDATORY VERIFICATION PROTOCOL - MUST FOLLOW EXACTLY:**
+**REVIEW APPROACH:**
 
-**STEP 1: Launch Browser**
+Choose the appropriate verification method based on the implementation type:
+
+📋 **Option A: Code Review Only** (For backend, APIs, libraries, or when browser testing isn't needed)
+1. Review the source code for correctness
+2. Check that implementation matches the plan requirements
+3. Verify error handling and edge cases
+4. Ensure code quality and best practices
+
+🌐 **Option B: Browser Testing** (For UI/Frontend implementations - RECOMMENDED but optional)
+If the implementation has a visual UI component, you MAY launch the browser to verify:
 \`\`\`xml
 <browser_action>
 <action>launch</action>
@@ -44,40 +53,33 @@ Builder has completed implementation. Your task is to verify the work.
 </browser_action>
 \`\`\`
 
-**STEP 2: Extract DOM Structure (REQUIRED - DO NOT SKIP)**
+And extract the DOM structure to verify layout:
 \`\`\`xml
 <browser_action>
 <action>dom_extract</action>
 </browser_action>
 \`\`\`
 
-This gives you EXACT element positions. Example output:
-\`\`\`
-Row (y≈20): [button] "7" at (10, 20), [button] "8" at (60, 20)
-Row (y≈60): [button] "4" at (10, 60), [button] "5" at (60, 60)
-\`\`\`
-
-**STEP 3: Verify Each Row Against Guidelines**
-For calculator, CORRECT layout is:
-- Row 1: C, /, *, -
-- Row 2: 7, 8, 9, +
-- Row 3: 4, 5, 6
-- Row 4: 1, 2, 3, =
-- Row 5: 0, .
-
-Compare DOM output row by row:
-"Row (y≈X): Expected [7,8,9], Actual [from dom_extract] - MATCH/MISMATCH"
+**REVIEW CHECKLIST:**
+- [ ] Implementation matches the plan requirements
+- [ ] Code logic is correct and handles edge cases
+- [ ] UI layout is correct (if applicable, can verify via code or browser)
+- [ ] Error handling is appropriate
+- [ ] Code follows project conventions
 
 🛑 **REJECT if:**
-- ANY number in wrong row
-- ANY operator in wrong position
-- Layout doesn't match standard
+- Core functionality is broken
+- Implementation doesn't match requirements
+- Critical issues found in code review
 
-✅ **APPROVE ONLY if ALL rows match exactly**
+✅ **APPROVE if:**
+- Implementation meets requirements
+- Code quality is acceptable
+- No critical issues found
 
 **Decision:**
-- REJECT: Return to Builder with "Move button X from row Y to row Z"
-- APPROVE: Only if every single check passes`,
+- REJECT: Return to Builder with specific issues to fix
+- APPROVE: Use \`attempt_completion\` to hand off to QA for testing`,
 
 	// Phase 3: Test review after QA returns
 	testReview: `**PHASE 3: TEST REVIEW** (Current Phase)
@@ -86,13 +88,15 @@ QA has completed testing. Your task is to review the test results.
 
 **Review Checklist:**
 - [ ] All acceptance criteria have corresponding tests
-- [ ] Edge cases are covered
+- [ ] Edge cases are covered  
 - [ ] Error handling is tested
 - [ ] Test results show all tests passing
 
 **Decision:**
 - If APPROVED: Use \`attempt_completion\` with \`architectReviewTests.approved: true\` to proceed to Security
-- If REJECTED: Return to QA with specific issues to address`,
+- If REJECTED: Use \`attempt_completion\` with \`architectReviewTests.approved: false\` to return **directly to Builder** with issues to fix
+  - Include specific details about what needs to be fixed
+  - The issues will be passed directly to Builder without re-planning`,
 
 	// Phase 4: Final review after Sentinel Security returns
 	finalReview: `**PHASE 4: FINAL REVIEW** (Current Phase)
@@ -177,15 +181,24 @@ export const QA_PROMPTS = {
 
 You have received the Builder's implementation. Your task is to test it.
 
-**Browser Testing Process:**
+**Testing Approach (choose based on implementation type):**
+
+📋 **Option A: Code-based Testing** (For APIs, backend, libraries)
+1. Review the test files and run existing tests
+2. Execute unit tests using the project's test runner
+3. Verify expected outputs and edge cases  
+
+🌐 **Option B: Browser Testing** (For UI/Frontend - optional)
 1. Use \`start_background_service\` to start the dev server
 2. Use \`browser_action\` with action="launch" to open the app
 3. Perform E2E tests using browser actions
 4. Capture screenshots as evidence
 
 **Decision:**
-- If tests PASS: Use \`attempt_completion\` to hand off to Security
-- If tests FAIL: Return to Builder with specific failure details`,
+- If tests PASS: Use \`attempt_completion\` with \`qaAuditContext.testsPassed: true\` to continue
+- If tests FAIL: Use \`attempt_completion\` with \`qaAuditContext.testsPassed: false\`
+  - This will return **directly to Builder** with the issue details
+  - Be specific about what failed and what needs to be fixed`,
 }
 
 export const SECURITY_PROMPTS = {

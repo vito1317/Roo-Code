@@ -209,7 +209,11 @@ export class DiffViewProvider {
 			await updatedDocument.save()
 		}
 
-		await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), { preview: false, preserveFocus: true })
+		// Skip opening .specs files in editor - they display in Spec Workflow Panel
+		const isSpecsFile = absolutePath.includes(".specs/") || absolutePath.includes(".specs\\")
+		if (!isSpecsFile) {
+			await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), { preview: false, preserveFocus: true })
+		}
 		await this.closeAllDiffViews()
 
 		// Getting diagnostics before and after the file edit is a better approach than
@@ -657,7 +661,9 @@ export class DiffViewProvider {
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
-		if (openFile) {
+		// Skip opening .specs files in editor - they display in Spec Workflow Panel
+		const isSpecsFile = absolutePath.includes(".specs/") || absolutePath.includes(".specs\\")
+		if (openFile && !isSpecsFile) {
 			// Show the document in the editor
 			await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
 				preview: false,

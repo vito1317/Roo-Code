@@ -179,7 +179,7 @@ ${projectContext ? `\n專案背景：\n${projectContext}` : ""}
 
 	/**
 	 * Get project context for Architect to answer questions with proper context
-	 * Tries to get context from: 1) Sentinel FSM handoff context, 2) plan.md file
+	 * Tries to get context from: 1) Sentinel FSM handoff context, 2) project-plan.md file
 	 */
 	private async getProjectContext(task: Task): Promise<string> {
 		const contextParts: string[] = []
@@ -192,19 +192,19 @@ ${projectContext ? `\n專案背景：\n${projectContext}` : ""}
 			}
 		}
 
-		// 2. Try to read plan.md if it exists
+		// 2. Try to read project-plan.md if it exists
 		try {
-			const planPath = path.join(task.cwd, "plan.md")
+			const planPath = path.join(task.cwd, "project-plan.md")
 			const planContent = await fs.readFile(planPath, "utf-8")
 			if (planContent) {
 				// Truncate if too long (keep first 3000 chars)
 				const truncated = planContent.length > 3000
 					? planContent.substring(0, 3000) + "\n\n... (內容已截斷)"
 					: planContent
-				contextParts.push(`## 專案計畫 (plan.md)\n${truncated}`)
+				contextParts.push(`## 專案計畫 (project-plan.md)\n${truncated}`)
 			}
 		} catch {
-			// plan.md doesn't exist, that's fine
+			// project-plan.md doesn't exist, that's fine
 		}
 
 		// 3. Try to read design-specs.md if it exists

@@ -18,6 +18,10 @@ interface SpecTask {
 	title: string
 	status: "pending" | "in-progress" | "done"
 	complexity?: string
+	description?: string
+	files?: string[]
+	acceptance?: string[]
+	dependencies?: string
 }
 
 export class SpecWorkflowPanelManager {
@@ -26,6 +30,7 @@ export class SpecWorkflowPanelManager {
 	private panel: vscode.WebviewPanel | undefined
 	private disposables: vscode.Disposable[] = []
 	private isReady: boolean = false
+	private pendingStep: "requirements" | "design" | "tasks" | null = null
 
 	private constructor(private readonly provider: ClineProvider) {}
 
@@ -60,13 +65,25 @@ export class SpecWorkflowPanelManager {
 
 			console.log(`[SpecWorkflowPanel] Setting up file watcher for ${workspacePath}`)
 
-			// When a spec file is created, auto-open the panel AND update chat sidebar
+		// When a spec file is created, auto-open the panel AND update chat sidebar
 			watcher.onDidCreate(async (uri) => {
 				try {
 					console.log(`[SpecWorkflowPanel] Spec file created: ${uri.fsPath}`)
-					// Get or create instance and show the panel
+					// Get or create instance
 					const instance = SpecWorkflowPanelManager.getInstance(provider)
-					await instance.show()
+					
+					// Detect which spec file was created and switch to the correct step
+					const fileName = path.basename(uri.fsPath)
+					let step: "requirements" | "design" | "tasks" | null = null
+					if (fileName === "requirements.md") step = "requirements"
+					else if (fileName === "design.md") step = "design"
+					else if (fileName === "tasks.md") step = "tasks"
+					
+					if (step) {
+						await instance.showAndSwitchToStep(step)
+					} else {
+						await instance.show()
+					}
 					// Also refresh status to update chat sidebar immediately
 					await instance.refreshWorkflowStatus()
 				} catch (error) {
@@ -162,6 +179,27 @@ export class SpecWorkflowPanelManager {
 		await this.refreshWorkflowStatus()
 	}
 
+	/**
+	 * Show the panel and switch to a specific workflow step
+	 * @param step The step to switch to: 'requirements', 'design', or 'tasks'
+	 */
+	public async showAndSwitchToStep(step: "requirements" | "design" | "tasks"): Promise<void> {
+		await this.createOrShowPanel()
+		await this.refreshWorkflowStatus()
+
+		// Send message to webview to switch to the specified step
+		if (this.panel && this.isReady) {
+			await this.panel.webview.postMessage({
+				type: "switchToStep",
+				step: step,
+			})
+		} else {
+			// Webview not ready yet, store for later
+			this.pendingStep = step
+			console.log(`[SpecWorkflowPanel] Pending step: ${step} (waiting for webview ready)`)
+		}
+	}
+
 	private async createOrShowPanel(): Promise<void> {
 		if (this.panel) {
 			this.panel.reveal(vscode.ViewColumn.One)
@@ -183,13 +221,30 @@ export class SpecWorkflowPanelManager {
 
 		this.panel.webview.html = this.getHtmlContent()
 
+
 		this.panel.webview.onDidReceiveMessage(
 			async (message: any) => {
 				try {
 					if (message?.type === "webviewDidLaunch") {
 						this.isReady = true
 						await this.refreshWorkflowStatus()
+						// Send pending step if any
+						if (this.pendingStep && this.panel) {
+							await this.panel.webview.postMessage({
+								type: "switchToStep",
+								step: this.pendingStep,
+							})
+							console.log(`[SpecWorkflowPanel] Sent pending step: ${this.pendingStep}`)
+							this.pendingStep = null
+						}
+					} else if (message?.type === "requestSpecFileContent") {
+						// Handle file content request directly in panel
+						await this.handleSpecFileContentRequest(message.file)
+					} else if (message?.type === "openSpecFile") {
+						// Handle open file request directly
+						await this.handleOpenSpecFile(message.file)
 					} else if (message?.type) {
+						// Forward other messages to the main handler
 						await webviewMessageHandler(this.provider as any, message)
 					}
 				} catch (err) {
@@ -265,28 +320,197 @@ export class SpecWorkflowPanelManager {
 		const lines = content.split("\n")
 		let taskCounter = 0
 
-		for (const line of lines) {
-			const match = line.match(/^[\s-]*\[([ x\/])\]\s*(.+)$/i)
-			if (match) {
-				taskCounter++
-				const statusChar = match[1].toLowerCase()
-				const taskText = match[2].trim()
-				const complexityMatch = taskText.match(/\(complexity:\s*(low|medium|high)\)/i)
+		// Try parsing TASK-XXX header format first (e.g., "### TASK-001: Title (complexity: low)")
+		const taskHeaderRegex = /^#{1,3}\s*TASK-(\d+):\s*(.+?)(?:\s*\(complexity:\s*(low|medium|high)\))?$/i
+		let currentTask: SpecTask | null = null
+		let currentSection = ""
+		let sectionContent: string[] = []
 
-				tasks.push({
-					id: `task-${taskCounter}`,
-					title: taskText.replace(/\(complexity:\s*(low|medium|high)\)/i, "").trim(),
-					status: statusChar === "x" ? "done" : statusChar === "/" ? "in-progress" : "pending",
-					complexity: complexityMatch ? complexityMatch[1] : undefined,
-				})
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]
+			
+			// Check for TASK-XXX header format
+			const headerMatch = line.match(taskHeaderRegex)
+			if (headerMatch) {
+				// Save previous task if exists
+				if (currentTask) {
+					if (currentSection && sectionContent.length > 0) {
+						this.applySection(currentTask, currentSection, sectionContent)
+					}
+					tasks.push(currentTask)
+				}
+
+				taskCounter++
+				const taskId = headerMatch[1]
+				const title = headerMatch[2].trim()
+				const complexity = headerMatch[3]?.toLowerCase()
+
+				currentTask = {
+					id: `TASK-${taskId.padStart(3, "0")}`,
+					title: title,
+					status: "pending",
+					complexity: complexity,
+				}
+				currentSection = ""
+				sectionContent = []
+				continue
+			}
+
+			// If we have an active task, look for sections
+			if (currentTask) {
+				// Check for section headers
+				if (line.match(/^(?:\*\*)?描述(?:\*\*)?[:\s]*/i) || line.match(/^(?:\*\*)?Description(?:\*\*)?[:\s]*/i)) {
+					if (currentSection && sectionContent.length > 0) {
+						this.applySection(currentTask, currentSection, sectionContent)
+					}
+					currentSection = "description"
+					sectionContent = []
+					continue
+				}
+				if (line.match(/^(?:\*\*)?涉及檔案(?:\*\*)?[:\s]*/i) || line.match(/^(?:\*\*)?(?:Files?|涉及)(?:\*\*)?[:\s]*/i)) {
+					if (currentSection && sectionContent.length > 0) {
+						this.applySection(currentTask, currentSection, sectionContent)
+					}
+					currentSection = "files"
+					sectionContent = []
+					continue
+				}
+				if (line.match(/^(?:\*\*)?驗收標準(?:\*\*)?[:\s]*/i) || line.match(/^(?:\*\*)?Acceptance(?:\*\*)?[:\s]*/i)) {
+					if (currentSection && sectionContent.length > 0) {
+						this.applySection(currentTask, currentSection, sectionContent)
+					}
+					currentSection = "acceptance"
+					sectionContent = []
+					continue
+				}
+				if (line.match(/^(?:\*\*)?依賴(?:\*\*)?[:\s]*/i) || line.match(/^(?:\*\*)?Dependencies(?:\*\*)?[:\s]*/i)) {
+					if (currentSection && sectionContent.length > 0) {
+						this.applySection(currentTask, currentSection, sectionContent)
+					}
+					currentSection = "dependencies"
+					sectionContent = []
+					continue
+				}
+
+				// Check for section separator (---) which ends current task's sections
+				if (line.match(/^---+$/)) {
+					if (currentSection && sectionContent.length > 0) {
+						this.applySection(currentTask, currentSection, sectionContent)
+					}
+					currentSection = ""
+					sectionContent = []
+					continue
+				}
+
+				// Collect section content
+				if (currentSection && line.trim()) {
+					sectionContent.push(line.trim())
+				}
+			}
+		}
+
+		// Don't forget the last task
+		if (currentTask) {
+			if (currentSection && sectionContent.length > 0) {
+				this.applySection(currentTask, currentSection, sectionContent)
+			}
+			tasks.push(currentTask)
+		}
+
+		// If no TASK-XXX format found, fall back to checkbox format
+		if (tasks.length === 0) {
+			for (const line of lines) {
+				const match = line.match(/^[\s-]*\[([ x\/])\]\s*(.+)$/i)
+				if (match) {
+					taskCounter++
+					const statusChar = match[1].toLowerCase()
+					const taskText = match[2].trim()
+					const complexityMatch = taskText.match(/\(complexity:\s*(low|medium|high)\)/i)
+
+					tasks.push({
+						id: `task-${taskCounter}`,
+						title: taskText.replace(/\(complexity:\s*(low|medium|high)\)/i, "").trim(),
+						status: statusChar === "x" ? "done" : statusChar === "/" ? "in-progress" : "pending",
+						complexity: complexityMatch ? complexityMatch[1] : undefined,
+					})
+				}
 			}
 		}
 
 		return tasks
 	}
 
+	/**
+	 * Apply section content to the current task
+	 */
+	private applySection(task: SpecTask, section: string, content: string[]): void {
+		switch (section) {
+			case "description":
+				task.description = content.join(" ").replace(/^\s*-\s*/, "")
+				break
+			case "files":
+				task.files = content
+					.map(line => line.replace(/^\s*[-*•]\s*/, "").replace(/`/g, "").split(/\s*[-–—]\s*/)[0].trim())
+					.filter(f => f.length > 0)
+				break
+			case "acceptance":
+				task.acceptance = content
+					.filter(line => line.match(/^\s*[-*•☐☑✓✗]\s*/) || line.match(/^\s*\[[ x]\]/i))
+					.map(line => line.replace(/^\s*[-*•☐☑✓✗]\s*/, "").replace(/^\s*\[[ x]\]\s*/i, "").trim())
+				break
+			case "dependencies":
+				task.dependencies = content.join(", ").replace(/^\s*[-*•]\s*/, "")
+				break
+		}
+	}
+
 	public isOpen(): boolean {
 		return !!this.panel
+	}
+
+	/**
+	 * Handle spec file content request - reads file and sends content back to panel
+	 */
+	private async handleSpecFileContentRequest(filename: string): Promise<void> {
+		if (!this.panel || !filename) return
+
+		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+		if (!workspacePath) return
+
+		const fs = require("fs")
+		const filePath = path.join(workspacePath, ".specs", filename)
+
+		if (fs.existsSync(filePath)) {
+			const content = fs.readFileSync(filePath, "utf-8")
+			await this.panel.webview.postMessage({
+				type: "specFileContent",
+				file: filename,
+				content: content,
+			})
+			console.log(`[SpecWorkflowPanel] Sent file content for ${filename}`)
+		} else {
+			console.warn(`[SpecWorkflowPanel] File not found: ${filePath}`)
+		}
+	}
+
+	/**
+	 * Handle open spec file request - opens file in VS Code editor
+	 */
+	private async handleOpenSpecFile(filename: string): Promise<void> {
+		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+		if (!workspacePath || !filename) return
+
+		const filePath = path.join(workspacePath, ".specs", filename)
+		const fileUri = vscode.Uri.file(filePath)
+
+		try {
+			const document = await vscode.workspace.openTextDocument(fileUri)
+			await vscode.window.showTextDocument(document, vscode.ViewColumn.Beside)
+			console.log(`[SpecWorkflowPanel] Opened file in editor: ${filename}`)
+		} catch (error) {
+			console.error(`[SpecWorkflowPanel] Failed to open file: ${error}`)
+			vscode.window.showErrorMessage(`Failed to open ${filename}`)
+		}
 	}
 
 	public async sendMessage(message: any): Promise<void> {
@@ -327,7 +551,8 @@ export class SpecWorkflowPanelManager {
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; img-src data:;">
+	<script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 	<title>Spec Workflow</title>
 	<style>
 		:root {
@@ -522,8 +747,8 @@ export class SpecWorkflowPanelManager {
 			background: transparent;
 			color: var(--vscode-button-background);
 			cursor: pointer;
-			opacity: 0;
-			transition: opacity 0.15s;
+			opacity: 0.7;
+			transition: opacity 0.15s, background 0.15s;
 			flex-shrink: 0;
 		}
 		.task-item:hover .task-btn {
@@ -532,6 +757,68 @@ export class SpecWorkflowPanelManager {
 		.task-btn:hover {
 			background: var(--vscode-button-background);
 			color: var(--vscode-button-foreground);
+		}
+		/* Task expansion styles */
+		.task-expand-btn {
+			padding: 4px 8px;
+			font-size: 12px;
+			border: none;
+			background: transparent;
+			color: var(--vscode-foreground);
+			cursor: pointer;
+			opacity: 0.6;
+			transition: all 0.15s;
+		}
+		.task-expand-btn:hover {
+			opacity: 1;
+			background: var(--vscode-button-secondaryBackground);
+			border-radius: 4px;
+		}
+		.task-expand-btn.expanded {
+			transform: rotate(90deg);
+		}
+		.task-details {
+			display: none;
+			margin-top: 12px;
+			padding: 12px;
+			border-radius: 6px;
+			background: var(--vscode-input-background);
+			border: 1px solid var(--vscode-input-border);
+			font-size: 13px;
+			line-height: 1.5;
+		}
+		.task-details.visible {
+			display: block;
+		}
+		.task-details h4 {
+			font-size: 12px;
+			font-weight: 600;
+			margin: 0 0 6px 0;
+			color: var(--vscode-foreground);
+			opacity: 0.8;
+		}
+		.task-details p {
+			margin: 0 0 12px 0;
+			color: var(--vscode-foreground);
+		}
+		.task-details ul {
+			margin: 0 0 12px 0;
+			padding-left: 20px;
+		}
+		.task-details li {
+			margin: 4px 0;
+		}
+		.task-details code {
+			background: var(--vscode-textCodeBlock-background);
+			padding: 2px 6px;
+			border-radius: 3px;
+			font-size: 12px;
+		}
+		.task-details-section {
+			margin-bottom: 12px;
+		}
+		.task-details-section:last-child {
+			margin-bottom: 0;
 		}
 		.empty-state {
 			text-align: center;
@@ -630,6 +917,32 @@ export class SpecWorkflowPanelManager {
 			padding: 48px;
 			color: var(--vscode-descriptionForeground);
 		}
+		
+		/* Mermaid styles */
+		.mermaid-container {
+			margin: 16px 0;
+			padding: 16px;
+			background: var(--vscode-textCodeBlock-background, #1e1e1e);
+			border-radius: 6px;
+			overflow-x: auto;
+		}
+		.mermaid-container svg {
+			max-width: 100%;
+			height: auto;
+		}
+		.mermaid-loading {
+			text-align: center;
+			padding: 24px;
+			color: var(--vscode-descriptionForeground);
+			font-style: italic;
+		}
+		.mermaid-error {
+			color: var(--vscode-errorForeground);
+			padding: 8px;
+			margin-bottom: 8px;
+			border-left: 3px solid var(--vscode-errorForeground);
+			background: rgba(255, 0, 0, 0.1);
+		}
 	</style>
 </head>
 <body>
@@ -638,8 +951,8 @@ export class SpecWorkflowPanelManager {
 			<div class="header-top">
 				<h1 class="workflow-title">📋 Spec Workflow</h1>
 				<div class="header-actions">
-					<button class="btn btn-secondary" onclick="updateSpecs()">🔄 Update</button>
-					<button class="btn btn-primary" id="runAllBtn" onclick="runAllTasks()" disabled>▶ Run All</button>
+					<button class="btn btn-secondary" id="updateBtn">🔄 Update</button>
+					<button class="btn btn-primary" id="runAllBtn" disabled>▶ Run All</button>
 				</div>
 			</div>
 			<div class="workflow-steps" id="steps"></div>
@@ -658,13 +971,13 @@ export class SpecWorkflowPanelManager {
 			<div class="content-view hidden" id="contentView">
 				<div class="content-header">
 					<div class="content-header-left">
-						<button class="back-btn" onclick="showTaskView()">← Back</button>
+						<button class="back-btn" id="backBtn">← Back</button>
 						<h2 class="content-title">
 							<span id="contentIcon">📄</span>
 							<span id="contentFileName">Document</span>
 						</h2>
 					</div>
-					<button class="btn btn-secondary" onclick="openInEditor()">📝 Open in Editor</button>
+					<button class="btn btn-secondary" id="openEditorBtn">📝 Open in Editor</button>
 				</div>
 				<div class="content-body" id="contentBody">
 					<div class="loading-state">Loading...</div>
@@ -680,8 +993,32 @@ export class SpecWorkflowPanelManager {
 		let workflowStatus = {};
 		let fileContents = {};
 		
+		// Initialize Mermaid with dark theme
+		if (typeof mermaid !== 'undefined') {
+			mermaid.initialize({
+				startOnLoad: false,
+				securityLevel: 'loose',
+				theme: 'dark',
+				themeVariables: {
+					background: '#1e1e1e',
+					textColor: '#ffffff',
+					mainBkg: '#2d2d2d',
+					nodeBorder: '#888888',
+					lineColor: '#cccccc',
+					primaryColor: '#3c3c3c',
+					primaryTextColor: '#ffffff',
+					primaryBorderColor: '#888888',
+					secondaryColor: '#2d2d2d',
+					tertiaryColor: '#454545',
+					fontFamily: 'var(--vscode-font-family, sans-serif)'
+				}
+			});
+		}
+		
 		// Notify ready
 		vscode.postMessage({ type: 'webviewDidLaunch' });
+		
+		// Note: Event listeners are added at the end, after function definitions
 		
 		window.addEventListener('message', event => {
 			const message = event.data;
@@ -692,6 +1029,17 @@ export class SpecWorkflowPanelManager {
 				fileContents[message.file] = message.content;
 				if (currentFile === message.file && currentView === 'content') {
 					renderFileContent(message.file, message.content);
+				}
+			} else if (message.type === 'switchToStep') {
+				// Map step name to filename and switch view
+				const stepToFile = {
+					'requirements': 'requirements.md',
+					'design': 'design.md',
+					'tasks': 'tasks.md'
+				};
+				const filename = stepToFile[message.step];
+				if (filename) {
+					viewFile(filename, true);
 				}
 			}
 		});
@@ -717,12 +1065,21 @@ export class SpecWorkflowPanelManager {
 				if (!completed) cls += ' disabled';
 				return \`
 					\${i > 0 ? '<span class="arrow">→</span>' : ''}
-					<div class="\${cls}" onclick="viewFile('\${step.file}', \${completed})" title="\${completed ? 'Click to view ' + step.name : 'Not created yet'}">
+					<div class="\${cls}" data-file="\${step.file}" data-exists="\${completed}" title="\${completed ? 'Click to view ' + step.name : 'Not created yet'}">
 						<span class="step-icon">\${step.icon}</span>
 						<span>\${step.name}</span>
 					</div>
 				\`;
 			}).join('');
+			
+			// Add click event listeners for steps (CSP-compliant)
+			stepsContainer.querySelectorAll('.step').forEach(el => {
+				el.addEventListener('click', function() {
+					const file = this.getAttribute('data-file');
+					const exists = this.getAttribute('data-exists') === 'true';
+					viewFile(file, exists);
+				});
+			});
 			
 			// Enable run all button if tasks exist
 			runAllBtn.disabled = !status.tasks;
@@ -744,18 +1101,66 @@ export class SpecWorkflowPanelManager {
 				
 				taskView.innerHTML = tasks.map(task => {
 					const statusIcon = task.status === 'done' ? '✓' : task.status === 'in-progress' ? '⏳' : '';
-					return \`
-						<div class="task-item \${task.status}">
+					const hasDetails = task.description || task.files || task.acceptance;
+					
+					// Build details section HTML if task has details
+					let detailsHtml = '';
+					if (hasDetails) {
+						detailsHtml += '<div class="task-details" id="details-' + task.id + '">';
+						if (task.description) {
+							detailsHtml += '<div class="task-details-section"><h4>📝 描述</h4><p>' + task.description + '</p></div>';
+						}
+						if (task.files && task.files.length > 0) {
+							detailsHtml += '<div class="task-details-section"><h4>📁 涉及檔案</h4><ul>';
+							task.files.forEach(function(f) { detailsHtml += '<li><code>' + f + '</code></li>'; });
+							detailsHtml += '</ul></div>';
+						}
+						if (task.acceptance && task.acceptance.length > 0) {
+							detailsHtml += '<div class="task-details-section"><h4>✅ 驗收標準</h4><ul>';
+							task.acceptance.forEach(function(a) { detailsHtml += '<li>' + a + '</li>'; });
+							detailsHtml += '</ul></div>';
+						}
+						if (task.dependencies) {
+							detailsHtml += '<div class="task-details-section"><h4>🔗 依賴</h4><p>' + task.dependencies + '</p></div>';
+						}
+						detailsHtml += '</div>';
+					}
+					
+						return \`
+						<div class="task-item \${task.status}" data-task-id="\${task.id}">
 							<div class="task-checkbox">\${statusIcon}</div>
+							\${hasDetails ? '<button class="task-expand-btn" data-target="details-' + task.id + '">▶</button>' : ''}
 							<div class="task-content">
 								<div class="task-title">\${task.title}</div>
+								\${detailsHtml}
 							</div>
 							\${task.complexity ? '<span class="task-complexity">' + task.complexity + '</span>' : ''}
-							\${task.status === 'pending' ? '<button class="task-btn" onclick="startTask(\\'' + task.id + '\\')">▶ Run</button>' : ''}
 							\${task.status === 'in-progress' ? '<span class="task-complexity" style="background:#f59e0b">Running...</span>' : ''}
+							<button class="task-btn" data-task-id="\${task.id}">\${task.status === 'done' ? '🔄 Re-run' : '▶ Run'}</button>
 						</div>
 					\`;
 				}).join('');
+				
+				// Add click event listeners for task buttons (CSP-compliant)
+				taskView.querySelectorAll('.task-btn').forEach(btn => {
+					btn.addEventListener('click', function() {
+						const taskId = this.getAttribute('data-task-id');
+						startTask(taskId);
+					});
+				});
+				
+				// Add click event listeners for expand buttons
+				taskView.querySelectorAll('.task-expand-btn').forEach(btn => {
+					btn.addEventListener('click', function(e) {
+						e.stopPropagation();
+						const targetId = this.getAttribute('data-target');
+						const details = document.getElementById(targetId);
+						if (details) {
+							this.classList.toggle('expanded');
+							details.classList.toggle('visible');
+						}
+					});
+				});
 			}
 		}
 		
@@ -812,14 +1217,48 @@ export class SpecWorkflowPanelManager {
 		}
 		
 		function renderFileContent(filename, content) {
+			console.log('[SpecWorkflowPanel] renderFileContent called:', filename, 'content length:', content?.length);
 			const body = document.getElementById('contentBody');
-			// Simple markdown rendering
-			let html = content
+			if (!body) {
+				console.error('[SpecWorkflowPanel] contentBody element not found!');
+				return;
+			}
+			if (!content) {
+				body.innerHTML = '<div class="empty-state">No content found</div>';
+				return;
+			}
+			
+			// Extract mermaid blocks first
+			const mermaidBlocks = [];
+			const backticks = String.fromCharCode(96, 96, 96);
+			const mermaidRegex = new RegExp(backticks + 'mermaid([\\\\s\\\\S]*?)' + backticks, 'g');
+			let processedContent = content.replace(mermaidRegex, function(match, code) {
+				const id = 'mermaid-' + mermaidBlocks.length;
+				mermaidBlocks.push({ id: id, code: code.trim() });
+				return '<div class="mermaid-container" id="' + id + '"><div class="mermaid-loading">Loading diagram...</div></div>';
+			});
+			
+			// Also detect standalone mermaid blocks (no mermaid label but starts with mermaid keywords)
+			const mermaidKeywords = ['graph', 'flowchart', 'sequenceDiagram', 'classDiagram', 'stateDiagram', 'erDiagram', 'journey', 'gantt', 'pie', 'quadrantChart', 'requirementDiagram', 'gitGraph', 'mindmap', 'timeline'];
+			const codeBlockRegex = new RegExp(backticks + '([\\\\s\\\\S]*?)' + backticks, 'g');
+			processedContent = processedContent.replace(codeBlockRegex, function(match, code) {
+				const trimmedCode = code.trim();
+				const firstWord = trimmedCode.split(/[\\s\\n]/)[0];
+				if (mermaidKeywords.includes(firstWord)) {
+					const id = 'mermaid-' + mermaidBlocks.length;
+					mermaidBlocks.push({ id: id, code: trimmedCode });
+					return '<div class="mermaid-container" id="' + id + '"><div class="mermaid-loading">Loading diagram...</div></div>';
+				}
+				return '<pre>' + trimmedCode + '</pre>';
+			});
+			
+			// Simple markdown rendering for other content
+			const singleBacktick = String.fromCharCode(96);
+			let html = processedContent
 				.replace(/^### (.+)$/gm, '<h3>$1</h3>')
 				.replace(/^## (.+)$/gm, '<h2>$1</h2>')
 				.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-				.replace(/\\\`\\\`\\\`([\\s\\S]*?)\\\`\\\`\\\`/g, '<pre>$1</pre>')
-				.replace(/\\\`([^\\\`]+)\\\`/g, '<code>$1</code>')
+				.replace(new RegExp(singleBacktick + '([^' + singleBacktick + ']+)' + singleBacktick, 'g'), '<code>$1</code>')
 				.replace(/^- \\[x\\] (.+)$/gim, '<li style="list-style:none;">✅ $1</li>')
 				.replace(/^- \\[\\/\\] (.+)$/gim, '<li style="list-style:none;">🔄 $1</li>')
 				.replace(/^- \\[ \\] (.+)$/gim, '<li style="list-style:none;">⬜ $1</li>')
@@ -830,6 +1269,28 @@ export class SpecWorkflowPanelManager {
 				.replace(/\\n\\n/g, '</p><p>')
 				.replace(/\\n/g, '<br>');
 			body.innerHTML = '<p>' + html + '</p>';
+			console.log('[SpecWorkflowPanel] Content rendered successfully');
+			
+			// Render mermaid diagrams
+			if (typeof mermaid !== 'undefined' && mermaidBlocks.length > 0) {
+				mermaidBlocks.forEach(function(block) {
+					(async function() {
+						try {
+							const container = document.getElementById(block.id);
+							if (container) {
+								const result = await mermaid.render(block.id + '-svg', block.code);
+								container.innerHTML = result.svg;
+							}
+						} catch (err) {
+							console.error('[SpecWorkflowPanel] Mermaid render error:', err);
+							const container = document.getElementById(block.id);
+							if (container) {
+								container.innerHTML = '<div class="mermaid-error">Failed to render diagram: ' + err.message + '</div><pre>' + block.code + '</pre>';
+							}
+						}
+					})();
+				});
+			}
 		}
 		
 		function openInEditor() {
@@ -849,6 +1310,12 @@ export class SpecWorkflowPanelManager {
 		function updateSpecs() {
 			vscode.postMessage({ type: 'updateSpecs' });
 		}
+		
+		// CSP-compliant event listeners for static buttons (added after function definitions)
+		document.getElementById('updateBtn').addEventListener('click', updateSpecs);
+		document.getElementById('runAllBtn').addEventListener('click', runAllTasks);
+		document.getElementById('backBtn').addEventListener('click', showTaskView);
+		document.getElementById('openEditorBtn').addEventListener('click', openInEditor);
 	</script>
 </body>
 </html>`

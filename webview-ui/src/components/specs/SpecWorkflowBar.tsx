@@ -100,26 +100,33 @@ export const SpecWorkflowBar: React.FC<SpecWorkflowBarProps> = ({
 					padding: 8px 12px;
 					background: var(--vscode-editor-background);
 					border-bottom: 1px solid var(--vscode-panel-border);
+					overflow: hidden;
+					min-width: 0;
 				}
 
 				.spec-workflow-project {
 					font-weight: 600;
 					font-size: 13px;
 					color: var(--vscode-foreground);
-					margin-right: 12px;
+					margin-right: 8px;
+					white-space: nowrap;
+					flex-shrink: 0;
 				}
 
 				.spec-workflow-tabs {
 					display: flex;
 					align-items: center;
 					gap: 4px;
+					flex-shrink: 1;
+					min-width: 0;
+					overflow: hidden;
 				}
 
 				.spec-workflow-tab {
 					display: flex;
 					align-items: center;
-					gap: 6px;
-					padding: 4px 10px;
+					gap: 4px;
+					padding: 4px 8px;
 					border-radius: 4px;
 					font-size: 12px;
 					cursor: pointer;
@@ -128,6 +135,8 @@ export const SpecWorkflowBar: React.FC<SpecWorkflowBarProps> = ({
 					color: var(--vscode-foreground);
 					opacity: 0.6;
 					transition: all 0.15s ease;
+					white-space: nowrap;
+					flex-shrink: 0;
 				}
 
 				.spec-workflow-tab:hover {
@@ -160,6 +169,7 @@ export const SpecWorkflowBar: React.FC<SpecWorkflowBarProps> = ({
 					font-weight: 600;
 					background: var(--vscode-badge-background);
 					color: var(--vscode-badge-foreground);
+					flex-shrink: 0;
 				}
 
 				.spec-workflow-tab.completed .spec-workflow-step {
@@ -171,25 +181,28 @@ export const SpecWorkflowBar: React.FC<SpecWorkflowBarProps> = ({
 					color: var(--vscode-foreground);
 					opacity: 0.4;
 					font-size: 12px;
+					flex-shrink: 0;
 				}
 
 				.spec-workflow-actions {
 					display: flex;
 					align-items: center;
-					gap: 8px;
+					gap: 6px;
 					margin-left: auto;
+					flex-shrink: 0;
 				}
 
 				.spec-workflow-btn {
 					display: flex;
 					align-items: center;
 					gap: 4px;
-					padding: 4px 10px;
+					padding: 4px 8px;
 					font-size: 12px;
 					border-radius: 4px;
 					border: none;
 					cursor: pointer;
 					transition: all 0.15s ease;
+					white-space: nowrap;
 				}
 
 				.spec-workflow-btn-update {
@@ -212,6 +225,16 @@ export const SpecWorkflowBar: React.FC<SpecWorkflowBarProps> = ({
 
 				.spec-workflow-btn-icon {
 					font-size: 14px;
+				}
+				
+				/* Hide button text on very narrow screens, show only icons */
+				@media (max-width: 400px) {
+					.spec-workflow-btn span:not(.spec-workflow-btn-icon) {
+						display: none;
+					}
+					.spec-workflow-tab span:not(.spec-workflow-step) {
+						display: none;
+					}
 				}
 			`}</style>
 

@@ -471,15 +471,39 @@ function renderButton(args) {
   `;
 }
 function renderCard(args) {
-    const { title, content, footer, variant = "default" } = args;
+    const { title, content, footer, variant = "default", collapsible = false } = args;
+    // Generate unique ID for collapsible card
+    const cardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const toggleScript = collapsible ? `
+    <script>
+      (function() {
+        var card = document.getElementById('${cardId}');
+        var header = card.querySelector('.mcp-card-header');
+        var body = card.querySelector('.mcp-card-body');
+        var footerEl = card.querySelector('.mcp-card-footer');
+        var toggle = card.querySelector('.mcp-card-toggle');
+        var isCollapsed = false;
+        
+        header.style.cursor = 'pointer';
+        header.onclick = function() {
+          isCollapsed = !isCollapsed;
+          body.style.display = isCollapsed ? 'none' : 'block';
+          if (footerEl) footerEl.style.display = isCollapsed ? 'none' : 'block';
+          toggle.textContent = isCollapsed ? '▶' : '▼';
+        };
+      })();
+    </script>
+  ` : '';
+    const toggleIcon = collapsible ? `<span class="mcp-card-toggle" style="float:right;font-size:12px;opacity:0.7;">▼</span>` : '';
     return `
     <div class="mcp-ui">
       ${getStyles()}
-      <div class="mcp-card ${variant}">
-        <div class="mcp-card-header">${title}</div>
+      <div class="mcp-card ${variant}" id="${cardId}">
+        <div class="mcp-card-header">${toggleIcon}${title}</div>
         <div class="mcp-card-body">${content}</div>
         ${footer ? `<div class="mcp-card-footer">${footer}</div>` : ""}
       </div>
+      ${toggleScript}
     </div>
   `;
 }
@@ -659,36 +683,12 @@ function renderMermaid(args) {
       </div>
     `;
     }
-    // Escape the code for safe embedding in HTML
-    const escapedCode = code
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    // Use a unique ID for this diagram
-    const diagramId = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    return `
-    <div class="mcp-ui">
-      ${getStyles()}
-      <div class="mcp-mermaid">
-        ${title ? `<div class="mcp-mermaid-title">${title}</div>` : ""}
-        <div id="${diagramId}" class="mermaid">
+    // Return Markdown format with mermaid code block
+    // This will be properly rendered by the webview's MermaidBlock component
+    const titleSection = title ? `**${title}**\n\n` : "";
+    return `${titleSection}\`\`\`mermaid
 ${code}
-        </div>
-      </div>
-      <script type="module">
-        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({
-          startOnLoad: true,
-          theme: '${theme}',
-          securityLevel: 'loose',
-          flowchart: { curve: 'basis' }
-        });
-        mermaid.run({ nodes: [document.getElementById('${diagramId}')] });
-      </script>
-    </div>
-  `;
+\`\`\``;
 }
 function renderMarkdown(args) {
     const { content, title } = args;

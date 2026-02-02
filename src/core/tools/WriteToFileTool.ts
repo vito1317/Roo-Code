@@ -107,9 +107,17 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				state?.experiments ?? {},
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
 			)
-		// Sentinel Mode: For .md files (like plan.md), skip diff view entirely and save silently
+		// Sentinel/Spec Mode: For .md files (like plan.md), skip diff view entirely and save silently
 			const isSentinelMode = state?.mode?.startsWith("sentinel-") ?? false
-			const isSentinelPlanFile = isSentinelMode && relPath.endsWith(".md")
+			const isSpecMode = state?.mode === "spec"
+			// CRITICAL: Always detect .specs files by path - this is the most reliable check!
+			// Note: relPath may use forward slash OR backslash depending on OS
+			const isSpecsPathFile = relPath.includes(".specs/") || relPath.includes(".specs\\") || relPath.startsWith(".specs/") || relPath.startsWith(".specs\\")
+			// For .specs files, ALWAYS skip diff view - regardless of mode!
+			// For other .md files in Sentinel/Spec mode, also skip diff view
+			const isSentinelPlanFile = (isSpecsPathFile && relPath.endsWith(".md")) || ((isSentinelMode || isSpecMode) && relPath.endsWith(".md"))
+			
+			console.log(`[WriteToFileTool] Mode: ${state?.mode}, isSpecsPathFile: ${isSpecsPathFile}, isSentinelPlanFile: ${isSentinelPlanFile}, relPath: ${relPath}`)
 
 			if (isSentinelPlanFile) {
 				// Save directly without showing any diff view
@@ -125,39 +133,65 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				const toolResultMessage = `✅ Created ${relPath}`
 				pushToolResult(toolResultMessage)
 
-				// Open preview
+				// Determine if this is a .specs file - use Spec Workflow Panel instead of Markdown Preview
+				const isSpecsFile = relPath.includes(".specs/") || relPath.includes(".specs\\")
+				
 				try {
 					const vscode = await import("vscode")
+					
+					if (isSpecsFile) {
+						// Use Spec Workflow Panel for .specs/*.md files
+						const { SpecWorkflowPanelManager } = await import("../webview/SpecWorkflowPanelManager")
+						const provider = task.providerRef.deref()
+						if (provider) {
+							const panelManager = SpecWorkflowPanelManager.getInstance(provider as any)
+							
+							// Detect which spec file and switch to correct step
+							const fileName = path.basename(relPath)
+							let step: "requirements" | "design" | "tasks" | null = null
+							if (fileName === "requirements.md") step = "requirements"
+							else if (fileName === "design.md") step = "design"
+							else if (fileName === "tasks.md") step = "tasks"
+							
+							if (step) {
+								await panelManager.showAndSwitchToStep(step)
+							} else {
+								await panelManager.show()
+							}
+							await task.say("text", `📋 **Spec file created:** \`${relPath}\` - Spec Workflow Panel is now open.`)
+						}
+					} else {
+						// For non-specs .md files, use Markdown preview
+						// Ensure Kroki extension is installed
+						const krokiExtId = "pomdtr.markdown-kroki"
+						const krokiExt = vscode.extensions.getExtension(krokiExtId)
+						if (!krokiExt) {
+							await task.say("text", `📦 Installing Kroki extension for diagram support...`)
+							await vscode.commands.executeCommand("workbench.extensions.installExtension", krokiExtId)
+							await delay(2000)
+							await task.say("text", `✅ Kroki extension installed!`)
+						}
 
-					// Ensure Kroki extension is installed
-					const krokiExtId = "pomdtr.markdown-kroki"
-					const krokiExt = vscode.extensions.getExtension(krokiExtId)
-					if (!krokiExt) {
-						await task.say("text", `📦 Installing Kroki extension for diagram support...`)
-						await vscode.commands.executeCommand("workbench.extensions.installExtension", krokiExtId)
-						await delay(2000)
-						await task.say("text", `✅ Kroki extension installed!`)
-					}
+						await delay(500)
+						const fileUri = vscode.Uri.file(absolutePath)
+						await vscode.commands.executeCommand("markdown.showPreview", fileUri)
 
-					await delay(500)
-					const fileUri = vscode.Uri.file(absolutePath)
-					await vscode.commands.executeCommand("markdown.showPreview", fileUri)
-
-					// Close source tabs
-					for (const group of vscode.window.tabGroups.all) {
-						for (const tab of group.tabs) {
-							if (tab.input && (tab.input as any).uri?.fsPath === absolutePath) {
-								const isPreview = tab.label.startsWith("Preview ")
-								if (!isPreview) {
-									await vscode.window.tabGroups.close(tab)
+						// Close source tabs
+						for (const group of vscode.window.tabGroups.all) {
+							for (const tab of group.tabs) {
+								if (tab.input && (tab.input as any).uri?.fsPath === absolutePath) {
+									const isPreview = tab.label.startsWith("Preview ")
+									if (!isPreview) {
+										await vscode.window.tabGroups.close(tab)
+									}
 								}
 							}
 						}
-					}
 
-					await task.say("text", `📝 **Plan created:** \`${relPath}\` - Preview is now open.`)
+						await task.say("text", `📝 **Plan created:** \`${relPath}\` - Preview is now open.`)
+					}
 				} catch (previewError) {
-					console.log("[WriteToFileTool] Failed to open markdown preview:", previewError)
+					console.log("[WriteToFileTool] Failed to open preview:", previewError)
 				}
 
 				task.processQueuedMessages()
@@ -238,51 +272,78 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
 
-			// Auto-open markdown preview for .md files in Sentinel mode
+			// Auto-open markdown preview for .md files in Sentinel/Spec mode
 			if (relPath.endsWith(".md")) {
 				const isSentinelMode = state?.mode?.startsWith("sentinel-") ?? false
-				if (isSentinelMode) {
+				const isSpecMode = state?.mode === "spec"
+				if (isSentinelMode || isSpecMode) {
+					const isSpecsFile = relPath.includes(".specs/") || relPath.includes(".specs\\")
+					
 					try {
 						// Import vscode dynamically to avoid circular dependencies
 						const vscode = await import("vscode")
 						const absolutePath = path.resolve(task.cwd, relPath)
+						
+						if (isSpecsFile) {
+							// Use Spec Workflow Panel for .specs/*.md files
+							const { SpecWorkflowPanelManager } = await import("../webview/SpecWorkflowPanelManager")
+							const provider = task.providerRef.deref()
+							if (provider) {
+								const panelManager = SpecWorkflowPanelManager.getInstance(provider as any)
+								
+								// Detect which spec file and switch to correct step
+								const fileName = path.basename(relPath)
+								let step: "requirements" | "design" | "tasks" | null = null
+								if (fileName === "requirements.md") step = "requirements"
+								else if (fileName === "design.md") step = "design"
+								else if (fileName === "tasks.md") step = "tasks"
+								
+								if (step) {
+									await panelManager.showAndSwitchToStep(step)
+								} else {
+									await panelManager.show()
+								}
+								await task.say("text", `📋 **Spec file updated:** \`${relPath}\` - Spec Workflow Panel is now open.`)
+							}
+						} else {
+							// For non-specs .md files, use Markdown preview
+							// Ensure Kroki extension is installed for proper diagram rendering
+							const krokiExtId = "pomdtr.markdown-kroki"
+							const krokiExt = vscode.extensions.getExtension(krokiExtId)
+							if (!krokiExt) {
+								await task.say("text", `📦 Installing Kroki extension for diagram support...`)
+								await vscode.commands.executeCommand("workbench.extensions.installExtension", krokiExtId)
+								// Wait for extension to be ready
+								await delay(2000)
+								await task.say("text", `✅ Kroki extension installed! Diagrams will render correctly.`)
+							}
 
-						// Ensure Kroki extension is installed for proper diagram rendering
-						const krokiExtId = "pomdtr.markdown-kroki"
-						const krokiExt = vscode.extensions.getExtension(krokiExtId)
-						if (!krokiExt) {
-							await task.say("text", `📦 Installing Kroki extension for diagram support...`)
-							await vscode.commands.executeCommand("workbench.extensions.installExtension", krokiExtId)
-							// Wait for extension to be ready
-							await delay(2000)
-							await task.say("text", `✅ Kroki extension installed! Diagrams will render correctly.`)
-						}
+							// Wait for file system to sync before opening
+							await delay(500)
 
-						// Wait for file system to sync before opening
-						await delay(500)
+							// Open preview directly without showing source code
+							const fileUri = vscode.Uri.file(absolutePath)
+							// Use markdown.showPreview to open only preview (not the source)
+							await vscode.commands.executeCommand("markdown.showPreview", fileUri)
 
-						// Open preview directly without showing source code
-						const fileUri = vscode.Uri.file(absolutePath)
-						// Use markdown.showPreview to open only preview (not the source)
-						await vscode.commands.executeCommand("markdown.showPreview", fileUri)
-
-						// Close any source code tabs for this file that may have opened
-						for (const group of vscode.window.tabGroups.all) {
-							for (const tab of group.tabs) {
-								if (tab.input && (tab.input as any).uri?.fsPath === absolutePath) {
-									// Don't close preview tabs, only source tabs
-									const isPreview = tab.label.startsWith("Preview ")
-									if (!isPreview) {
-										await vscode.window.tabGroups.close(tab)
+							// Close any source code tabs for this file that may have opened
+							for (const group of vscode.window.tabGroups.all) {
+								for (const tab of group.tabs) {
+									if (tab.input && (tab.input as any).uri?.fsPath === absolutePath) {
+										// Don't close preview tabs, only source tabs
+										const isPreview = tab.label.startsWith("Preview ")
+										if (!isPreview) {
+											await vscode.window.tabGroups.close(tab)
+										}
 									}
 								}
 							}
-						}
 
-						await task.say("text", `📝 **Plan created:** \`${relPath}\` - Preview is now open.`)
+							await task.say("text", `📝 **Plan created:** \`${relPath}\` - Preview is now open.`)
+						}
 					} catch (previewError) {
 						// Silently fail - preview is a nice-to-have, not critical
-						console.log("[WriteToFileTool] Failed to open markdown preview:", previewError)
+						console.log("[WriteToFileTool] Failed to open preview:", previewError)
 					}
 				}
 			}
@@ -320,7 +381,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		// Skip streaming/diff view for .md files in Sentinel mode (they open in preview instead)
 		const isSentinelMode = state?.mode?.startsWith("sentinel-") ?? false
-		if (isSentinelMode && relPath?.endsWith(".md")) {
+		const isSpecMode = state?.mode === "spec"
+		
+		// CRITICAL: Also skip for .specs/ files - they should NEVER open in diff editor
+		const isSpecsPathFile = relPath?.includes(".specs/") || relPath?.includes(".specs\\") || relPath?.startsWith(".specs/") || relPath?.startsWith(".specs\\")
+		
+		if ((isSentinelMode || isSpecMode || isSpecsPathFile) && relPath?.endsWith(".md")) {
+			console.log(`[WriteToFileTool.handlePartial] Skipping diff view for spec file: ${relPath}, isSpecsPathFile: ${isSpecsPathFile}`)
 			return
 		}
 
