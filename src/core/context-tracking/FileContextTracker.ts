@@ -259,6 +259,45 @@ export class FileContextTracker {
 		}
 	}
 
+	/**
+	 * Gets files that were @ mentioned by user but not yet read via read_file tool.
+	 * This is used to enforce that Spec Mode reads user's requirement files before creating requirements.md.
+	 * 
+	 * @returns Array of file paths that were mentioned but not read with read_tool
+	 */
+	async getMentionedButUnreadFiles(): Promise<string[]> {
+		try {
+			const metadata = await this.getTaskMetadata(this.taskId)
+			
+			// Collect all mentioned files
+			const mentionedFiles = new Set<string>()
+			// Collect all files that have been read via read_tool
+			const readFiles = new Set<string>()
+			
+			for (const entry of metadata.files_in_context) {
+				if (entry.record_source === "file_mentioned") {
+					mentionedFiles.add(entry.path)
+				}
+				if (entry.record_source === "read_tool") {
+					readFiles.add(entry.path)
+				}
+			}
+			
+			// Return files that were mentioned but not read
+			const unreadFiles: string[] = []
+			for (const filePath of mentionedFiles) {
+				if (!readFiles.has(filePath)) {
+					unreadFiles.push(filePath)
+				}
+			}
+			
+			return unreadFiles
+		} catch (error) {
+			console.error("Failed to get mentioned but unread files:", error)
+			return []
+		}
+	}
+
 	getAndClearCheckpointPossibleFile(): string[] {
 		const files = Array.from(this.checkpointPossibleFiles)
 		this.checkpointPossibleFiles.clear()

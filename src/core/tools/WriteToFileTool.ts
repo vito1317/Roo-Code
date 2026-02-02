@@ -120,17 +120,46 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			console.log(`[WriteToFileTool] Mode: ${state?.mode}, isSpecsPathFile: ${isSpecsPathFile}, isSentinelPlanFile: ${isSentinelPlanFile}, relPath: ${relPath}`)
 
 			if (isSentinelPlanFile) {
-				// Save directly without showing any diff view
+				// Note: No length validation - AI can write incrementally using append mode
+				
+				// Spec Mode: Support APPEND mode for incremental writing
+				// If content starts with <!-- APPEND -->, append to existing file
+				const APPEND_MARKER = "<!-- APPEND -->"
+				const isAppendMode = newContent.startsWith(APPEND_MARKER)
+				let contentToWrite = newContent
+				let isAppending = false
+				
+				// Resolve absolute path early for append logic
 				const absolutePath = path.resolve(task.cwd, relPath)
+				
+				if (isAppendMode) {
+					// Remove the marker from content
+					contentToWrite = newContent.slice(APPEND_MARKER.length).trimStart()
+					
+					// Check if file exists and append
+					try {
+						const existingContent = await fs.readFile(absolutePath, "utf-8")
+						contentToWrite = existingContent + "\n\n" + contentToWrite
+						isAppending = true
+						console.log(`[WriteToFileTool] Appending to ${relPath} (existing: ${existingContent.split("\n").length} lines, adding: ${contentToWrite.split("\n").length - existingContent.split("\n").length} lines)`)
+					} catch (e) {
+						// File doesn't exist, will create new
+						console.log(`[WriteToFileTool] Creating new file ${relPath} (append mode but file didn't exist)`)
+					}
+				}
+				
+				// Save directly without showing any diff view
 				await fs.mkdir(path.dirname(absolutePath), { recursive: true })
-				await fs.writeFile(absolutePath, newContent, "utf-8")
+				await fs.writeFile(absolutePath, contentToWrite, "utf-8")
 
 				// Track file and mark as edited
 				await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 				task.didEditFile = true
 
 				// Push tool result
-				const toolResultMessage = `✅ Created ${relPath}`
+				const toolResultMessage = isAppending 
+					? `✅ Appended to ${relPath} (total: ${contentToWrite.split("\\n").length} lines)`
+					: `✅ Created ${relPath}`
 				pushToolResult(toolResultMessage)
 
 				// Determine if this is a .specs file - use Spec Workflow Panel instead of Markdown Preview

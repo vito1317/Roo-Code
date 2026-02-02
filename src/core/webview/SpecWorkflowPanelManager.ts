@@ -1058,7 +1058,12 @@ export class SpecWorkflowPanelManager {
 				};
 				const filename = stepToFile[message.step];
 				if (filename) {
-					viewFile(filename, true);
+					// Special handling for tasks - show parsed task view instead of markdown
+					if (message.step === 'tasks') {
+						showTaskView();
+					} else {
+						viewFile(filename, true);
+					}
 				}
 			}
 		});
@@ -1113,8 +1118,13 @@ export class SpecWorkflowPanelManager {
 			cachedTasks = tasks || [];
 			console.log('[SpecWorkflowPanel] cachedTasks now:', cachedTasks.length);
 			
-			// Render tasks (only if we're in task view)
-			if (currentView === 'tasks') {
+			// Auto-switch to tasks view when tasks exist and tasks.md is complete
+			// This ensures task cards are shown instead of raw markdown
+			if (status.tasks && cachedTasks.length > 0) {
+				console.log('[SpecWorkflowPanel] Auto-switching to tasks view since tasks exist');
+				showTaskView();
+			} else if (currentView === 'tasks') {
+				// Only render tasks if we're already in task view
 				renderTasks();
 			}
 		}

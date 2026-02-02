@@ -78,16 +78,28 @@ ${statusIndicators[2]} Tasks         ${status.tasksExists ? "(.specs/tasks.md)" 
 
 ---
 
-## ⚠️ 重要規則 - DO NOT DELEGATE!
+## ⚠️ 重要規則
 
-**你正在 Spec Mode 中工作。你必須親自處理所有工作！**
+**你正在 Spec Mode 中工作。**
+
+${phase === "tasks" ? `
+### ✅ Phase 3 (Tasks) - 可以建立子任務
+
+在 Tasks 階段，你可以使用 \`new_task\` 工具為每個 TASK-XXX 建立獨立的子任務執行。
+
+- ✅ **允許使用 \`new_task\` 工具** 為每個任務建立獨立子任務
+- ✅ **依序建立子任務**：TASK-001 → TASK-002 → TASK-003...
+- ❌ **禁止直接執行任務**：你的職責是建立子任務，由子任務執行實際工作
+` : `
+### ❌ DO NOT DELEGATE!
 
 - ❌ **禁止使用 \`new_task\` 工具** 建立子任務或委派給其他模式
 - ❌ **禁止切換到 Architect / Code / Designer 模式** 來處理 spec 檔案
 - ✅ **你必須親自建立** \`.specs/requirements.md\`、\`.specs/design.md\`、\`.specs/tasks.md\`
 - ✅ **使用 \`write_to_file\` 工具** 直接建立這些檔案
 
-**原因**：Spec Mode 的目的是收集需求、設計架構、分解任務。這些都是你在 Spec Mode 中的職責，不應交給其他 agent。
+**原因**：Spec Mode 在 Phase 1-2 的目的是收集需求、設計架構、分解任務。這些都是你在 Spec Mode 中的職責，不應交給其他 agent。
+`}
 
 ---
 `
@@ -122,359 +134,50 @@ Otherwise, preserve the existing content!
 
 You are in the **Requirements Phase**. Create comprehensive, detailed requirements documentation.
 
----
+### 📌 Context
 
-### 🔴 第一步：完整讀取使用者提供的檔案！（極為重要！）
+When the user uses \`@filename\` to mention files, the file content is **already included in the conversation context**.
+Look for \`[read_file for 'xxx']\` blocks above - that's the user's file content.
 
-**如果使用者有提供任何檔案**（.pdf, .docx, .txt, .md 等），**必須完整讀取並提取所有內容！**
+### 🔄 MANDATORY: Process ALL Sections Iteratively
 
+**You are NOT done until you have processed EVERY section from the user's file!**
+
+Follow this exact workflow:
+
+**Step 1: First write - Create file with header and first section**
 \`\`\`
-# 範例：讀取使用者提供的檔案
-read_file("需求功能規格書-模具管理.pdf")
-read_file("user_requirements.docx")
-\`\`\`
-
-### ⚠️ 用戶檔案處理規則（必須嚴格遵守！）
-
-1. **完整讀取**：使用 \`read_file\` 讀取用戶提供的所有檔案
-2. **逐項提取**：將檔案中的每一個功能點、每一個需求都提取出來
-3. **不遺漏任何內容**：用戶檔案的每一個章節、每一個列表項目都必須在 requirements.md 中體現
-4. **保留原始結構**：如果用戶檔案有明確的章節結構，在 requirements.md 中也要反映
-5. **補充而非替代**：你的任務是「整理和補充」用戶的需求，不是「用自己的想法替代」
-
-### 🚫 絕對禁止
-
-- ❌ 只讀取部分內容
-- ❌ 用自己的理解「總結」用戶需求（必須保留細節）
-- ❌ 跳過用戶文件中的任何章節
-- ❌ 產出比用戶原文更短的 requirements.md
-
----
-
-### 📏 文件長度要求（必達！）
-
-**requirements.md 長度必須 >= 用戶提供檔案的 80%！**
-
-- 如果用戶檔案有 500 行，requirements.md 至少要有 400 行
-- 如果用戶檔案有 800 行，requirements.md 至少要有 640 行
-- 最低下限：800 字（即使用戶沒提供檔案）
-- 每個功能需求至少 50-100 字描述
-- 必須包含：背景、目標、功能、非功能需求、技術堆疊
-
----
-
-### 🎯 你的任務（按順序執行！）
-
-#### 步驟 1：列出工作區檔案
-
-\`\`\`
-# 首先列出工作區所有檔案，找出用戶的需求文件
-list_files(path=".", recursive=true)
+write_to_file(".specs/requirements.md", "# Project Title\\n\\n## 1. Overview\\n[content from user's first section]...")
 \`\`\`
 
-#### 步驟 2：讀取所有需求相關檔案
-
-找到以下類型的檔案後，必須用 \`read_file\` **完整讀取**：
-- 需求.md、需求規格書.*、requirements.*、spec.*
-- 功能規格書.*、PRD.*、用戶故事.*
-- 任何看起來像需求文件的檔案（.md, .docx, .pdf, .txt）
-
+**Step 2: Loop through remaining sections - Append each one**
 \`\`\`
-# 讀取找到的每個需求檔案
-read_file("需求.md")  # 如果存在
-read_file("需求功能規格書-xxx.md")  # 如果存在
-# ...讀取所有找到的需求相關檔案
+write_to_file(".specs/requirements.md", "<!-- APPEND -->\\n\\n## 2. [Next Section]\\n[expand content]...")
+write_to_file(".specs/requirements.md", "<!-- APPEND -->\\n\\n## 3. [Next Section]\\n[expand content]...")
+write_to_file(".specs/requirements.md", "<!-- APPEND -->\\n\\n## 4. [Next Section]\\n[expand content]...")
+... continue until ALL sections are done ...
 \`\`\`
 
-#### 步驟 3：建立 requirements.md
+### ⚠️ CRITICAL RULES
 
-將讀取到的所有內容整合並補充到 \`.specs/requirements.md\`
+1. **Count the sections** in user's file first
+2. **Process each section** one by one
+3. **APPEND after each section** - don't try to write everything at once
+4. **DO NOT say "complete"** until you have processed EVERY section
+5. **Your output must be LONGER** than user's input - expand, don't summarize
 
----
+### 📝 Example Workflow
 
-## 📝 requirements.md 完整範本
+If user's file has sections: 概述, 功能需求, 非功能需求, 技術堆疊, 驗收條件
 
-以下是每個章節的詳細格式和內容指引：
+You should make **5 separate write_to_file calls**:
+1. \`write_to_file(..., "# 標題\\n\\n## 概述\\n...")\` - Create file
+2. \`write_to_file(..., "<!-- APPEND -->\\n\\n## 功能需求\\n...")\` - Append
+3. \`write_to_file(..., "<!-- APPEND -->\\n\\n## 非功能需求\\n...")\` - Append
+4. \`write_to_file(..., "<!-- APPEND -->\\n\\n## 技術堆疊\\n...")\` - Append
+5. \`write_to_file(..., "<!-- APPEND -->\\n\\n## 驗收條件\\n...")\` - Append
 
-### 1. 專案概述 (Project Overview)
-
-\`\`\`markdown
-# [專案名稱] 需求規格書
-
-## 1. 專案概述
-
-### 1.1 專案背景
-[詳細說明 100-200 字：為什麼需要這個專案？目前面臨什麼問題？]
-
-範例：
-> 目前公司使用 Excel 管理客戶資料，隨著業務成長，手動管理已無法滿足需求。
-> 經常發生資料遺失、版本混亂、無法同時編輯等問題。需要一個專業的 CRM 系統
-> 來集中管理客戶資料、追蹤銷售機會、產生報表分析。
-
-### 1.2 專案目標
-- **主要目標**: [一句話描述核心目的]
-- **次要目標**: 
-  - [目標 1]
-  - [目標 2]
-
-### 1.3 目標使用者
-| 角色 | 描述 | 主要使用功能 |
-|------|------|--------------|
-| 管理員 | IT 人員，負責系統設定 | 使用者管理、權限設定 |
-| 業務人員 | 第一線銷售人員 | 客戶資料維護、商機追蹤 |
-| 主管 | 部門主管 | 報表查看、績效分析 |
-
-### 1.4 專案範圍
-**包含 (In Scope):**
-- [功能 1]
-- [功能 2]
-
-**不包含 (Out of Scope):**
-- [排除項目 1]
-- [排除項目 2]
-\`\`\`
-
----
-
-### 1.5 🔧 技術堆疊 (Tech Stack) - 必填！
-
-\`\`\`markdown
-## 2. 技術堆疊
-
-### 2.1 後端框架
-| 項目 | 選用技術 | 版本 | 說明 |
-|------|----------|------|------|
-| 框架 | Laravel / Django / Express / Spring | 12.x | 主要後端框架 |
-| 語言 | PHP / Python / JavaScript / Java | 8.3 / 3.12 / 18 | 程式語言版本 |
-| 資料庫 | MySQL / PostgreSQL / MongoDB | 8.0 | 資料儲存 |
-
-### 2.2 前端框架
-| 項目 | 選用技術 | 版本 | 說明 |
-|------|----------|------|------|
-| 框架 | Vue.js / React / Angular / Next.js | 3.5 / 18 | 前端框架 |
-| UI 庫 | Tailwind CSS / Bootstrap / Ant Design | 4.0 | 樣式框架 |
-| 狀態管理 | Pinia / Redux / Vuex | 2.0 | 狀態管理 |
-
-### 2.3 開發工具
-- **版本控制**: Git
-- **容器化**: Docker (開發/部署)
-- **CI/CD**: GitHub Actions / GitLab CI
-- **測試框架**: PHPUnit / Jest / Pytest
-
-### 2.4 部署環境
-- **伺服器**: AWS / GCP / Azure / 自建
-- **Web Server**: Nginx / Apache
-- **快取**: Redis
-\`\`\`
-
-**⚠️ 技術堆疊必須明確指定！** 這是後續 design.md 和 tasks.md 的基礎。
-
----
-
-### 2. 功能需求 (Functional Requirements)
-
-**每個功能都要包含完整描述：**
-
-\`\`\`markdown
-## 2. 功能需求
-
-### FR-001: 使用者登入功能
-
-**功能描述:**
-使用者可透過電子郵件和密碼登入系統。系統需支援記住登入狀態、
-密碼重設功能，並實作登入失敗次數限制以防止暴力破解攻擊。
-
-**使用者故事:**
-> 作為【業務人員】，我希望【使用公司 Email 快速登入系統】，
-> 以便【每天上班時能立即存取客戶資料開始工作】。
-
-**前置條件:**
-- 使用者已完成註冊
-- Email 已通過驗證
-
-**詳細流程:**
-1. 使用者開啟登入頁面
-2. 輸入 Email 和密碼
-3. 點擊「登入」按鈕
-4. 系統驗證憑證
-5. 驗證成功：導向儀表板
-6. 驗證失敗：顯示錯誤訊息，記錄失敗次數
-
-**輸入欄位:**
-| 欄位 | 類型 | 必填 | 驗證規則 | 說明 |
-|------|------|------|----------|------|
-| email | Email | 是 | 有效 Email 格式 | 使用者登入帳號 |
-| password | Password | 是 | 8-50 字元 | 使用者密碼 |
-| remember | Boolean | 否 | - | 記住我選項 |
-
-**輸出/回應:**
-- 成功：設定 Session/Token，導向儀表板
-- 失敗：顯示「帳號或密碼錯誤」（不透露具體哪個錯）
-- 鎖定：連續失敗 5 次，帳號鎖定 15 分鐘
-
-**例外處理:**
-- 帳號被停用：顯示「帳號已停用，請聯繫管理員」
-- 密碼過期：導向密碼變更頁面
-
-**驗收標準:**
-- [ ] 正確帳密可成功登入並導向儀表板
-- [ ] 錯誤帳密顯示統一錯誤訊息
-- [ ] 連續失敗 5 次後帳號鎖定 15 分鐘
-- [ ] 「記住我」功能可保持登入狀態 30 天
-- [ ] 密碼重設連結有效期限為 1 小時
-
-**優先級:** 🔴 High (核心功能)
-**預估複雜度:** Medium
-\`\`\`
-
----
-
-### 3. 非功能需求 (Non-Functional Requirements)
-
-\`\`\`markdown
-## 3. 非功能需求
-
-### 3.1 效能需求
-| 指標 | 要求 | 備註 |
-|------|------|------|
-| 頁面載入時間 | < 3 秒 | 首次載入 |
-| API 回應時間 | < 500ms | 95th percentile |
-| 同時在線使用者 | 500+ | 正常運作 |
-| 資料庫查詢 | < 100ms | 單筆查詢 |
-
-### 3.2 安全需求
-- **認證**: JWT Token + Refresh Token 機制
-- **授權**: RBAC 角色權限管理
-- **傳輸加密**: 全站 HTTPS (TLS 1.3)
-- **密碼存儲**: bcrypt 雜湊，cost factor >= 12
-- **敏感資料**: AES-256 加密
-- **日誌記錄**: 記錄所有登入、資料變更操作
-- **OWASP Top 10**: 防範 SQL Injection、XSS、CSRF
-
-### 3.3 可用性需求
-- **SLA**: 99.5% 正常運行時間
-- **備份**: 每日自動備份，保留 30 天
-- **災難復原**: RTO 4 小時，RPO 1 小時
-
-### 3.4 相容性需求
-- **瀏覽器**: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
-- **行動裝置**: iOS 14+, Android 10+ (響應式設計)
-- **螢幕解析度**: 最低 1280x720
-\`\`\`
-
----
-
-### 4. 資料需求 (Data Requirements)
-
-\`\`\`markdown
-## 4. 資料需求
-
-### 4.1 核心資料實體
-
-#### Customer (客戶)
-| 欄位 | 類型 | 必填 | 說明 |
-|------|------|------|------|
-| id | UUID | 系統 | 主鍵 |
-| name | String(100) | 是 | 客戶名稱 |
-| email | String(255) | 是 | 聯絡信箱 (唯一) |
-| phone | String(20) | 否 | 聯絡電話 |
-| company | String(100) | 否 | 公司名稱 |
-| status | Enum | 是 | active, inactive, blocked |
-| created_at | Datetime | 系統 | 建立時間 |
-| updated_at | Datetime | 系統 | 更新時間 |
-
-### 4.2 資料關係
-\\\`\\\`\\\`mermaid
-erDiagram
-    Customer ||--o{ Order : places
-    Customer ||--o{ Contact : has
-    Order ||--|{ OrderItem : contains
-    Product ||--o{ OrderItem : included_in
-\\\`\\\`\\\`
-
-### 4.3 資料驗證規則
-- Email: 必須符合 RFC 5322 格式
-- 電話: 台灣手機 09 開頭，10 碼
-- 金額: 正數，小數點後最多 2 位
-\`\`\`
-
----
-
-### 5. 整合需求 (Integration Requirements)
-
-\`\`\`markdown
-## 5. 外部系統整合
-
-### 5.1 Email 服務
-- **服務**: SendGrid / AWS SES
-- **用途**: 發送系統通知、密碼重設郵件
-- **API 格式**: REST JSON
-
-### 5.2 金流服務
-- **服務**: 綠界科技 ECPay
-- **用途**: 線上刷卡、ATM 付款
-- **回呼機制**: Webhook callback
-\`\`\`
-
----
-
-### 6. 使用者介面需求
-
-\`\`\`markdown
-## 6. UI/UX 需求
-
-### 6.1 頁面清單
-| 頁面 | 路由 | 說明 | 權限 |
-|------|------|------|------|
-| 登入頁 | /login | 使用者登入入口 | 公開 |
-| 儀表板 | /dashboard | 首頁數據總覽 | 登入後 |
-| 客戶列表 | /customers | 客戶資料管理 | 業務 |
-| 訂單管理 | /orders | 訂單查詢與處理 | 業務 |
-
-### 6.2 設計風格
-- **整體風格**: 現代簡約企業風
-- **主色調**: #3B82F6 (藍色系)
-- **字型**: Noto Sans TC / Inter
-- **間距**: 遵循 8px grid system
-\`\`\`
-
----
-
-### 🔍 技術環境偵測
-
-**請先分析專案目錄**，使用 \`list_files\` 工具識別：
-- **前端框架**: 查看 package.json (React, Vue, Angular, Next.js, Nuxt...)
-- **後端框架**: 查看 composer.json (Laravel), requirements.txt (Django, Flask), pom.xml (Spring)
-- **資料庫**: 查看 migrations、schema 檔案
-- **其他工具**: Docker, CI/CD 配置等
-
-將偵測到的技術堆疊記錄在文件中。
-
----
-
-### ⚠️ 重要原則
-
-1. **完整勝於簡潔**: 需求文件越詳細，後續開發越順利。不要怕文件太長！
-2. **自由發揮**: 範本僅供參考，你可以根據專案特性調整格式和內容
-3. **主動補充**: 根據你的專業判斷，補充使用者可能遺漏的需求
-4. **技術建議**: 如果發現更好的技術方案，主動提出建議
-5. **邊界條件**: 詳細說明異常情況和錯誤處理
-6. **驗收標準**: 每個功能都要有可測試的驗收條件
-
-### 🚀 開始前
-
-1. **如果使用者有提供檔案**（如 .pdf, .docx, .txt 等），**先使用 \`read_file\` 讀取這些檔案內容**
-2. **分析專案目錄結構**，了解現有技術堆疊
-3. 仔細閱讀使用者提供的需求描述
-4. 根據需求的複雜度，決定需要詢問哪些問題
-5. 按照範本格式（可自由調整）建立完整的 requirements.md
-6. 使用 \`write_to_file\` 工具建立檔案
-
-**⚠️ 重要：**
-- 使用者提供的檔案是最重要的需求來源，務必先閱讀！
-- **需求文件至少 500-1000 字**，確保足夠詳細完整
-- 可以使用 Mermaid 圖表來視覺化流程和關係
-- 技術堆疊（Tech Stack）必須明確指定版本號
+**Only after the 5th write can you say the requirements phase is complete.**
 `
 			)
 
