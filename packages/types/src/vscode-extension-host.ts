@@ -662,6 +662,7 @@ export interface WebviewMessage {
 		| "requestSkills"
 		| "createSkill"
 		| "deleteSkill"
+		| "moveSkill"
 		| "openSkillFile"
 		// Spec Mode messages
 		| "requestSpecsStatus"
@@ -708,8 +709,9 @@ export interface WebviewMessage {
 	timeout?: number
 	payload?: WebViewMessagePayload
 	source?: "global" | "project" | "built-in"
-	skillName?: string // For skill operations (createSkill, deleteSkill, openSkillFile)
-	skillMode?: string // For skill operations (mode restriction)
+	skillName?: string // For skill operations (createSkill, deleteSkill, moveSkill, openSkillFile)
+	skillMode?: string // For skill operations (current mode restriction)
+	newSkillMode?: string // For moveSkill (target mode)
 	skillDescription?: string // For createSkill (skill description)
 	requestId?: string
 	ids?: string[]
