@@ -289,8 +289,8 @@ export const AgentTopologyCanvas: React.FC<AgentTopologyCanvasProps> = ({
 						// Both are at col 4, so arrow goes straight down from CODE_REVIEW bottom to QA top
 						const centerX = from.x + NODE_WIDTH / 2
 						// Position arrow outside the nodes - from bottom of CODE_REVIEW to top of QA
-						const startY = from.y + NODE_HEIGHT - 25 // Bottom edge of CODE_REVIEW node
-						const endY = to.y - 30 // Top edge of QA node (adjusted for node y offset)
+						const startY = from.y + NODE_HEIGHT // Bottom edge of CODE_REVIEW node + gap
+						const endY = to.y - 5 // Top edge of QA node (adjusted for node y offset)
 						return (
 							<line
 								key="conn-4-5"

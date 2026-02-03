@@ -432,6 +432,22 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 								userFileTotalLines = totalUserLines
 								console.log(`[WriteToFileTool] FORCING APPEND - coverage too low!`)
 							}
+						} else {
+							// FALLBACK: No @mentioned files - use same minimum as GATE CHECK
+							// This ensures consistency between the coverage check and the design.md gate
+							const MIN_REQUIREMENTS_LINES = 100
+							const writtenLines = contentToWrite.split("\n").length
+							
+							console.log(`[WriteToFileTool] COVERAGE CHECK - no mentioned files, using fallback. Written: ${writtenLines} lines, minimum: ${MIN_REQUIREMENTS_LINES}`)
+							
+							if (writtenLines < MIN_REQUIREMENTS_LINES) {
+								shouldForceAppend = true
+								appendForceMessage = 
+									`⚠️ **INCOMPLETE: requirements.md only has ${writtenLines} lines (need at least ${MIN_REQUIREMENTS_LINES}).**\n\n` +
+									`**請繼續添加更多內容！**\n\n` +
+									`**使用 \`<!-- APPEND -->\` 前綴繼續寫入。**`
+								console.log(`[WriteToFileTool] FORCING APPEND - below minimum ${MIN_REQUIREMENTS_LINES} lines!`)
+							}
 						}
 					} catch (e) {
 						console.log(`[WriteToFileTool] Error checking line coverage: ${e}`)

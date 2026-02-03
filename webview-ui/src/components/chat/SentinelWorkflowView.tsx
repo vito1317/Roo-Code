@@ -662,43 +662,46 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 					</div>
 
 					{/* Pencil-Style Agent Status Indicators */}
-					<div style={{ display: "flex", gap: "12px", marginBottom: "12px" }}>
-						{/* Left: Asking Agent Status */}
-						<div
-							style={{
-								flex: 1,
-								padding: "10px 12px",
-								borderRadius: "8px",
-								background: "#0F172A",
-								border: `1px solid ${handoff ? (AGENT_COLORS[handoff.from] || "#3B82F6") : agentColor}`,
-							}}
-						>
-							<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-								<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-									<span style={{ fontSize: "12px" }}>{handoff ? "🟦" : "🔷"}</span>
-									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "11px", fontWeight: 600, color: handoff ? (AGENT_COLORS[handoff.from] || "#3B82F6") : agentColor }}>
-										{handoff?.from || currentAgent} Agent
-									</span>
+					<div style={{ display: "flex", gap: "12px", marginBottom: "12px", justifyContent: handoff ? "flex-start" : "center" }}>
+						{/* Show Asking Agent Status ONLY when there's a handoff (AI-to-AI) */}
+						{handoff && (
+							<div
+								style={{
+									flex: 1,
+									padding: "10px 12px",
+									borderRadius: "8px",
+									background: "#0F172A",
+									border: `1px solid ${AGENT_COLORS[handoff.from] || "#3B82F6"}`,
+								}}
+							>
+								<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+									<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+										<span style={{ fontSize: "12px" }}>🟦</span>
+										<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "11px", fontWeight: 600, color: AGENT_COLORS[handoff.from] || "#3B82F6" }}>
+											{handoff.from} Agent
+										</span>
+									</div>
+									<span style={{
+										padding: "2px 8px",
+										borderRadius: "100px",
+										background: "#F59E0B",
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "8px",
+										fontWeight: 700,
+										color: "#0A0F1C",
+									}}>ASKING</span>
 								</div>
-								<span style={{
-									padding: "2px 8px",
-									borderRadius: "100px",
-									background: "#F59E0B",
-									fontFamily: "'JetBrains Mono', monospace",
-									fontSize: "8px",
-									fontWeight: 700,
-									color: "#0A0F1C",
-								}}>ASKING</span>
+								<div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "8px", color: "#64748B", marginTop: "4px" }}>
+									State: WAITING_FOR_ANSWER
+								</div>
 							</div>
-							<div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "8px", color: "#64748B", marginTop: "4px" }}>
-								State: WAITING_FOR_ANSWER
-							</div>
-						</div>
+						)}
 						
-						{/* Right: Responding Agent Status */}
+						{/* Current Agent Status - always shown */}
 						<div
 							style={{
-								flex: 1,
+								flex: handoff ? 1 : "0 1 auto",
+								minWidth: handoff ? undefined : "200px",
 								padding: "10px 12px",
 								borderRadius: "8px",
 								background: "#0F172A",
@@ -715,21 +718,21 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 								<span style={{
 									padding: "2px 8px",
 									borderRadius: "100px",
-									background: "#10B981",
+									background: handoff ? "#10B981" : "#3B82F6",
 									fontFamily: "'JetBrains Mono', monospace",
 									fontSize: "8px",
 									fontWeight: 700,
 									color: "#0A0F1C",
-								}}>RESPONDING</span>
+								}}>{handoff ? "RESPONDING" : "ACTIVE"}</span>
 							</div>
 							<div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "8px", color: "#64748B", marginTop: "4px" }}>
-								State: ANSWERING_QUESTION
+								State: {handoff ? "ANSWERING_QUESTION" : "PROCESSING"}
 							</div>
 						</div>
 					</div>
 
 					{/* Pencil-Style Vertical Message Stack */}
-					<div ref={messagesContainerRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px", paddingRight: "4px" }}>
+					<div ref={messagesContainerRef} style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px", paddingRight: "4px" }}>
 						{/* Asking Agent Message Card */}
 						{handoff && handoff.summary && (
 							<div style={{
@@ -782,70 +785,7 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 							</div>
 						)}
 						
-						{/* Responding Agent Message Card */}
-						{activity && (
-							<div style={{
-								background: "#0F172A",
-								borderRadius: "10px",
-								border: `2px solid ${agentColor}`,
-								overflow: "hidden",
-							}}>
-								{/* Header */}
-								<div style={{
-									display: "flex",
-									justifyContent: "space-between",
-									alignItems: "center",
-									padding: "10px 14px",
-									background: `linear-gradient(135deg, ${agentColor}20, ${agentColor}10)`,
-									borderBottom: `1px solid ${agentColor}30`,
-								}}>
-									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", fontWeight: 600, color: agentColor }}>
-										{currentAgent}
-									</span>
-									<span style={{
-										padding: "3px 10px",
-										borderRadius: "6px",
-										background: "rgba(16, 185, 129, 0.2)",
-										fontFamily: "'JetBrains Mono', monospace",
-										fontSize: "9px",
-										fontWeight: 600,
-										color: "#10B981",
-									}}>response</span>
-								</div>
-								{/* Content */}
-								<div style={{ padding: "14px" }}>
-									<div style={{
-										fontFamily: "'Inter', sans-serif",
-										fontSize: "12px",
-										color: agentColor,
-										marginBottom: "8px",
-										fontWeight: 600,
-									}}>💬 {isStreaming ? "正在回覆..." : "回覆"}</div>
-									<div style={{
-										fontFamily: "'Inter', sans-serif",
-										fontSize: "12px",
-										color: "#E2E8F0",
-										lineHeight: "1.7",
-										whiteSpace: "pre-wrap",
-										maxHeight: "200px",
-										overflowY: "auto",
-									}}>
-										{streamingContent || activity}
-										{isStreaming && (
-											<span style={{
-												display: "inline-block",
-												width: "2px",
-												height: "14px",
-												background: agentColor,
-												marginLeft: "2px",
-												animation: "pulse 0.5s ease-in-out infinite",
-											}} />
-										)}
-									</div>
-								</div>
-							</div>
-						)}
-						{/* API Request Loading Indicator - shows when streaming but no content yet */}
+					{/* API Request Loading Indicator - shows when streaming but no content yet */}
 						{isStreaming && !streamingContent && (
 							<div
 								style={{
@@ -1019,6 +959,7 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 						return (
 							<div key={msg.ts || idx} style={{
 								display: "flex",
+								flexDirection: "column",
 								gap: "12px",
 								marginBottom: "12px",
 							}}>
