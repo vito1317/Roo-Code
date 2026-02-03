@@ -668,7 +668,18 @@ export class SentinelStateMachine {
 				const useUIDesignCanvas = isTruthy(plan?.useUIDesignCanvas) || isTruthy(plan?.use_ui_design_canvas) ||
 					isTruthy(rootData.useUIDesignCanvas) || isTruthy(rootData.use_ui_design_canvas)
 
-				console.log("[SentinelFSM] Design flags (after isTruthy) - needsDesign:", needsDesign, "hasUI:", hasUI, "useFigma:", useFigma, "usePenpot:", usePenpot, "useUIDesignCanvas:", useUIDesignCanvas)
+				// CRITICAL: Check if hasUI is EXPLICITLY set to false
+				// This allows tasks like testing, backend work, etc. to skip Designer completely
+				const hasUIExplicitlyFalse = (plan?.hasUI === false || plan?.has_ui === false || plan?.hasUi === false ||
+					rootData.hasUI === false || rootData.has_ui === false || rootData.hasUi === false)
+
+				console.log("[SentinelFSM] Design flags (after isTruthy) - needsDesign:", needsDesign, "hasUI:", hasUI, "useFigma:", useFigma, "usePenpot:", usePenpot, "useUIDesignCanvas:", useUIDesignCanvas, "hasUIExplicitlyFalse:", hasUIExplicitlyFalse)
+
+				// If hasUI is explicitly set to false, skip Designer entirely
+				if (hasUIExplicitlyFalse) {
+					console.log("[SentinelFSM] hasUI explicitly set to false - skipping Designer, routing directly to Builder")
+					return AgentState.BUILDER
+				}
 
 				if (needsDesign || hasUI || useFigma || usePenpot || useUIDesignCanvas) {
 					console.log("[SentinelFSM] UI design requested - routing to Designer for mockup generation")

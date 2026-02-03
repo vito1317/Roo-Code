@@ -293,6 +293,26 @@ export class SpecWorkflowPanelManager {
 				status,
 				tasks,
 			})
+			
+			// IMPORTANT: Also send updated file contents to refresh webview cache
+			// This ensures the panel shows the latest content, not stale cached content
+			const specFiles = ["requirements.md", "design.md", "tasks.md"]
+			for (const filename of specFiles) {
+				const filePath = path.join(specsDir, filename)
+				if (fs.existsSync(filePath)) {
+					try {
+						const content = fs.readFileSync(filePath, "utf-8")
+						await this.panel.webview.postMessage({
+							type: "specFileContent",
+							file: filename,
+							content: content,
+						})
+						console.log(`[SpecWorkflowPanel] Sent updated content for ${filename} (${content.split("\n").length} lines)`)
+					} catch (e) {
+						console.warn(`[SpecWorkflowPanel] Could not read ${filename}:`, e)
+					}
+				}
+			}
 		}
 
 		// Also notify the Chat Sidebar to keep it in sync

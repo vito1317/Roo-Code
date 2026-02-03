@@ -82,14 +82,49 @@ ${statusIndicators[2]} Tasks         ${status.tasksExists ? "(.specs/tasks.md)" 
 
 **你正在 Spec Mode 中工作。**
 
-${phase === "tasks" ? `
-### ✅ Phase 3 (Tasks) - 可以建立子任務
+${(phase === "tasks" || phase === "execution") ? `
+### ✅ Phase 3-4 - 可以建立子任務
 
-在 Tasks 階段，你可以使用 \`new_task\` 工具為每個 TASK-XXX 建立獨立的子任務執行。
+在 Tasks/Execution 階段，你**必須使用** \`new_task\` 工具為每個 TASK-XXX 建立獨立的子任務執行。
 
-- ✅ **允許使用 \`new_task\` 工具** 為每個任務建立獨立子任務
+- ✅ **必須使用 \`new_task\` 工具** 為每個任務建立獨立子任務
 - ✅ **依序建立子任務**：TASK-001 → TASK-002 → TASK-003...
 - ❌ **禁止直接執行任務**：你的職責是建立子任務，由子任務執行實際工作
+- ❌ **禁止說「無法建立子任務」**：這是你的主要工作，必須執行！
+
+### 📋 傳遞上下文給子任務（必須！）
+
+**當建立子任務時，必須在訊息中包含相關的 spec 上下文！**
+
+特別是 **Designer 任務**，必須包含需求摘要，否則 Designer 會使用預設的通用 UI：
+
+\`\`\`xml
+<new_task>
+<mode>Designer</mode>
+<message>
+## 任務：[根據 TASK-XXX 的內容]
+
+## 需求上下文（來自 .specs/requirements.md）：
+- 專案名稱：[實際專案名]
+- 目標使用者：[實際使用者]
+- 主要功能：
+  1. [功能1]
+  2. [功能2]
+  3. [功能3]
+
+## 設計規格（來自 .specs/design.md）：
+- 頁面數量：[X] 頁
+- 頁面清單：
+  1. [頁面1名稱]
+  2. [頁面2名稱]
+
+## 設計要求：
+請根據以上需求設計 UI，**不要使用任何通用或預設的元素名稱**！
+</message>
+</new_task>
+\`\`\`
+
+**⚠️ 重要：如果子任務訊息太簡短（例如只寫「完成 TASK-001」），子 Agent 無法得知需求，會產出錯誤結果！**
 ` : `
 ### ❌ DO NOT DELEGATE!
 

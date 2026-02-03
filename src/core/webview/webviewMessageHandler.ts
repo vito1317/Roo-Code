@@ -65,6 +65,7 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { SpecWorkflowPanelManager } from "./SpecWorkflowPanelManager"
+import { SpecWorkflowManager } from "../specs/SpecWorkflowManager"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -3976,6 +3977,9 @@ ${taskList}
 
 		case "requestSpecTasks": {
 			// Read and parse tasks from tasks.md
+			// Supports both formats:
+			// 1. Header format: "### TASK-001: Title (complexity: low)"
+			// 2. Checkbox format: "- [x] Task title"
 			try {
 				const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
 				if (workspacePath) {
@@ -3983,27 +3987,78 @@ ${taskList}
 					const tasksPath = path.join(workspacePath, ".specs", "tasks.md")
 					if (fsSync.existsSync(tasksPath)) {
 						const content = fsSync.readFileSync(tasksPath, "utf-8")
-						// Parse tasks from markdown content
 						const tasks: Array<{ id: string; title: string; description?: string; status: "pending" | "in-progress" | "done"; complexity?: string }> = []
-						const lines = content.split("\n")
-						let taskCounter = 0
-						for (const line of lines) {
-							// Match task lines like "- [x] Task title" or "- [ ] Task title (complexity: high)"
-							const match = line.match(/^[\s-]*\[([ x\/])\]\s*(.+)$/i)
-							if (match) {
-								taskCounter++
-								const statusChar = match[1].toLowerCase()
-								const taskText = match[2].trim()
-								const complexityMatch = taskText.match(/\(complexity:\s*(low|medium|high)\)/i)
-
+						
+						// First try to parse header format (### TASK-XXX: Title)
+						const taskHeaderRegex = /^#{2,3}\s+(TASK-\d+)[:\s]+(.+?)(?:\s*\(complexity:\s*(low|medium|high)\))?$/gim
+						const taskMatches = [...content.matchAll(taskHeaderRegex)]
+						
+						if (taskMatches.length > 0) {
+							// Parse header format - determine completion by checking acceptance criteria
+							for (const match of taskMatches) {
+								const taskId = match[1]
+								const title = match[2].replace(/\s*\(complexity:\s*(low|medium|high)\)/i, "").trim()
+								const complexity = match[3] || "medium"
+								
+								// Find task section to check acceptance criteria
+								const taskStartIndex = content.indexOf(match[0])
+								const nextTaskMatch = content.slice(taskStartIndex + match[0].length).match(/^#{2,3}\s+TASK-\d+[:\s]/mi)
+								const taskEndIndex = nextTaskMatch 
+									? taskStartIndex + match[0].length + content.slice(taskStartIndex + match[0].length).indexOf(nextTaskMatch[0])
+									: content.length
+								
+								const taskSection = content.slice(taskStartIndex, taskEndIndex)
+								
+								// Check acceptance criteria checkboxes in task section
+								// Match [x], [X], [✓], [✔], [☑] as completed, [/] as in-progress, [ ] as pending
+								const checkboxes = [...taskSection.matchAll(/^[\s-]*\[([^\]]*)\]/gm)]
+								const totalCheckboxes = checkboxes.length
+								// Check for completed: x, X, ✓, ✔, ☑, or any non-space/non-slash character
+								const completedCheckboxes = checkboxes.filter(cb => {
+									const char = cb[1].trim()
+									return char !== "" && char !== "/" && char !== " "
+								}).length
+								const inProgressCheckboxes = checkboxes.filter(cb => cb[1].trim() === "/").length
+								
+								// Determine status based on checkbox completion
+								let status: "pending" | "in-progress" | "done" = "pending"
+								if (totalCheckboxes > 0) {
+									if (completedCheckboxes === totalCheckboxes) {
+										status = "done"
+									} else if (completedCheckboxes > 0 || inProgressCheckboxes > 0) {
+										status = "in-progress"
+									}
+								}
+								
 								tasks.push({
-									id: `task-${taskCounter}`,
-									title: taskText.replace(/\(complexity:\s*(low|medium|high)\)/i, "").trim(),
-									status: statusChar === "x" ? "done" : statusChar === "/" ? "in-progress" : "pending",
-									complexity: complexityMatch ? complexityMatch[1] : undefined,
+									id: taskId,
+									title,
+									status,
+									complexity,
 								})
 							}
+						} else {
+							// Fallback: Parse checkbox format (- [x] Task title)
+							const lines = content.split("\n")
+							let taskCounter = 0
+							for (const line of lines) {
+								const match = line.match(/^[\s-]*\[([ x\/])\]\s*(.+)$/i)
+								if (match) {
+									taskCounter++
+									const statusChar = match[1].toLowerCase()
+									const taskText = match[2].trim()
+									const complexityMatch = taskText.match(/\(complexity:\s*(low|medium|high)\)/i)
+
+									tasks.push({
+										id: `task-${taskCounter}`,
+										title: taskText.replace(/\(complexity:\s*(low|medium|high)\)/i, "").trim(),
+										status: statusChar === "x" ? "done" : statusChar === "/" ? "in-progress" : "pending",
+										complexity: complexityMatch ? complexityMatch[1] : undefined,
+									})
+								}
+							}
 						}
+						
 						await provider.postMessageToWebview({
 							type: "specTasksList",
 							tasks,
@@ -4027,8 +4082,8 @@ ${taskList}
 
 
 		case "startSpecTask": {
-			// Create a new sub-task for executing this specific spec task
-			// with dynamic mode routing based on task type
+			// Execute this specific spec task using SpecWorkflowManager
+			// Routes to sentinel-architect mode for proper multi-agent workflow
 			const taskId = message.taskId
 			if (!taskId) break
 			
@@ -4061,120 +4116,26 @@ ${taskList}
 					break
 				}
 				
-				// Extract task section content (from task header to next task header or end)
+				// Extract task title from the match
+				const taskTitle = taskMatch[1].replace(/\s*\(complexity:\s*(low|medium|high)\)/i, "").trim()
+				
+				// Extract task section content for description
 				const taskStartIndex = tasksContent.indexOf(taskMatch[0])
 				const nextTaskMatch = tasksContent.slice(taskStartIndex + taskMatch[0].length).match(/^#{2,3}\s+TASK-\d+[:\s]/mi)
 				const taskEndIndex = nextTaskMatch 
 					? taskStartIndex + taskMatch[0].length + tasksContent.slice(taskStartIndex + taskMatch[0].length).indexOf(nextTaskMatch[0])
 					: tasksContent.length
 				
-				const taskSection = tasksContent.slice(taskStartIndex, taskEndIndex).trim()
+				const taskDescription = tasksContent.slice(taskStartIndex, taskEndIndex).trim()
 				
-				// ========== DYNAMIC MODE ROUTING ==========
-				// Detect task type from content keywords
-				const taskContentLower = taskSection.toLowerCase()
+				console.log(`[startSpecTask] Executing task ${taskId} via SpecWorkflowManager.startIndividualTask`)
 				
-				// Analysis/Design keywords (routes to Architect mode)
-				const analysisKeywords = [
-					"分析", "規劃", "設計", "架構", "研究", "評估",
-					"analyze", "analyse", "plan", "planning", "design", "architecture",
-					"research", "evaluate", "review", "assess", "study", "investigate"
-				]
-				
-				// Implementation keywords (routes to Code mode)
-				const implementKeywords = [
-					"實作", "建立", "創建", "開發", "撰寫", "編寫", "修改", "新增", "刪除", "修復",
-					"implement", "create", "build", "develop", "write", "code", "coding",
-					"modify", "add", "delete", "fix", "refactor", "update"
-				]
-				
-				// Testing keywords (routes to Code mode with QA focus)
-				const testingKeywords = [
-					"測試", "驗證", "檢驗", "單元測試",
-					"test", "testing", "verify", "validate", "qa", "unit test", "integration test"
-				]
-				
-				// Determine task type
-				let targetMode = "code"  // Default to code mode
-				let modeDescription = "實作模式 (Code)"
-				
-				const hasAnalysisKeywords = analysisKeywords.some(kw => taskContentLower.includes(kw))
-				const hasImplementKeywords = implementKeywords.some(kw => taskContentLower.includes(kw))
-				const hasTestingKeywords = testingKeywords.some(kw => taskContentLower.includes(kw))
-				
-				// Priority: If task mentions analysis/design AND NOT implementation, use Architect
-				if (hasAnalysisKeywords && !hasImplementKeywords) {
-					targetMode = "architect"
-					modeDescription = "架構師模式 (Architect)"
-				} else if (hasTestingKeywords && !hasImplementKeywords) {
-					targetMode = "code"  // Use code mode but add testing focus
-					modeDescription = "實作模式 (Code) - 測試導向"
-				}
-				// Otherwise default to code mode for implementation
-				
-				console.log(`[startSpecTask] Task ${taskId} detected as type: ${targetMode}, keywords: analysis=${hasAnalysisKeywords}, implement=${hasImplementKeywords}, testing=${hasTestingKeywords}`)
-				
-				// Switch to the detected mode
-				await provider.setMode(targetMode)
-				
-				// Build mode-specific prompt with dynamic instructions
-				const modeInstructions = targetMode === "architect" 
-					? `## 📐 架構師模式啟動
-
-你現在以 **架構師 (Architect)** 角色執行此任務。
-專注於：分析、規劃、設計架構，產出文件而非直接編碼。`
-					: `## 💻 實作模式啟動
-
-你現在以 **開發者 (Code)** 角色執行此任務。
-專注於：撰寫程式碼、創建檔案、實作功能。`
-				
-				const subTaskPrompt = `# 🎯 建立子任務執行 Spec 任務
-
-**偵測到的任務類型**: ${modeDescription}
-
-${modeInstructions}
-
----
-
-## 任務內容
-
-${taskSection}
-
----
-
-## 🔴 執行指示
-
-**請使用 \`new_task\` 工具建立一個子任務來執行此任務。**
-
-子任務提示詞應包含：
-1. 任務描述：${taskId} 的完整內容
-2. 執行模式：${targetMode === "architect" ? "分析並產出設計文件" : "創建或修改必要的檔案"}
-3. 驗證標準：確保符合驗收標準
-4. 完成後更新 tasks.md 將此任務標記為完成
-
-**不要直接執行這個任務，請用 new_task 建立子任務！**`
-
-				// Switch to Spec mode first (to handle sub-task creation)
-				await provider.setMode("spec")
-				
-				// Create new chat and send prompt to Spec Mode
-				await provider.postMessageToWebview({ type: "invoke", invoke: "newChat" })
-				
-				// Wait for new chat to initialize
-				await new Promise(resolve => setTimeout(resolve, 300))
-				
-				// Send the sub-task creation instruction
-				await provider.postMessageToWebview({ 
-					type: "invoke", 
-					invoke: "sendMessage",
-					text: subTaskPrompt
-				})
-				
-				console.log(`[startSpecTask] Sent sub-task creation instruction for ${taskId} to Spec Mode`)
+				// Use SpecWorkflowManager to start the task with sentinel-architect mode
+				await SpecWorkflowManager.startIndividualTask(provider, taskId, taskTitle, taskDescription)
 				
 			} catch (error) {
-				console.error("[startSpecTask] Error creating sub-task:", error)
-				vscode.window.showErrorMessage(`Failed to create sub-task: ${error instanceof Error ? error.message : String(error)}`)
+				console.error("[startSpecTask] Error executing task:", error)
+				vscode.window.showErrorMessage(`Failed to execute task: ${error instanceof Error ? error.message : String(error)}`)
 			}
 			break
 		}

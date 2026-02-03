@@ -137,7 +137,7 @@ export class SpecWorkflowManager {
 		taskTitle: string,
 		taskDescription?: string
 	): Promise<void> {
-		const prompt = `# 🚀 執行任務: ${taskId}
+		const prompt = `# 🚀 Sentinel 工作流程 (TDD) - 執行任務: ${taskId}
 
 ## 任務資訊
 
@@ -145,30 +145,67 @@ export class SpecWorkflowManager {
 **任務標題:** ${taskTitle}
 ${taskDescription ? `**任務描述:** ${taskDescription}` : ""}
 
-## 你的任務
+## 你的角色: Sentinel Architect
 
-作為 **Architect**，請：
+你是 **Sentinel 多代理工作流程** 的 Architect。你的任務是規劃，然後交給 Builder 實作。
 
-1. **閱讀 Spec 檔案** 了解專案背景
-   - \`.specs/requirements.md\` - 需求規格
-   - \`.specs/design.md\` - 系統設計
-   - \`.specs/tasks.md\` - 完整任務清單
+---
 
-2. **聚焦於此任務 (${taskId})**
-   - 分析此任務的具體實作步驟
-   - 確認技術選型和架構符合設計文件
-   - 列出需要建立或修改的檔案
+## 第一步：閱讀 Spec 檔案
 
-3. **建立實作計畫**
-   - 提供詳細的實作步驟
-   - 說明潛在風險和注意事項
-   - 完成後更新 tasks.md 中此任務的狀態為 \`[x]\`
+讀取以下檔案了解專案背景：
+- \`.specs/requirements.md\` - 需求規格
+- \`.specs/design.md\` - 系統設計
+- \`.specs/tasks.md\` - 完整任務清單 (含測試案例)
 
-請開始分析並規劃 ${taskId}！`
+---
+
+## 第二步：分析任務 (${taskId})
+
+- 分析此任務的具體實作步驟
+- **特別注意任務中的「測試案例」區塊**
+- 確認技術選型和架構符合設計文件
+- 列出需要建立或修改的檔案
+
+---
+
+## 第三步：建立 plan.md (TDD 模式) 並交給 Builder
+
+在 plan.md 中明確指示 Builder 使用 **TDD 開發流程**：
+
+1. **Red** - 先寫測試案例 (依據任務中的測試案例區塊)
+2. **Green** - 執行測試確認失敗，然後實作程式碼使測試通過
+3. **Refactor** - 重構程式碼，保持測試通過
+
+建立 \`plan.md\` 後，**使用 handoff_context 工具** 將任務交給 Builder：
+
+\`\`\`xml
+<handoff_context>
+<notes>任務 ${taskId} 規劃完成。請使用 TDD 模式：先寫測試，再實作。</notes>
+<context_json>{
+  "architectPlan": true,
+  "taskId": "${taskId}",
+  "taskTitle": "${taskTitle}",
+  "hasUI": false,
+  "tddMode": true
+}</context_json>
+</handoff_context>
+\`\`\`
+
+---
+
+## ⚠️ 重要提醒
+
+1. **使用 handoff_context** - 不要用 switch_mode 或 new_task
+2. **不要直接寫程式碼** - 這是 Builder 的工作
+3. **TDD 模式** - 在 plan.md 中明確指示 Builder 先寫測試
+4. **完成後更新 tasks.md** - 將此任務狀態改為 \`[x]\`
+
+開始執行！`
 
 		try {
-			// Switch to Architect mode (custom mode, not built-in)
-			await provider.setMode("architect")
+			// Switch to Sentinel Architect mode for multi-agent workflow
+			await provider.setMode("sentinel-architect")
 			
 			// Create new task with the task-specific prompt
 			await provider.createTask(prompt, [])

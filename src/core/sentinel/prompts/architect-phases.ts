@@ -53,33 +53,31 @@ If the implementation has a visual UI component, you MAY launch the browser to v
 </browser_action>
 \`\`\`
 
-And extract the DOM structure to verify layout:
-\`\`\`xml
-<browser_action>
-<action>dom_extract</action>
-</browser_action>
-\`\`\`
-
 **REVIEW CHECKLIST:**
 - [ ] Implementation matches the plan requirements
 - [ ] Code logic is correct and handles edge cases
-- [ ] UI layout is correct (if applicable, can verify via code or browser)
+- [ ] UI layout is correct (if applicable)
 - [ ] Error handling is appropriate
-- [ ] Code follows project conventions
 
-🛑 **REJECT if:**
-- Core functionality is broken
-- Implementation doesn't match requirements
-- Critical issues found in code review
+**DECISION - USE handoff_context:**
 
-✅ **APPROVE if:**
-- Implementation meets requirements
-- Code quality is acceptable
-- No critical issues found
+✅ **APPROVE** - Use handoff_context with codeReviewPassed: true:
+\`\`\`xml
+<handoff_context>
+<notes>Code review passed. Implementation meets requirements.</notes>
+<context_json>{"codeReviewPassed": true, "status": "approved"}</context_json>
+</handoff_context>
+\`\`\`
 
-**Decision:**
-- REJECT: Return to Builder with specific issues to fix
-- APPROVE: Use \`attempt_completion\` to hand off to QA for testing`,
+❌ **REJECT** - Use handoff_context with codeReviewPassed: false:
+\`\`\`xml
+<handoff_context>
+<notes>Code review failed. Issues found that need fixing.</notes>
+<context_json>{"codeReviewPassed": false, "status": "rejected", "issues": ["issue 1", "issue 2"]}</context_json>
+</handoff_context>
+\`\`\`
+
+⚠️ **IMPORTANT:** Always use handoff_context to complete this phase!`,
 
 	// Phase 3: Test review after QA returns
 	testReview: `**PHASE 3: TEST REVIEW** (Current Phase)
@@ -92,11 +90,25 @@ QA has completed testing. Your task is to review the test results.
 - [ ] Error handling is tested
 - [ ] Test results show all tests passing
 
-**Decision:**
-- If APPROVED: Use \`attempt_completion\` with \`architectReviewTests.approved: true\` to proceed to Security
-- If REJECTED: Use \`attempt_completion\` with \`architectReviewTests.approved: false\` to return **directly to Builder** with issues to fix
-  - Include specific details about what needs to be fixed
-  - The issues will be passed directly to Builder without re-planning`,
+**DECISION - USE handoff_context:**
+
+✅ **APPROVE** - Proceed to Security:
+\`\`\`xml
+<handoff_context>
+<notes>Test review passed. All tests are passing.</notes>
+<context_json>{"testReviewPassed": true, "status": "approved"}</context_json>
+</handoff_context>
+\`\`\`
+
+❌ **REJECT** - Return to Builder:
+\`\`\`xml
+<handoff_context>
+<notes>Test review failed. Issues need fixing.</notes>
+<context_json>{"testReviewPassed": false, "status": "rejected", "issues": ["describe issues"]}</context_json>
+</handoff_context>
+\`\`\`
+
+⚠️ **IMPORTANT:** Always use handoff_context to complete this phase!`,
 
 	// Phase 4: Final review after Sentinel Security returns
 	finalReview: `**PHASE 4: FINAL REVIEW** (Current Phase)
@@ -115,9 +127,16 @@ Security audit is complete. Your task is to make the final decision.
 • Test results and coverage
 • Security review status
 
-**Decision:**
-- If APPROVED: Use \`attempt_completion\` with final approval and summary
-- If REJECTED: Return to appropriate agent with issues`,
+**DECISION - USE handoff_context to complete:**
+
+\`\`\`xml
+<handoff_context>
+<notes>Final review complete. Workflow approved.</notes>
+<context_json>{"finalReviewPassed": true, "status": "approved", "summary": "Brief summary here"}</context_json>
+</handoff_context>
+\`\`\`
+
+⚠️ **IMPORTANT:** Use handoff_context to complete the workflow!`,
 }
 
 export const BUILDER_PROMPTS = {
@@ -125,10 +144,8 @@ export const BUILDER_PROMPTS = {
 
 You have received the Architect's plan. Your task is to implement it.
 
-**📋 TASK TRACKING - USE update_todo_list:**
-1. At the START: Parse the plan and create todos
-2. As you complete each task, UPDATE the list
-3. Mark items: [x] = done, [/] = in progress, [ ] = pending
+**📋 TASK TRACKING (optional):**
+You may use update_todo_list to track progress, but it's not required.
 
 **Implementation Guidelines:**
 - Follow existing code patterns

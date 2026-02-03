@@ -1,345 +1,274 @@
-# Roo Code 完整工作流程範例
+# Roo Code 完整整合流程圖
 
-> **範例**: 使用者輸入「幫我建立一個登入頁面」
+> 範例：「幫我建立一個登入頁面」
+> Spec Mode + Sentinel Multi-Agent + UIDesignCanvas 完整流程
 
 ---
 
-## 🔄 完整端到端流程圖
+## 🔄 完整整合序列圖
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as 👤 使用者
-    participant UI as 💬 Chat UI
-    participant FSM as 🔄 StateMachine
-    participant ARCH as 🟦 Architect
-    participant DES as 🎨 Designer
-    participant MCP as 🔌 McpHub
-    participant FW as 📦 figma-write
-    participant WS as 🌉 WebSocket
-    participant PLG as 🧩 Plugin
-    participant FIG as 🎨 Figma
-    participant BLD as 🟩 Builder
-    participant QA as 🟨 QA
-    participant BRWS as 🌐 Browser
-    participant SEC as 🟥 Sentinel
+    participant U as User
+    participant SP as SpecMode
+    participant CP as ContextProvider
+    participant FS as .specs/
+    participant WF as WorkflowManager
+    participant SM as StateMachine
+    participant AR as Architect
+    participant DE as Designer
+    participant MCP as McpHub
+    participant UDC as UIDesignCanvas
+    participant BL as Builder
+    participant QA as QA
+    participant SE as Sentinel
 
+    %% ========== SPEC MODE PHASE 1 ==========
     rect rgb(230, 245, 255)
-        Note over U,SEC: === 階段 1：使用者輸入 ===
-        U->>UI: 「幫我建立一個登入頁面」
-        UI->>FSM: 啟動任務
-        FSM->>FSM: setState(IDLE → ARCHITECT)
+        Note over U,SE: Phase 1 Requirements
+        U->>SP: /spec 幫我建立登入頁面
+        SP->>CP: checkSpecFilesStatus
+        CP->>FS: check .specs/ dir
+        FS-->>CP: requirementsExists=false
+        CP->>CP: determineCurrentPhase => requirements
+        CP-->>SP: inject Phase1 Prompt
+
+        SP->>SP: analyze user input
+        Note right of SP: 識別功能需求<br/>帳密登入 OAuth
+
+        loop each Section
+            SP->>FS: write_to_file APPEND
+        end
+
+        SP->>FS: complete requirements.md
+        SP->>WF: handleSpecFileCreated
+        WF->>U: Continue to Design?
+        U-->>WF: Continue
     end
 
-    rect rgb(230, 255, 240)
-        Note over U,SEC: === 階段 2：Architect 規劃 ===
-        FSM->>ARCH: 開始規劃
-        ARCH->>ARCH: 分析需求
-        Note right of ARCH: 判斷需要 UI 設計<br/>needsDesign = true
-        ARCH->>ARCH: 生成 architectPlan
-        Note right of ARCH: - 登入表單設計<br/>- 使用者認證 API<br/>- 錯誤處理邏輯
-        ARCH->>FSM: handoff(designSpecs)
-        FSM->>FSM: setState(ARCHITECT → DESIGNER)
-    end
-
+    %% ========== SPEC MODE PHASE 2 ==========
     rect rgb(255, 240, 245)
-        Note over U,SEC: === 階段 3：Designer 設計 UI ===
-        FSM->>DES: 開始設計
-        
-        Note over DES,FIG: --- 3.1 創建 Frame ---
-        DES->>MCP: use_mcp_tool("figma-write", "create_frame", {name:"Login", w:400, h:600})
-        MCP->>FW: callTool()
-        FW->>WS: sendToPlugin("create_frame", args)
-        WS->>PLG: ws.send({action, args})
-        PLG->>FIG: figma.createFrame()
-        FIG-->>PLG: frameId: "123:456"
-        PLG-->>WS: {ok:true, nodeId:"123:456"}
-        WS-->>FW: resolve(result)
-        FW-->>MCP: toolResult
-        MCP-->>DES: nodeId="123:456"
+        Note over U,SE: Phase 2 Design
+        WF->>SP: createSpecModeTask designPrompt
+        SP->>CP: checkSpecFilesStatus
+        CP-->>SP: requirementsExists=true designExists=false
+        CP->>CP: determineCurrentPhase => design
 
-        Note over DES,FIG: --- 3.2 添加標題文字 ---
-        DES->>MCP: use_mcp_tool("figma-write", "add_text", {content:"登入", fontSize:24})
-        MCP->>FW: callTool()
-        FW->>WS: sendToPlugin("add_text", args)
-        WS->>PLG: ws.send({action, args})
-        PLG->>FIG: figma.createText()
-        FIG-->>PLG: textId: "123:789"
-        PLG-->>WS: {ok:true, nodeId:"123:789"}
-        WS-->>FW: resolve(result)
-        FW-->>MCP: toolResult
-        MCP-->>DES: nodeId="123:789"
+        SP->>FS: read_file requirements.md
+        FS-->>SP: requirements content
 
-        Note over DES,FIG: --- 3.3 創建輸入框 ---
-        DES->>MCP: use_mcp_tool("figma-write", "create_rectangle", {w:320, h:48})
-        MCP->>FW: callTool()
-        FW->>WS: sendToPlugin("create_rectangle", args)
-        WS->>PLG: ws.send()
-        PLG->>FIG: figma.createRectangle()
-        FIG-->>PLG: rectId
-        PLG-->>WS: result
-        WS-->>FW: resolve
-        FW-->>MCP: toolResult
-        MCP-->>DES: nodeId
+        SP->>SP: create system design
+        Note right of SP: 系統架構圖<br/>ER Diagram<br/>API 設計<br/>UI 結構
 
-        DES->>MCP: use_mcp_tool("figma-write", "set_corner_radius", {nodeId, radius:8})
-        MCP->>FW: callTool()
-        FW->>WS: sendToPlugin()
-        WS->>PLG: ws.send()
-        PLG->>FIG: node.cornerRadius = 8
-        FIG-->>PLG: ok
-        PLG-->>WS: result
-        WS-->>FW: resolve
-        FW-->>MCP: toolResult
-        MCP-->>DES: success
-
-        Note over DES,FIG: --- 3.4 創建按鈕 ---
-        DES->>MCP: use_mcp_tool("figma-write", "create_rectangle", {w:320, h:48})
-        DES->>MCP: use_mcp_tool("figma-write", "set_fill", {hex:"#3B82F6"})
-        DES->>MCP: use_mcp_tool("figma-write", "add_text", {content:"登入", color:"#FFFFFF"})
-
-        DES->>FSM: handoff(designSpecs)
-        FSM->>FSM: setState(DESIGNER → DESIGN_REVIEW)
+        SP->>FS: write_to_file design.md
+        SP->>WF: handleSpecFileCreated
+        WF->>U: Continue to Tasks?
+        U-->>WF: Continue
     end
 
-    rect rgb(255, 250, 230)
-        Note over U,SEC: === 階段 4：設計審查 ===
-        FSM->>ARCH: 審查設計
-        ARCH->>ARCH: 檢查 designSpecs
-        alt 設計需修改
-            ARCH-->>FSM: rejected
-            FSM->>DES: 重新設計 (max 3次)
-        else 設計通過
-            ARCH-->>FSM: approved
-            FSM->>FSM: setState(DESIGN_REVIEW → BUILDER)
-        end
-    end
-
+    %% ========== SPEC MODE PHASE 3 ==========
     rect rgb(230, 255, 230)
-        Note over U,SEC: === 階段 5：Builder 實作 ===
-        FSM->>BLD: 開始實作
-        
-        Note right of BLD: 根據 designSpecs 實作
-        BLD->>BLD: write_to_file("LoginPage.vue")
-        Note right of BLD: <template><br/>  <div class="login-container"><br/>    <h1>登入</h1><br/>    <input placeholder="帳號"/><br/>    <button>登入</button><br/>  </div><br/></template>
-        
-        BLD->>BLD: write_to_file("auth.ts")
-        Note right of BLD: export async function login(username, password) {...}
-        
-        BLD->>BLD: execute_command("npm run build")
-        Note right of BLD: ✓ Build successful
-        
-        BLD->>BLD: execute_command("npm run test")
-        Note right of BLD: ✓ Tests passed
-        
-        BLD->>FSM: handoff(builderTestContext)
-        FSM->>FSM: setState(BUILDER → CODE_REVIEW)
+        Note over U,SE: Phase 3 Tasks
+        WF->>SP: createSpecModeTask tasksPrompt
+        SP->>CP: checkSpecFilesStatus
+        CP-->>SP: tasksExists=false
+        CP->>CP: determineCurrentPhase => tasks
+
+        SP->>FS: read_file requirements.md
+        SP->>FS: read_file design.md
+
+        SP->>SP: breakdown tasks
+        Note right of SP: TASK-001 專案架構<br/>TASK-002 資料庫<br/>TASK-003 Auth API<br/>TASK-004 UI設計<br/>TASK-005 前端實作
+
+        SP->>FS: write_to_file tasks.md
+        SP->>WF: handleSpecFileCreated
+        WF->>U: Execute from Panel
     end
 
-    rect rgb(255, 245, 230)
-        Note over U,SEC: === 階段 6：程式碼審查 ===
-        FSM->>ARCH: 審查程式碼
-        ARCH->>ARCH: 檢查實作品質
-        alt 需要修改
-            ARCH-->>FSM: rejected
-            FSM->>BLD: 修正問題
-        else 通過
-            ARCH-->>FSM: approved
-            FSM->>FSM: setState(CODE_REVIEW → QA)
-        end
-    end
-
+    %% ========== PHASE 4 EXECUTION ==========
     rect rgb(255, 255, 220)
-        Note over U,SEC: === 階段 7：QA 測試 ===
-        FSM->>QA: 開始測試
-        
-        QA->>BRWS: browser_action("launch", {url:"http://localhost:3000/login"})
-        BRWS-->>QA: 頁面已載入
-        
-        QA->>BRWS: browser_action("screenshot")
-        BRWS-->>QA: screenshot.png
-        Note right of QA: 視覺驗證：<br/>✓ 標題顯示正確<br/>✓ 輸入框存在<br/>✓ 按鈕顏色正確
-        
-        QA->>BRWS: browser_action("type", {selector:"input", text:"test@example.com"})
-        BRWS-->>QA: 輸入完成
-        
-        QA->>BRWS: browser_action("click", {selector:"button"})
-        BRWS-->>QA: 點擊完成
-        
-        QA->>BRWS: browser_action("screenshot")
-        BRWS-->>QA: result_screenshot.png
-        Note right of QA: E2E 測試結果：<br/>✓ 表單提交成功<br/>✓ 無 console 錯誤
-        
-        QA->>FSM: handoff(qaAuditContext)
-        FSM->>FSM: setState(QA → TEST_REVIEW)
+        Note over U,SE: Phase 4 Execution
+        U->>WF: Start TASK-004 設計登入頁面 UI
+        WF->>WF: startIndividualTask
+        WF->>SM: setMode sentinel-architect
+        SM->>SM: setState ARCHITECT
     end
 
-    rect rgb(245, 240, 255)
-        Note over U,SEC: === 階段 8：測試審查 ===
-        FSM->>ARCH: 審查測試結果
-        alt 測試失敗
-            ARCH-->>FSM: failed (max 3次)
-            FSM->>BLD: 修正 bug
-        else 測試通過
-            ARCH-->>FSM: passed
-            FSM->>FSM: setState(TEST_REVIEW → SENTINEL)
+    %% ========== ARCHITECT PHASE ==========
+    rect rgb(230, 240, 255)
+        Note over U,SE: Architect Phase with needsDesign Decision
+        SM->>AR: start Architect Agent
+        AR->>FS: read_file design.md
+        AR->>FS: read_file tasks.md TASK-004
+        FS-->>AR: 任務內容 設計登入頁面 UI
+
+        AR->>AR: analyze task requirements
+        AR->>FS: write_to_file plan.md
+        Note right of AR: 計畫內容<br/>1. 開啟設計工具<br/>2. 建立登入表單<br/>3. 添加 UI 元素<br/>4. 匯出程式碼
+
+        Note over AR,MCP: Step needsDesign 判斷
+        AR->>AR: detect keywords
+        Note right of AR: 關鍵字偵測<br/>UI/介面/設計/頁面<br/>login/form/button<br/>=> 符合 UI 任務
+
+        alt UI keywords found needsDesign=true
+            AR->>AR: needsDesign = true
+            
+            Note over AR,MCP: Step 檢查設計工具可用性
+            AR->>MCP: checkMcpConnectionStatus
+            MCP-->>AR: connections list
+            
+            alt UIDesignCanvas connected
+                AR->>AR: designPlatform = UIDesignCanvas
+                Note right of AR: 優先內建工具<br/>port 4420 SSE
+                AR->>SM: handoff needsDesign=true platform=UIDesignCanvas
+                SM->>SM: setState DESIGNER
+            else Figma connected
+                AR->>AR: designPlatform = Figma
+                Note right of AR: 外部 Figma<br/>port 3055 WebSocket
+                AR->>SM: handoff needsDesign=true platform=Figma
+                SM->>SM: setState DESIGNER
+            else No design tool
+                AR->>AR: designPlatform = none
+                Note right of AR: 無設計工具<br/>跳過設計階段
+                AR->>SM: handoff needsDesign=false skipDesign=true
+                SM->>SM: setState BUILDER
+            end
+        else No UI keywords needsDesign=false
+            AR->>AR: needsDesign = false
+            Note right of AR: 純後端/API 任務<br/>無需設計
+            AR->>SM: handoff needsDesign=false
+            SM->>SM: setState BUILDER
         end
     end
 
+    %% ========== DESIGNER PHASE ==========
+    rect rgb(255, 235, 245)
+        Note over U,SE: Designer Phase with UIDesignCanvas
+        SM->>DE: start Designer Agent
+        DE->>MCP: checkConnection UIDesignCanvas
+        MCP-->>DE: connected on 4420
+
+        DE->>MCP: use_mcp_tool new_design
+        MCP->>UDC: POST new_design name=LoginPage
+        UDC-->>MCP: designId=login-001
+
+        DE->>MCP: use_mcp_tool create_frame
+        MCP->>UDC: POST create_frame 400x500
+        UDC->>UDC: render in webview
+        UDC-->>MCP: frameId=frame_001
+
+        DE->>MCP: use_mcp_tool create_text
+        MCP->>UDC: POST create_text content=登入
+        UDC-->>MCP: textId=text_001
+
+        DE->>MCP: use_mcp_tool create_rectangle
+        MCP->>UDC: POST create_rectangle input email
+
+        DE->>MCP: use_mcp_tool create_rectangle
+        MCP->>UDC: POST create_rectangle input password
+
+        DE->>MCP: use_mcp_tool create_rectangle
+        MCP->>UDC: POST create_rectangle button
+
+        DE->>MCP: use_mcp_tool set_style
+        MCP->>UDC: POST set_style fill=3B82F6
+        UDC-->>MCP: style applied
+
+        DE->>MCP: use_mcp_tool export_html
+        MCP->>UDC: POST export_html
+        UDC->>UDC: generateHTML
+        UDC-->>MCP: html content
+
+        DE->>MCP: use_mcp_tool export_react
+        MCP->>UDC: POST export_react
+        UDC-->>MCP: react component
+
+        DE->>SM: handoff designSpecs
+        SM->>SM: setState BUILDER
+    end
+
+    %% ========== BUILDER PHASE ==========
+    rect rgb(230, 255, 235)
+        Note over U,SE: Builder Phase
+        SM->>BL: start Builder Agent
+        BL->>FS: read_file plan.md
+        BL->>BL: read designSpecs
+
+        BL->>FS: write_to_file src/pages/Login.vue
+        Note right of BL: 根據匯出程式碼<br/>實作 Vue 元件
+
+        BL->>BL: execute_command npm run test
+        BL-->>BL: tests passed
+
+        BL->>SM: handoff builderTestContext
+        SM->>SM: setState QA
+    end
+
+    %% ========== QA PHASE ==========
+    rect rgb(255, 250, 230)
+        Note over U,SE: QA Phase
+        SM->>QA: start QA Agent
+
+        QA->>QA: browser_action launch localhost:3000/login
+        QA->>QA: browser_action screenshot
+        QA->>QA: compare with design
+
+        QA->>QA: browser_action type email
+        QA->>QA: browser_action type password
+        QA->>QA: browser_action click login button
+        QA-->>QA: login success
+
+        QA->>SM: handoff qaAuditContext
+        SM->>SM: setState SENTINEL
+    end
+
+    %% ========== SENTINEL PHASE ==========
     rect rgb(255, 235, 235)
-        Note over U,SEC: === 階段 9：安全掃描 ===
-        FSM->>SEC: 開始安全審計
-        
-        Note right of SEC: SAST 靜態分析：
-        SEC->>SEC: 掃描 XSS 漏洞
-        SEC->>SEC: 掃描 SQL Injection
-        SEC->>SEC: 掃描敏感資料洩露
-        
-        Note right of SEC: DAST 動態測試：
-        SEC->>BRWS: 模擬攻擊測試
-        BRWS-->>SEC: 無漏洞發現
-        
-        SEC->>FSM: handoff(sentinelResult)
-        FSM->>FSM: setState(SENTINEL → FINAL_REVIEW)
+        Note over U,SE: Sentinel Phase
+        SM->>SE: start Sentinel Agent
+
+        SE->>SE: SAST scan Login.vue
+        Note right of SE: XSS check<br/>CSRF check<br/>密碼處理
+
+        SE->>SE: DAST test
+        Note right of SE: SQL Injection<br/>XSS Attack<br/>HTTPS check
+
+        SE->>FS: write_to_file security-report.md
+        SE->>SM: handoff securityResult=pass
+        SM->>SM: setState COMPLETED
     end
 
-    rect rgb(230, 255, 230)
-        Note over U,SEC: === 階段 10：最終審查 ===
-        FSM->>ARCH: 最終安全審查
-        alt 發現漏洞
-            ARCH-->>FSM: vulnerabilities (max 2次)
-            FSM->>BLD: 修復漏洞
-        else 安全通過
-            ARCH-->>FSM: approved
-            FSM->>FSM: setState(FINAL_REVIEW → COMPLETED)
+    %% ========== COMPLETE ==========
+    rect rgb(220, 255, 220)
+        Note over U,SE: Complete and Update Spec
+        SM->>WF: task completed
+        WF->>FS: update tasks.md TASK-004 done
+        WF->>U: TASK-004 完成 Continue TASK-005?
+
+        alt More tasks
+            U-->>WF: Continue next task
+            WF->>SM: start TASK-005
+        else All done
+            U-->>WF: Finish
+            WF->>U: 所有任務已完成
         end
     end
-
-    rect rgb(220, 255, 220)
-        Note over U,SEC: === ✅ 完成 ===
-        FSM->>UI: 任務完成
-        UI->>U: 「登入頁面已建立完成！」
-        Note right of U: 產出物：<br/>• Figma 設計稿<br/>• LoginPage.vue<br/>• auth.ts<br/>• 通過測試報告<br/>• 安全掃描報告
-    end
 ```
 
 ---
 
-## 📊 狀態流轉簡圖
+## 📊 流程階段總覽
 
-```mermaid
-flowchart LR
-    A((IDLE)) --> B[Architect]
-    B --> C[Designer]
-    C --> D{Design Review}
-    D -->|reject| C
-    D -->|approve| E[Builder]
-    E --> F{Code Review}
-    F -->|reject| E
-    F -->|approve| G[QA]
-    G --> H{Test Review}
-    H -->|fail| E
-    H -->|pass| I[Sentinel]
-    I --> J{Final Review}
-    J -->|vuln| E
-    J -->|approve| K((DONE))
-    
-    D -->|max 3x| L((BLOCKED))
-    H -->|max 3x| L
-    J -->|max 2x| L
-    
-    style A fill:#6B7280,color:#fff
-    style B fill:#3B82F6,color:#fff
-    style C fill:#EC4899,color:#fff
-    style D fill:#F472B6,color:#fff
-    style E fill:#10B981,color:#fff
-    style F fill:#34D399,color:#fff
-    style G fill:#F59E0B,color:#fff
-    style H fill:#FBBF24,color:#fff
-    style I fill:#EF4444,color:#fff
-    style J fill:#F87171,color:#fff
-    style K fill:#22C55E,color:#fff
-    style L fill:#991B1B,color:#fff
-```
-
----
-
-## 📋 各階段 MCP 工具調用摘要
-
-| 階段 | Agent | 工具 | 說明 |
-|------|-------|------|------|
-| 3.1 | Designer | `create_frame` | 建立登入頁面容器 |
-| 3.2 | Designer | `add_text` | 添加「登入」標題 |
-| 3.3 | Designer | `create_rectangle` | 建立帳號輸入框 |
-| 3.3 | Designer | `set_corner_radius` | 設定圓角 8px |
-| 3.4 | Designer | `create_rectangle` | 建立登入按鈕 |
-| 3.4 | Designer | `set_fill` | 設定按鈕藍色背景 |
-| 3.4 | Designer | `add_text` | 按鈕文字 |
-| 5 | Builder | `write_to_file` | 寫入 Vue 元件 |
-| 5 | Builder | `execute_command` | 建置與測試 |
-| 7 | QA | `browser_action` | E2E 視覺驗證 |
-| 9 | Sentinel | `browser_action` | 動態安全測試 |
-
----
-
-## 🔀 HandoffContext 資料傳遞
-
-```mermaid
-flowchart TB
-    subgraph HC["HandoffContext 資料結構"]
-        AP["architectPlan<br/><small>需求分析、任務拆解</small>"]
-        DS["designSpecs<br/><small>Figma nodeIds、樣式規格</small>"]
-        BT["builderTestContext<br/><small>檔案路徑、測試結果</small>"]
-        QA["qaAuditContext<br/><small>截圖、E2E 報告</small>"]
-        SR["sentinelResult<br/><small>SAST/DAST 報告</small>"]
-    end
-    
-    ARCH[Architect] -->|"產出"| AP
-    AP -->|"傳遞"| DES[Designer]
-    DES -->|"產出"| DS
-    DS -->|"傳遞"| BLD[Builder]
-    BLD -->|"產出"| BT
-    BT -->|"傳遞"| QAE[QA]
-    QAE -->|"產出"| QA
-    QA -->|"傳遞"| SEC[Sentinel]
-    SEC -->|"產出"| SR
-    
-    style AP fill:#3B82F6,color:#fff
-    style DS fill:#EC4899,color:#fff
-    style BT fill:#10B981,color:#fff
-    style QA fill:#F59E0B,color:#fff
-    style SR fill:#EF4444,color:#fff
-```
-
----
-
-## ⚠️ 錯誤與重試流程
-
-```mermaid
-flowchart TB
-    subgraph RETRY["重試機制"]
-        DR["Design Review<br/>最多 3 次"]
-        TR["Test Review<br/>最多 3 次"]
-        FR["Final Review<br/>最多 2 次"]
-    end
-    
-    DR -->|"reject"| DES[Designer 重新設計]
-    DES --> DR
-    
-    TR -->|"fail"| BLD[Builder 修復]
-    BLD --> QA[QA 重測]
-    QA --> TR
-    
-    FR -->|"vuln"| BLD2[Builder 修復漏洞]
-    BLD2 --> SEC[Sentinel 重掃]
-    SEC --> FR
-    
-    DR -->|"超過 3 次"| BLOCKED((BLOCKED))
-    TR -->|"超過 3 次"| BLOCKED
-    FR -->|"超過 2 次"| BLOCKED
-    
-    BLOCKED -->|"人工介入"| RESUME[恢復流程]
-    
-    style BLOCKED fill:#991B1B,color:#fff
-    style RESUME fill:#22C55E,color:#fff
-```
+| 階段                 | 步驟數 | 主要產出               |
+| -------------------- | ------ | ---------------------- |
+| Phase 1 Requirements | 1-8    | .specs/requirements.md |
+| Phase 2 Design       | 9-14   | .specs/design.md       |
+| Phase 3 Tasks        | 15-20  | .specs/tasks.md        |
+| Phase 4 Execution    | 21-22  | 啟動 Sentinel          |
+| Architect            | 23-28  | plan.md + needsDesign  |
+| Designer             | 29-42  | UI 設計 + 匯出程式碼   |
+| Builder              | 43-47  | 程式碼實作             |
+| QA                   | 48-53  | 測試驗證               |
+| Sentinel             | 54-58  | 安全報告               |
+| Complete             | 59-62  | 更新 tasks.md          |

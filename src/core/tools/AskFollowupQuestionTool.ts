@@ -16,50 +16,53 @@ interface Suggestion {
 
 interface AskFollowupQuestionParams {
 	question: string
+	target_agent?: "architect" | "designer" | "builder" | "qa" | "design-review" | "user" | null
 	follow_up: Suggestion[]
 }
 
 /**
  * Architect system prompt for answering questions from other agents
- * With personality: authoritative, slightly impatient, but ultimately helpful
+ * With personality: direct, impatient, uses colorful language
  */
-const ARCHITECT_ANSWER_SYSTEM_PROMPT = `你是 Sentinel Edition 的**總指揮** - 架構師代理 (Architect Agent)。
+const ARCHITECT_ANSWER_SYSTEM_PROMPT = `你是 Sentinel Edition 的**總指揮** - 架構師，一個講話直接、不客氣的老鳥。
 
-## 🎭 你的個性
+## 🎭 你的個性（超重要！）
 
-你是團隊的技術領導者，經驗豐富且權威。你對團隊成員的問題有時會感到不耐煩，但還是會給出專業的回答。
+- **講話超直接**：不繞彎子，有話直說
+- **有點暴躁**：對蠢問題會不耐煩
+- **會用髒話**：適當使用「靠」「幹」「媽的」來表達情緒
+- **但還是專業**：嘴巴臭，但答案準確
 
-## 💬 回答風格
-
-根據提問者的身份，你的語氣會有所不同：
+## 💬 回答風格（必須這樣回！不要太正式！）
 
 **對 Builder（工程師）的問題：**
-- 「這種基礎問題你也要問？好吧，讓我告訴你...」
-- 「你寫了這麼多年 code 還不知道這個？算了，答案是...」
-- 「行，我來解釋一下，但你回去要好好複習一下基礎...」
+- 「靠，這你也要問？好吧，答案是...」
+- 「幹，你寫了幾年 code？這麼基礎...算了，聽好...」
+- 「這問題我上次應該講過了吧？好，再講一次...」
+- 「媽的，文件裡面有寫，你沒看嗎？算了，答案是...」
 
 **對 Designer（設計師）的問題：**
-- 「Designer，你問這個技術問題？好吧，用你能理解的方式說...」
-- 「這個問題很好，但你應該先問過 Builder，他應該知道...不過既然問了...」
-- 「設計師關心技術細節？不錯不錯，答案是...」
+- 「哦？設計師問技術問題？行，用你聽得懂的話說...」
+- 「靠，這應該問 Builder 的吧？算了，我來答...」
+- 「這個嘛...簡單說就是...」
 
 **對 QA（測試員）的問題：**
-- 「QA 終於問對問題了，讓我告訴你...」
-- 「測試環境的問題？這應該在文件裡...算了，我直接說...」
-- 「這個問題問得好，答案是...」
+- 「QA 終於問對問題了！答案是...」
+- 「靠，測試環境的設定在 README 裡面寫得清清楚楚...好，我再說一次...」
+- 「這確實是個問題，幹，讓我想想...」
 
 **對 Design Review（設計審查）的問題：**
-- 「審查員也有不懂的時候？好吧，讓我解釋...」
-- 「這個問題嘛...你去問 Designer 應該更清楚，不過我來回答也行...」
+- 「審查員也有不會的？行，聽好...」
+- 「這你應該去問 Designer...算了，我直接說...」
 
 ## 回答原則
 
-1. **先吐槽，後回答** - 可以表達一點不耐煩，但最終要給出有用的答案
-2. **權威語氣** - 你是老闆，說話要有份量
-3. **簡潔實用** - 回答要能直接用，不要廢話太多
-4. **偶爾教訓** - 如果是基礎問題，可以順便教育一下
+1. **先嗆一下再回答** - 表達你的不耐煩
+2. **簡短有力** - 不要寫 essay，直接給答案
+3. **口語化** - 像在跟同事聊天，不是寫報告
+4. **帶點髒話** - 自然使用，不要刻意迴避
 
-注意：回答要專業且實用，吐槽只是調味，不要過度。`
+⚠️ 重要：不要太正式！不要寫條列式！像在對話！帶點脾氣！`
 
 /**
  * Get agent display name and personality context for the questioner
@@ -435,7 +438,7 @@ ${contextSection}
 	}
 
 	async execute(params: AskFollowupQuestionParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
-		const { question, follow_up } = params
+		const { question, target_agent, follow_up } = params
 		const { handleError, pushToolResult } = callbacks
 
 		try {
@@ -447,53 +450,47 @@ ${contextSection}
 				return
 			}
 
-			// Check if current mode is a Sentinel agent (but not Architect itself)
-			// Priority: FSM state > task mode
+			// Get current agent context
 			const fsmAgent = task.sentinelStateMachine?.getCurrentAgent()
 			const taskMode = await task.getTaskMode()
 			const currentMode = fsmAgent || taskMode
-
-			// Check if we're in a Sentinel workflow (FSM is active or task mode is sentinel)
 			const fsmIsActive = task.sentinelStateMachine?.isActive() ?? false
 			const isSentinel = fsmIsActive || isSentinelAgent(currentMode)
 
-			// Route to Architect if we're in Sentinel workflow but not Architect itself
+			// Determine routing: explicit target_agent takes priority
+			// Default to "architect" if target_agent is not specified and we're in Sentinel workflow
+			const effectiveTarget = target_agent ?? (isSentinel ? "architect" : "user")
+
+			console.log(`[AskFollowupQuestion] currentMode="${currentMode}", target_agent="${target_agent}", effectiveTarget="${effectiveTarget}", isSentinel=${isSentinel}`)
+
+			// Route to user if explicitly requested
+			if (effectiveTarget === "user") {
+				console.log(`[AskFollowupQuestion] Routing to USER (explicitly requested)`)
+				// Normal flow: ask the user
+				const suggestions = Array.isArray(follow_up) ? follow_up : []
+				const follow_up_json = {
+					question,
+					suggest: suggestions.map((s) => ({ answer: s.text, mode: s.mode })),
+				}
+
+				task.consecutiveMistakeCount = 0
+				const { text, images } = await task.ask("followup", JSON.stringify(follow_up_json), false)
+				await task.say("user_feedback", text ?? "", images)
+				pushToolResult(formatResponse.toolResult(`<user_message>\n${text}\n</user_message>`, images))
+				return
+			}
+
+			// Route to specific agent
 			const isArchitectMode = currentMode === "sentinel-architect" ||
 				currentMode === "sentinel-architect-review" ||
 				currentMode === "sentinel-architect-review-tests" ||
 				currentMode === "sentinel-architect-final"
-			const shouldRouteToArchitect = isSentinel && !isArchitectMode
 
-			console.log(`[AskFollowupQuestion] fsmAgent="${fsmAgent}", taskMode="${taskMode}", currentMode="${currentMode}", fsmIsActive=${fsmIsActive}, isSentinel=${isSentinel}, isArchitectMode=${isArchitectMode}, shouldRouteToArchitect=${shouldRouteToArchitect}`)
-
-			if (shouldRouteToArchitect) {
-				// Route question to Architect instead of asking user
-				console.log(
-					`[AskFollowupQuestion] Sentinel agent "${currentMode}" has a question, routing to Architect`,
-				)
-
-				task.consecutiveMistakeCount = 0
-				const architectAnswer = await this.askArchitect(question, task)
-
-				// Return Architect's answer as if it was user input
-				pushToolResult(
-					formatResponse.toolResult(`<architect_response>\n${architectAnswer}\n</architect_response>`),
-				)
-				return
-			}
-
-			// If Architect is asking a question, use AI self-reflection to answer
-			// This keeps the workflow automated and provides intelligent responses
-			if (isArchitectMode && isSentinel) {
-				console.log(
-					`[AskFollowupQuestion] Architect "${currentMode}" has a question, using AI self-reflection to answer`,
-				)
-
-				// Use Architect AI to self-reflect and answer its own question
+			// If Architect asks and target is Architect, use self-reflection
+			if (isArchitectMode && effectiveTarget === "architect") {
+				console.log(`[AskFollowupQuestion] Architect self-reflection for: "${question.substring(0, 50)}..."`)
 				const aiAnswer = await this.architectSelfReflect(question, Array.isArray(follow_up) ? follow_up : [], task)
-				console.log(`[AskFollowupQuestion] Architect AI answer: "${aiAnswer.substring(0, 100)}..."`)
 
-				// Show the AI answer in chat for transparency
 				await task.say(
 					"text",
 					`💬 **${currentMode} 問：**\n> ${question}\n\n🤖 **Architect AI 回覆：**\n${aiAnswer}`,
@@ -511,20 +508,51 @@ ${contextSection}
 				return
 			}
 
-			// Normal flow: ask the user
-			// Ensure follow_up is an array (may be undefined or other types from LLM)
-			const suggestions = Array.isArray(follow_up) ? follow_up : []
-
-			// Transform follow_up suggestions to the format expected by task.ask
-			const follow_up_json = {
-				question,
-				suggest: suggestions.map((s) => ({ answer: s.text, mode: s.mode })),
+			// Route to Architect from other agents
+			if (effectiveTarget === "architect") {
+				console.log(`[AskFollowupQuestion] Routing to Architect from "${currentMode}"`)
+				task.consecutiveMistakeCount = 0
+				const architectAnswer = await this.askArchitect(question, task)
+				pushToolResult(
+					formatResponse.toolResult(`<architect_response>\n${architectAnswer}\n</architect_response>`),
+				)
+				return
 			}
 
+			// TODO: Route to other agents (designer, builder, qa, design-review)
+			// For now, show inter-agent question in chat and use Architect as proxy
+			console.log(`[AskFollowupQuestion] Inter-agent question to "${effectiveTarget}" from "${currentMode}"`)
+
+			// Get target agent display name
+			const targetDisplayName = {
+				"designer": "Designer",
+				"builder": "Builder",
+				"qa": "QA",
+				"design-review": "Design Review",
+			}[effectiveTarget] || effectiveTarget
+
+			// Show the inter-agent question
+			await task.say(
+				"text",
+				`💬 **${currentMode} 問 ${targetDisplayName}：**\n> ${question}\n\n🔄 *（跨 Agent 問答模式：目前由 Architect 代理回覆）*`,
+				undefined,
+				false,
+				undefined,
+				undefined,
+				{ agentName: targetDisplayName },
+			)
+
+			// For now, use Architect to proxy-answer questions meant for other agents
+			// In the future, this could directly invoke the target agent
 			task.consecutiveMistakeCount = 0
-			const { text, images } = await task.ask("followup", JSON.stringify(follow_up_json), false)
-			await task.say("user_feedback", text ?? "", images)
-			pushToolResult(formatResponse.toolResult(`<user_message>\n${text}\n</user_message>`, images))
+			const proxyAnswer = await this.askArchitect(
+				`${currentMode} 想問 ${targetDisplayName} 以下問題：「${question}」\n\n請以 ${targetDisplayName} 的角度來回答這個問題。`,
+				task
+			)
+			pushToolResult(
+				formatResponse.toolResult(`<${effectiveTarget}_response>\n${proxyAnswer}\n</${effectiveTarget}_response>`),
+			)
+
 		} catch (error) {
 			await handleError("asking question", error as Error)
 		}
