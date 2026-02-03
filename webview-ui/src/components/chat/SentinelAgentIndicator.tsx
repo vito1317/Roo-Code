@@ -1,103 +1,178 @@
 /**
- * Sentinel Agent Indicator
+ * Sentinel Agent Indicator with Workflow Bar
  *
- * Displays the current active Sentinel agent during FSM workflow.
- * Shows visual states for each agent with appropriate colors, icons, and status messages.
+ * Displays the current active Sentinel agent during FSM workflow
+ * with a visual workflow progress bar showing all stages.
+ * Updated to match Pencil design specs.
  */
 import React from "react"
-import { cn } from "@/lib/utils"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 
-// Agent state configuration with colors, icons, labels, and status messages
-const AGENT_CONFIG = {
+// Workflow stages in order
+const WORKFLOW_STAGES = [
+	{ id: "ARCHITECT", label: "ARCHITECT", icon: "🔷" },
+	{ id: "DESIGNER", label: "DESIGNER", icon: "🎨" },
+	{ id: "DESIGN_REVIEW", label: "DESIGN_REVIEW", icon: "🔎" },
+	{ id: "BUILDER", label: "BUILDER", icon: "🟩" },
+	{ id: "CODE_REVIEW", label: "CODE_REVIEW", icon: "📝" },
+	{ id: "QA", label: "QA", icon: "🧪" },
+	{ id: "TEST_REVIEW", label: "TEST_REVIEW", icon: "✅" },
+	{ id: "SENTINEL", label: "SENTINEL", icon: "🛡️" },
+	{ id: "FINAL_REVIEW", label: "FINAL_REVIEW", icon: "🏁" },
+] as const
+
+// Agent state configuration with Pencil design colors
+const AGENT_CONFIG: Record<string, {
+	headerBg: string
+	borderColor: string
+	textColor: string
+	icon: string
+	label: string
+	statusMessage: string
+	spinning: boolean
+}> = {
 	IDLE: {
-		borderColor: "border-gray-500/30",
-		bgColor: "bg-gray-500/10",
-		textColor: "text-gray-400",
+		headerBg: "#1E293B",
+		borderColor: "#475569",
+		textColor: "#64748B",
 		icon: "⚪",
 		label: "Idle",
 		statusMessage: "",
 		spinning: false,
 	},
 	ARCHITECT: {
-		borderColor: "border-blue-500/50",
-		bgColor: "bg-blue-500/10",
-		textColor: "text-blue-400",
-		icon: "🟦",
+		headerBg: "#10B981",
+		borderColor: "#10B981",
+		textColor: "#0A0F1C",
+		icon: "🔷",
 		label: "Architect",
 		statusMessage: "📐 規劃架構中...",
 		spinning: false,
 	},
 	DESIGNER: {
-		borderColor: "border-pink-500/50",
-		bgColor: "bg-pink-500/10",
-		textColor: "text-pink-400",
+		headerBg: "#EC4899",
+		borderColor: "#EC4899",
+		textColor: "#FFFFFF",
 		icon: "🎨",
 		label: "Designer",
 		statusMessage: "🎨 Creating UI design...",
 		spinning: false,
 	},
+	DESIGN_REVIEW: {
+		headerBg: "#F59E0B",
+		borderColor: "#F59E0B",
+		textColor: "#0A0F1C",
+		icon: "🔎",
+		label: "Design Review",
+		statusMessage: "🔍 Reviewing design...",
+		spinning: true,
+	},
 	BUILDER: {
-		borderColor: "border-green-500/50",
-		bgColor: "bg-green-500/10",
-		textColor: "text-green-400",
+		headerBg: "#3B82F6",
+		borderColor: "#3B82F6",
+		textColor: "#FFFFFF",
 		icon: "🟩",
 		label: "Builder",
 		statusMessage: "🔨 Building implementation...",
 		spinning: false,
 	},
+	CODE_REVIEW: {
+		headerBg: "#8B5CF6",
+		borderColor: "#8B5CF6",
+		textColor: "#FFFFFF",
+		icon: "📝",
+		label: "Code Review",
+		statusMessage: "📝 Reviewing code...",
+		spinning: true,
+	},
 	ARCHITECT_REVIEW: {
-		borderColor: "border-purple-500/50",
-		bgColor: "bg-purple-500/10",
-		textColor: "text-purple-400",
+		headerBg: "#8B5CF6",
+		borderColor: "#8B5CF6",
+		textColor: "#FFFFFF",
 		icon: "🔍",
 		label: "Architect Review",
 		statusMessage: "🔍 Reviewing & validating...",
 		spinning: true,
 	},
 	QA: {
-		borderColor: "border-yellow-500/50",
-		bgColor: "bg-yellow-500/10",
-		textColor: "text-yellow-400",
-		icon: "🟨",
+		headerBg: "#F59E0B",
+		borderColor: "#F59E0B",
+		textColor: "#0A0F1C",
+		icon: "🧪",
 		label: "QA Engineer",
 		statusMessage: "🧪 Testing in progress...",
 		spinning: true,
 	},
+	TEST_REVIEW: {
+		headerBg: "#22D3EE",
+		borderColor: "#22D3EE",
+		textColor: "#0A0F1C",
+		icon: "✅",
+		label: "Test Review",
+		statusMessage: "✅ Reviewing tests...",
+		spinning: true,
+	},
 	SENTINEL: {
-		borderColor: "border-red-500/50",
-		bgColor: "bg-red-500/10",
-		textColor: "text-red-400",
+		headerBg: "#EF4444",
+		borderColor: "#EF4444",
+		textColor: "#FFFFFF",
 		icon: "🛡️",
 		label: "Sentinel",
 		statusMessage: "🛡️ Security auditing...",
 		spinning: true,
 	},
+	FINAL_REVIEW: {
+		headerBg: "#10B981",
+		borderColor: "#10B981",
+		textColor: "#0A0F1C",
+		icon: "🏁",
+		label: "Final Review",
+		statusMessage: "🏁 Final verification...",
+		spinning: true,
+	},
 	COMPLETED: {
-		borderColor: "border-emerald-500/50",
-		bgColor: "bg-emerald-500/10",
-		textColor: "text-emerald-400",
+		headerBg: "#10B981",
+		borderColor: "#10B981",
+		textColor: "#0A0F1C",
 		icon: "✅",
 		label: "Completed",
 		statusMessage: "✅ Workflow complete!",
 		spinning: false,
 	},
 	BLOCKED: {
-		borderColor: "border-orange-500/50",
-		bgColor: "bg-orange-500/10",
-		textColor: "text-orange-400",
+		headerBg: "#F59E0B",
+		borderColor: "#F59E0B",
+		textColor: "#0A0F1C",
 		icon: "🚫",
 		label: "Blocked",
 		statusMessage: "⚠️ Human intervention required",
 		spinning: false,
 	},
-} as const
-
-type AgentState = keyof typeof AGENT_CONFIG
+}
 
 interface SentinelAgentIndicatorProps {
 	className?: string
 	variant?: "compact" | "full"
+}
+
+// Get stage status based on current agent
+const getStageStatus = (stageId: string, currentAgent: string): "completed" | "active" | "pending" => {
+	const stageIndex = WORKFLOW_STAGES.findIndex((s) => s.id === stageId)
+	const currentIndex = WORKFLOW_STAGES.findIndex((s) => s.id === currentAgent)
+
+	// Map some agent names to workflow stages
+	const agentToStage: Record<string, string> = {
+		ARCHITECT_REVIEW: "CODE_REVIEW",
+	}
+	const mappedCurrent = agentToStage[currentAgent] || currentAgent
+	const mappedCurrentIndex = WORKFLOW_STAGES.findIndex((s) => s.id === mappedCurrent)
+
+	if (currentAgent === "COMPLETED") return "completed"
+	if (currentAgent === "IDLE") return "pending"
+
+	if (stageIndex < mappedCurrentIndex) return "completed"
+	if (stageIndex === mappedCurrentIndex) return "active"
+	return "pending"
 }
 
 export const SentinelAgentIndicator: React.FC<SentinelAgentIndicatorProps> = ({
@@ -111,7 +186,7 @@ export const SentinelAgentIndicator: React.FC<SentinelAgentIndicatorProps> = ({
 		return null
 	}
 
-	const currentAgent = (sentinelAgentState.currentAgent || "IDLE") as AgentState
+	const currentAgent = (sentinelAgentState.currentAgent || "IDLE") as string
 	const config = AGENT_CONFIG[currentAgent] || AGENT_CONFIG.IDLE
 	const activity = sentinelAgentState.currentActivity || config.statusMessage
 	const handoff = sentinelAgentState.lastHandoff
@@ -120,137 +195,314 @@ export const SentinelAgentIndicator: React.FC<SentinelAgentIndicatorProps> = ({
 	if (variant === "compact") {
 		return (
 			<div
-				className={cn(
-					"inline-flex items-center gap-1.5 px-2 py-1 rounded-md",
-					config.bgColor,
-					"border",
-					config.borderColor,
-					"text-xs font-medium transition-all duration-300",
-					className,
-				)}
-				data-testid="sentinel-agent-indicator">
-				<span className="text-sm">{config.icon}</span>
-				<span className={cn("opacity-90", config.textColor)}>{config.label}</span>
-
-				{/* Spinning indicator for active testing/auditing */}
-				{config.spinning && (
-					<svg
-						className="animate-spin h-3 w-3 ml-1"
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24">
-						<circle
-							className="opacity-25"
-							cx="12"
-							cy="12"
-							r="10"
-							stroke="currentColor"
-							strokeWidth="4"
-						/>
-						<path
-							className="opacity-75"
-							fill="currentColor"
-							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-						/>
-					</svg>
-				)}
-
-				{/* Pulsing dot for non-spinning active states */}
-				{!config.spinning && currentAgent !== "IDLE" && currentAgent !== "COMPLETED" && (
-					<span className="relative flex h-2 w-2 ml-1">
-						<span
-							className={cn(
-								"animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-								config.bgColor.replace("/10", "/50"),
-							)}
-						/>
-						<span
-							className={cn("relative inline-flex rounded-full h-2 w-2", config.bgColor.replace("/10", ""))}
-						/>
-					</span>
-				)}
+				className={className}
+				style={{
+					display: "inline-flex",
+					alignItems: "center",
+					gap: "6px",
+					padding: "6px 12px",
+					borderRadius: "8px",
+					background: config.headerBg,
+					border: `2px solid ${config.borderColor}`,
+					fontFamily: "'JetBrains Mono', monospace",
+					fontSize: "10px",
+					fontWeight: 600,
+					color: config.textColor,
+					transition: "all 0.3s ease",
+				}}
+				data-testid="sentinel-agent-indicator"
+			>
+				<span style={{ fontSize: "14px" }}>{config.icon}</span>
+				<span>{config.label}</span>
+				{config.spinning && <span style={{ animation: "spin 1s linear infinite" }}>⟳</span>}
 			</div>
 		)
 	}
 
-	// Full variant - with status message, activity, and handoff info
+	// Full variant - with workflow bar, status message, activity, and handoff info
 	return (
 		<div
-			className={cn(
-				"flex flex-col gap-2 px-4 py-3 rounded-lg",
-				config.bgColor,
-				"border-2",
-				config.borderColor,
-				"transition-all duration-300 animate-fadeIn",
-				className,
-			)}
-			data-testid="sentinel-agent-indicator-full">
-			
-			{/* Header with icon and name */}
-			<div className="flex items-center gap-3">
-				<div className="flex items-center justify-center w-10 h-10 rounded-full bg-black/20 shadow-lg">
-					<span className="text-2xl">{config.icon}</span>
+			className={className}
+			style={{
+				background: "linear-gradient(180deg, #0A0F1C 0%, #0F172A 100%)",
+				borderRadius: "12px",
+				overflow: "hidden",
+				border: "1px solid rgba(71, 85, 105, 0.3)",
+			}}
+			data-testid="sentinel-agent-indicator-full"
+		>
+			{/* Header */}
+			<div
+				style={{
+					display: "flex",
+					justifyContent: "space-between",
+					alignItems: "flex-start",
+					padding: "12px 16px",
+					gap: "12px",
+					flexWrap: "wrap",
+				}}
+			>
+				<div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+					<span
+						style={{
+							color: "#FFFFFF",
+							fontFamily: "'Inter', sans-serif",
+							fontSize: "14px",
+							fontWeight: 700,
+						}}
+					>
+						Sentinel Architect Workflow
+					</span>
+					<span
+						style={{
+							color: "#64748B",
+							fontFamily: "'JetBrains Mono', monospace",
+							fontSize: "10px",
+						}}
+					>
+						Architect → Designer → Builder → QA → Sentinel
+					</span>
 				</div>
 
-				<div className="flex flex-col flex-1">
-					<span className={cn("text-sm font-bold", config.textColor)}>
-						{config.label}
-						{config.spinning && (
-							<svg
-								className="animate-spin h-3 w-3 inline-block ml-2"
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24">
-								<circle
-									className="opacity-25"
-									cx="12"
-									cy="12"
-									r="10"
-									stroke="currentColor"
-									strokeWidth="4"
-								/>
-								<path
-									className="opacity-75"
-									fill="currentColor"
-									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-								/>
-							</svg>
-						)}
-					</span>
-					{activity && (
-						<span className="text-xs text-vscode-descriptionForeground animate-pulse">
-							{activity}
+				{/* Status Badge */}
+				{currentAgent !== "IDLE" && (
+					<div
+						style={{
+							display: "flex",
+							gap: "8px",
+							alignItems: "center",
+							padding: "6px 14px",
+							borderRadius: "100px",
+							background: config.headerBg,
+						}}
+					>
+						<span
+							style={{
+								width: "6px",
+								height: "6px",
+								background: "#FFFFFF",
+								borderRadius: "50%",
+								animation: "pulse 1.5s ease-in-out infinite",
+							}}
+						/>
+						<span
+							style={{
+								color: config.textColor,
+								fontFamily: "'JetBrains Mono', monospace",
+								fontSize: "10px",
+								fontWeight: 700,
+								letterSpacing: "0.5px",
+							}}
+						>
+							{config.label.toUpperCase()} ACTIVE
 						</span>
-					)}
-				</div>
-
-				{/* Animated pulse indicator */}
-				{currentAgent !== "IDLE" && currentAgent !== "COMPLETED" && !config.spinning && (
-					<span className="relative flex h-3 w-3">
-						<span
-							className={cn(
-								"animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-								config.bgColor.replace("/10", "/50"),
-							)}
-						/>
-						<span
-							className={cn("relative inline-flex rounded-full h-3 w-3", config.bgColor.replace("/10", ""))}
-						/>
-					</span>
+					</div>
 				)}
 			</div>
 
-			{/* Handoff summary bar */}
-			{handoff && handoff.summary && (
-				<div className="mt-1 px-3 py-2 bg-black/20 rounded-md border border-white/10">
-					<div className="text-xs text-vscode-descriptionForeground mb-1">
-						📤 <span className="font-medium">{handoff.from}</span> → <span className="font-medium">{handoff.to}</span>
+			{/* Workflow State Bar */}
+			<div
+				style={{
+					display: "flex",
+					gap: "4px",
+					alignItems: "center",
+					padding: "8px 16px",
+					overflowX: "auto",
+					flexWrap: "wrap",
+				}}
+			>
+				{WORKFLOW_STAGES.map((stage, index) => {
+					const status = getStageStatus(stage.id, currentAgent)
+					const bgColor =
+						status === "completed"
+							? "#10B981"
+							: status === "active"
+								? config.headerBg
+								: "#1E293B"
+					const textColor =
+						status === "completed"
+							? "#0A0F1C"
+							: status === "active"
+								? config.textColor
+								: "#64748B"
+
+					return (
+						<React.Fragment key={stage.id}>
+							<div
+								style={{
+									display: "flex",
+									gap: "6px",
+									alignItems: "center",
+									padding: "6px 10px",
+									borderRadius: "8px",
+									background: bgColor,
+									transition: "all 0.2s ease",
+								}}
+							>
+								{status === "completed" && (
+									<span style={{ fontSize: "10px", color: textColor }}>✓</span>
+								)}
+								{status === "active" && (
+									<span
+										style={{
+											width: "6px",
+											height: "6px",
+											background: "#FFFFFF",
+											borderRadius: "50%",
+										}}
+									/>
+								)}
+								<span
+									style={{
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "9px",
+										fontWeight: 600,
+										color: textColor,
+									}}
+								>
+									{stage.label}
+								</span>
+							</div>
+							{index < WORKFLOW_STAGES.length - 1 && (
+								<span style={{ color: "#475569", fontSize: "12px" }}>›</span>
+							)}
+						</React.Fragment>
+					)
+				})}
+			</div>
+
+			{/* Current Agent Card */}
+			{currentAgent !== "IDLE" && (
+				<div
+					style={{
+						margin: "8px 16px 16px",
+						background: "#1E293B",
+						borderRadius: "12px",
+						overflow: "hidden",
+						border: `2px solid ${config.borderColor}`,
+					}}
+				>
+					{/* Agent Header */}
+					<div
+						style={{
+							display: "flex",
+							justifyContent: "space-between",
+							alignItems: "center",
+							padding: "10px 14px",
+							background: config.headerBg,
+						}}
+					>
+						<div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+							<span style={{ fontSize: "14px" }}>{config.icon}</span>
+							<span
+								style={{
+									fontFamily: "'Inter', sans-serif",
+									fontSize: "13px",
+									fontWeight: 600,
+									color: config.textColor,
+								}}
+							>
+								{config.label}
+							</span>
+						</div>
+						<div
+							style={{
+								display: "flex",
+								gap: "4px",
+								alignItems: "center",
+								padding: "2px 8px",
+								borderRadius: "4px",
+								background:
+									currentAgent === "COMPLETED" ? "#0A0F1C" : "rgba(255,255,255,0.9)",
+								fontFamily: "'JetBrains Mono', monospace",
+								fontSize: "9px",
+								fontWeight: 700,
+								color: currentAgent === "COMPLETED" ? "#10B981" : config.headerBg,
+							}}
+						>
+							{config.spinning && (
+								<span
+									style={{
+										width: "5px",
+										height: "5px",
+										background: config.headerBg,
+										borderRadius: "50%",
+										animation: "pulse 1.5s ease-in-out infinite",
+									}}
+								/>
+							)}
+							<span>{currentAgent === "COMPLETED" ? "✓ DONE" : "ACTIVE"}</span>
+						</div>
 					</div>
-					<div className="text-xs opacity-80 flex flex-wrap gap-2">
-						{handoff.summary}
+
+					{/* Agent Body */}
+					<div
+						style={{
+							padding: "12px 14px",
+							display: "flex",
+							flexDirection: "column",
+							gap: "8px",
+						}}
+					>
+						{/* Activity */}
+						{activity && (
+							<div
+								style={{
+									fontFamily: "'Inter', sans-serif",
+									fontSize: "11px",
+									color: config.borderColor,
+									fontStyle: "italic",
+								}}
+							>
+								"{activity}"
+							</div>
+						)}
+
+						{/* Handoff */}
+						{handoff && handoff.summary && (
+							<div
+								style={{
+									marginTop: "4px",
+									padding: "8px 10px",
+									background: "#0A0F1C",
+									borderRadius: "6px",
+								}}
+							>
+								<div
+									style={{
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "9px",
+										color: "#64748B",
+										marginBottom: "4px",
+									}}
+								>
+									📤 {handoff.from} → {handoff.to}
+								</div>
+								<div
+									style={{
+										fontFamily: "'Inter', sans-serif",
+										fontSize: "10px",
+										color: "#94A3B8",
+										lineHeight: "1.3",
+									}}
+								>
+									{handoff.summary}
+								</div>
+							</div>
+						)}
 					</div>
 				</div>
 			)}
+
+			<style>{`
+				@keyframes spin {
+					to { transform: rotate(360deg); }
+				}
+				@keyframes pulse {
+					0%, 100% { opacity: 1; }
+					50% { opacity: 0.5; }
+				}
+			`}</style>
 		</div>
 	)
 }

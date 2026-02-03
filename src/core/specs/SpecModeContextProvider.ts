@@ -56,9 +56,22 @@ export function determineCurrentPhase(status: SpecFilesStatus): SpecPhase {
 
 /**
  * Generate dynamic prompt based on current phase
+ * @param status - Spec files status
+ * @param originalPrompt - User's original prompt (optional)
  */
-export function generateSpecModePrompt(status: SpecFilesStatus): string {
+export function generateSpecModePrompt(status: SpecFilesStatus, originalPrompt?: string): string {
 	const phase = determineCurrentPhase(status)
+
+	// Include user's original prompt in context if available
+	const userPromptSection = originalPrompt
+		? `
+## 📝 使用者原始需求
+
+> ${originalPrompt.split('\n').join('\n> ')}
+
+---
+`
+		: ""
 
 	const statusIndicators = [
 		status.requirementsExists ? "✅" : "⬜",
@@ -238,6 +251,7 @@ If the user explicitly wants to redesign from scratch, they must confirm.
 			}
 			return (
 				header +
+				userPromptSection +
 				`
 ## 🎨 PHASE 2: Design
 
@@ -418,6 +432,7 @@ If the user explicitly wants to redefine tasks, they must confirm.
 			}
 			return (
 				header +
+				userPromptSection +
 				`
 ## ✅ PHASE 3: Task Breakdown
 
@@ -635,11 +650,13 @@ Architect → Designer → Builder → QA → Security → Final Review
 
 /**
  * Get complete Spec Mode context for prompt injection
+ * @param workspacePath - Workspace path to check spec files
+ * @param originalPrompt - User's original prompt (optional)
  */
-export function getSpecModeContext(workspacePath: string): SpecModeContext {
+export function getSpecModeContext(workspacePath: string, originalPrompt?: string): SpecModeContext {
 	const filesStatus = checkSpecFilesStatus(workspacePath)
 	const currentPhase = determineCurrentPhase(filesStatus)
-	const dynamicPrompt = generateSpecModePrompt(filesStatus)
+	const dynamicPrompt = generateSpecModePrompt(filesStatus, originalPrompt)
 
 	return {
 		currentPhase,

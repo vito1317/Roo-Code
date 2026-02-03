@@ -16,6 +16,9 @@ import {
 	type Command,
 	type McpServer,
 	type SkillMetadata,
+	type AgentVisualizationState,
+	type ToolCallInfo,
+	createInitialAgentVisualizationState,
 	RouterModels,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -66,6 +69,8 @@ export interface ExtensionStateContextType extends ExtensionState {
 			timestamp: number
 		}
 	}
+	// Agent Visualization Dashboard state
+	agentVisualization: AgentVisualizationState | null
 	alwaysAllowFollowupQuestions: boolean // New property for follow-up questions auto-approve
 	setAlwaysAllowFollowupQuestions: (value: boolean) => void // Setter for the new property
 	followupAutoApproveTimeoutMs: number | undefined // Timeout in ms for auto-approving follow-up questions
@@ -315,6 +320,8 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 	const [prevCloudIsAuthenticated, setPrevCloudIsAuthenticated] = useState(false)
 	const [includeCurrentTime, setIncludeCurrentTime] = useState(true)
 	const [includeCurrentCost, setIncludeCurrentCost] = useState(true)
+	// Agent Visualization state
+	const [agentVisualization, setAgentVisualization] = useState<AgentVisualizationState | null>(null)
 
 	const setListApiConfigMeta = useCallback(
 		(value: ProviderSettingsEntry[]) => setState((prevState) => ({ ...prevState, listApiConfigMeta: value })),
@@ -477,6 +484,42 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 					})
 					break
 				}
+				// Sentinel Agent State messages
+				case "sentinelAgentState": {
+					const sentinelState = (message as any).sentinelAgentState
+					if (sentinelState) {
+						setState((prevState) => ({
+							...prevState,
+							sentinelAgentState: sentinelState,
+						}))
+					}
+					break
+				}
+				// Agent Visualization messages
+				case "agentStateUpdate": {
+					if (message.agentVisualization) {
+						setAgentVisualization(message.agentVisualization as AgentVisualizationState)
+					}
+					break
+				}
+				case "toolCallUpdate": {
+					const toolCall = (message as any).toolCall as ToolCallInfo
+					if (toolCall) {
+						setAgentVisualization((prev) => {
+							if (!prev) return createInitialAgentVisualizationState()
+							const existingIndex = prev.toolCalls.findIndex((tc) => tc.id === toolCall.id)
+							let newToolCalls: ToolCallInfo[]
+							if (existingIndex >= 0) {
+								newToolCalls = [...prev.toolCalls]
+								newToolCalls[existingIndex] = toolCall
+							} else {
+								newToolCalls = [toolCall, ...prev.toolCalls].slice(0, 50) // Keep last 50
+							}
+							return { ...prev, toolCalls: newToolCalls }
+						})
+					}
+					break
+				}
 			}
 		},
 		[setListApiConfigMeta],
@@ -529,6 +572,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		profileThresholds: state.profileThresholds ?? {},
 		alwaysAllowFollowupQuestions,
 		followupAutoApproveTimeoutMs,
+		agentVisualization,
 		remoteControlEnabled: state.remoteControlEnabled ?? false,
 		taskSyncEnabled: state.taskSyncEnabled,
 		featureRoomoteControlEnabled: state.featureRoomoteControlEnabled ?? false,

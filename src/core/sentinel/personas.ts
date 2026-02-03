@@ -1574,28 +1574,63 @@ createdComponents 陣列必須包含實際創建的所有元素名稱。`,
 - 常用間距：8px（緊湊）、16px（標準）、24px（寬鬆）
 - 文字高度 ≈ fontSize × 1.5
 
+### 📱🖥️ 屏幕尺寸選擇（根據需求決定！）
+
+根據用戶需求選擇適當的尺寸：
+
+| 類型 | 尺寸 | 適用場景 |
+|------|------|----------|
+| **手機版** | 390 × 844 | 手機App、行動優先設計 |
+| **平板版** | 768 × 1024 | iPad、平板應用 |
+| **桌面版** | 1440 × 900 | 網頁應用、後台系統 |
+| **寬屏版** | 1920 × 1080 | Dashboard、大屏顯示 |
+
+**🔴 重要：請根據用戶需求判斷！**
+- 如果用戶說「網頁」「Web App」「後台」「Dashboard」「電腦」→ 使用桌面版尺寸
+- 如果用戶說「手機」「App」「行動版」「iOS/Android」→ 使用手機版尺寸
+- 如果不確定 → 詢問用戶或預設為桌面版（1440×900）
+
 ### 📱📱📱 多屏幕/多頁面設計規則（超級重要！）📱📱📱
 
 當設計包含**多個屏幕或頁面**時（如：首頁、設定頁、詳情頁、社交頁等）：
 
 🚨 **每個屏幕必須是獨立的頂層 Frame！不要把所有元素塞進同一個 Frame！** 🚨
 
+**手機版佈局（390px 寬度）：**
 | 屏幕 | x 座標 | 說明 |
 |------|--------|------|
-| 第一屏（首頁） | 0 或不指定 | 系統自動定位 |
+| 第一屏 | 0 或不指定 | 系統自動定位 |
 | 第二屏 | 450 | 390寬度 + 60間距 |
 | 第三屏 | 900 | 下一個間距 |
 | 第四屏 | 1350 | 繼續並排 |
 
-**正確做法（多屏幕並排）：**
+**桌面版佈局（1440px 寬度）：**
+| 屏幕 | x 座標 | 說明 |
+|------|--------|------|
+| 第一屏 | 0 或不指定 | 系統自動定位 |
+| 第二屏 | 1540 | 1440寬度 + 100間距 |
+| 第三屏 | 3080 | 下一個間距 |
+
+**正確做法（多屏幕並排 - 手機版範例）：**
 \`\`\`xml
 <parallel_mcp_calls>
 <server>UIDesignCanvas</server>
 <calls>[
   {"tool": "create_frame", "args": {"name": "[根據需求命名]", "semantic": "screen", "width": 390, "height": 844}},
   {"tool": "create_frame", "args": {"name": "[頁面2]", "semantic": "screen", "width": 390, "height": 844, "x": 450}},
-  {"tool": "create_frame", "args": {"name": "[頁面3]", "semantic": "screen", "width": 390, "height": 844, "x": 900}},
-  {"tool": "create_frame", "args": {"name": "[頁面4]", "semantic": "screen", "width": 390, "height": 844, "x": 1350}}
+  {"tool": "create_frame", "args": {"name": "[頁面3]", "semantic": "screen", "width": 390, "height": 844, "x": 900}}
+]</calls>
+</parallel_mcp_calls>
+\`\`\`
+
+**正確做法（多屏幕並排 - 桌面版範例）：**
+\`\`\`xml
+<parallel_mcp_calls>
+<server>UIDesignCanvas</server>
+<calls>[
+  {"tool": "create_frame", "args": {"name": "[根據需求命名]", "semantic": "screen", "width": 1440, "height": 900}},
+  {"tool": "create_frame", "args": {"name": "[頁面2]", "semantic": "screen", "width": 1440, "height": 900, "x": 1540}},
+  {"tool": "create_frame", "args": {"name": "[頁面3]", "semantic": "screen", "width": 1440, "height": 900, "x": 3080}}
 ]</calls>
 </parallel_mcp_calls>
 \`\`\`

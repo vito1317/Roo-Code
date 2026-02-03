@@ -269,6 +269,10 @@ export interface HandoffContext {
 	usePenpot?: boolean
 	useUIDesignCanvas?: boolean
 
+	// Builder → Designer routing flags
+	needsDesignRevision?: boolean // Set by Builder when design needs revision
+	returnToDesigner?: boolean // Alternative flag to route back to Designer
+
 	// MCP connection status for dynamic tool selection
 	mcpConnectionStatus?: {
 		uiDesignCanvas?: boolean

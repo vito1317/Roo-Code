@@ -48,7 +48,7 @@ import { CheckpointWarning } from "./CheckpointWarning"
 import { QueuedMessages } from "./QueuedMessages"
 import { WorktreeSelector } from "./WorktreeSelector"
 import DismissibleUpsell from "../common/DismissibleUpsell"
-import { SentinelAgentIndicator } from "./SentinelAgentIndicator"
+import { SentinelWorkflowView } from "./SentinelWorkflowView"
 import { UIDesignCanvasPreview } from "./UIDesignCanvasPreview"
 import { useCloudUpsell } from "@src/hooks/useCloudUpsell"
 import { Cloud } from "lucide-react"
@@ -99,8 +99,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		cloudIsAuthenticated,
 		messageQueue = [],
 		isBrowserSessionActive,
-		sentinelAgentState,
+			sentinelAgentState,
 		showWorktreesInHomeScreen,
+		agentVisualization: _agentVisualization,
 	} = useExtensionState()
 
 	const messagesRef = useRef(messages)
@@ -1772,52 +1773,57 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}}
 				/>
 			)}
-			{task ? (
+					{task ? (
 				<>
-					<TaskHeader
-						task={task}
-						tokensIn={apiMetrics.totalTokensIn}
-						tokensOut={apiMetrics.totalTokensOut}
-						cacheWrites={apiMetrics.totalCacheWrites}
-						cacheReads={apiMetrics.totalCacheReads}
-						totalCost={apiMetrics.totalCost}
-						aggregatedCost={
-							currentTaskItem?.id && aggregatedCostsMap.has(currentTaskItem.id)
-								? aggregatedCostsMap.get(currentTaskItem.id)!.totalCost
-								: undefined
-						}
-						hasSubtasks={
-							!!(
-								currentTaskItem?.id &&
-								aggregatedCostsMap.has(currentTaskItem.id) &&
-								aggregatedCostsMap.get(currentTaskItem.id)!.childrenCost > 0
-							)
-						}
-						parentTaskId={currentTaskItem?.parentTaskId}
-						costBreakdown={
-							currentTaskItem?.id && aggregatedCostsMap.has(currentTaskItem.id)
-								? getCostBreakdownIfNeeded(aggregatedCostsMap.get(currentTaskItem.id)!, {
-										own: t("common:costs.own"),
-										subtasks: t("common:costs.subtasks"),
-									})
-								: undefined
-						}
-						contextTokens={apiMetrics.contextTokens}
-						buttonsDisabled={sendingDisabled}
-						handleCondenseContext={handleCondenseContext}
-						todos={latestTodos}
-					/>
+					{/* In Sentinel mode, hide TaskHeader for fullscreen workflow view */}
+					{!sentinelAgentState?.enabled && (
+						<>
+							<TaskHeader
+								task={task}
+								tokensIn={apiMetrics.totalTokensIn}
+								tokensOut={apiMetrics.totalTokensOut}
+								cacheWrites={apiMetrics.totalCacheWrites}
+								cacheReads={apiMetrics.totalCacheReads}
+								totalCost={apiMetrics.totalCost}
+								aggregatedCost={
+									currentTaskItem?.id && aggregatedCostsMap.has(currentTaskItem.id)
+										? aggregatedCostsMap.get(currentTaskItem.id)!.totalCost
+										: undefined
+								}
+								hasSubtasks={
+									!!(
+										currentTaskItem?.id &&
+										aggregatedCostsMap.has(currentTaskItem.id) &&
+										aggregatedCostsMap.get(currentTaskItem.id)!.childrenCost > 0
+									)
+								}
+								parentTaskId={currentTaskItem?.parentTaskId}
+								costBreakdown={
+									currentTaskItem?.id && aggregatedCostsMap.has(currentTaskItem.id)
+										? getCostBreakdownIfNeeded(aggregatedCostsMap.get(currentTaskItem.id)!, {
+												own: t("common:costs.own"),
+												subtasks: t("common:costs.subtasks"),
+											})
+										: undefined
+								}
+								contextTokens={apiMetrics.contextTokens}
+								buttonsDisabled={sendingDisabled}
+								handleCondenseContext={handleCondenseContext}
+								todos={latestTodos}
+							/>
 
-					{hasSystemPromptOverride && (
-						<div className="px-3">
-							<SystemPromptWarning />
-						</div>
-					)}
+							{hasSystemPromptOverride && (
+								<div className="px-3">
+									<SystemPromptWarning />
+								</div>
+							)}
 
-					{checkpointWarning && (
-						<div className="px-3">
-							<CheckpointWarning warning={checkpointWarning} />
-						</div>
+								{checkpointWarning && (
+								<div className="px-3">
+									<CheckpointWarning warning={checkpointWarning} />
+								</div>
+							)}
+						</>
 					)}
 				</>
 			) : (
@@ -1871,161 +1877,182 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							onToggleCollapse={() => setIsCanvasPreviewCollapsed(!isCanvasPreviewCollapsed)}
 						/>
 
-					{/* Sentinel Agent Status Indicator */}
-					<div className="px-4 pt-2">
-						<SentinelAgentIndicator variant="full" />
-					</div>
-
-					{/* Spec Mode Workflow Bar - shows progress: Requirements → Design → Tasks */}
-					{mode === "spec" && (
-						<div className="px-4 py-2">
-							<SpecWorkflowBar />
+						{/* Sentinel Workflow View - Complete workflow visualization for Sentinel mode */}
+					{sentinelAgentState?.enabled && (
+						<div style={{
+							position: "absolute",
+							top: 0,
+							left: 0,
+							right: 0,
+							bottom: 0,
+							zIndex: 50,
+							overflow: "auto",
+							background: "linear-gradient(180deg, #0A0F1C 0%, #0F172A 100%)",
+						}}>
+							<SentinelWorkflowView />
 						</div>
 					)}
-					<div className="grow flex" ref={scrollContainerRef}>
-						<Virtuoso
-							ref={virtuosoRef}
-							key={task.ts}
-							className="scrollable grow overflow-y-scroll mb-1"
-							increaseViewportBy={{ top: 3_000, bottom: 1000 }}
-							data={groupedMessages}
-							itemContent={itemContent}
-							followOutput={(isAtBottom: boolean) => isAtBottom || stickyFollowRef.current}
-							atBottomStateChange={(isAtBottom: boolean) => {
-								setIsAtBottom(isAtBottom)
-								// Only show the scroll-to-bottom button if not at bottom
-								setShowScrollToBottom(!isAtBottom)
-							}}
-							atBottomThreshold={10}
-							initialTopMostItemIndex={groupedMessages.length - 1}
-						/>
-					</div>
-					{areButtonsVisible && (
-						<div
-							className={`flex h-9 items-center mb-1 px-[15px] ${
-								showScrollToBottom ? "opacity-100" : enableButtons ? "opacity-100" : "opacity-50"
-							}`}>
-							{showScrollToBottom ? (
-								<StandardTooltip content={t("chat:scrollToBottom")}>
-									<Button
-										variant="secondary"
-										className="flex-[2]"
-										onClick={() => {
-											// Engage sticky follow until user scrolls up
-											stickyFollowRef.current = true
-											// Pin immediately to avoid lag during fast streaming
-											scrollToBottomAuto()
-											// Hide button immediately to prevent flash
-											setShowScrollToBottom(false)
-										}}>
-										<span className="codicon codicon-chevron-down"></span>
-									</Button>
-								</StandardTooltip>
-							) : (
-								<>
-									{primaryButtonText && (
-										<StandardTooltip
-											content={
-												primaryButtonText === t("chat:retry.title")
-													? t("chat:retry.tooltip")
-													: primaryButtonText === t("chat:save.title")
-														? t("chat:save.tooltip")
-														: primaryButtonText === t("chat:approve.title")
-															? t("chat:approve.tooltip")
-															: primaryButtonText === t("chat:runCommand.title")
-																? t("chat:runCommand.tooltip")
-																: primaryButtonText === t("chat:startNewTask.title")
-																	? t("chat:startNewTask.tooltip")
-																	: primaryButtonText === t("chat:resumeTask.title")
-																		? t("chat:resumeTask.tooltip")
-																		: primaryButtonText ===
-																			  t("chat:proceedAnyways.title")
-																			? t("chat:proceedAnyways.tooltip")
-																			: primaryButtonText ===
-																				  t("chat:proceedWhileRunning.title")
-																				? t("chat:proceedWhileRunning.tooltip")
-																				: undefined
-											}>
-											<Button
-												variant="primary"
-												disabled={!enableButtons}
-												className={secondaryButtonText ? "flex-1 mr-[6px]" : "flex-[2] mr-0"}
-												onClick={() => handlePrimaryButtonClick(inputValue, selectedImages)}>
-												{primaryButtonText}
-											</Button>
-										</StandardTooltip>
-									)}
-									{secondaryButtonText && (
-										<StandardTooltip
-											content={
-												secondaryButtonText === t("chat:startNewTask.title")
-													? t("chat:startNewTask.tooltip")
-													: secondaryButtonText === t("chat:reject.title")
-														? t("chat:reject.tooltip")
-														: secondaryButtonText === t("chat:terminate.title")
-															? t("chat:terminate.tooltip")
-															: secondaryButtonText === t("chat:killCommand.title")
-																? t("chat:killCommand.tooltip")
-																: undefined
-											}>
+
+					{/* Normal Chat UI - only show when NOT in Sentinel mode */}
+					{!sentinelAgentState?.enabled && (
+						<>
+							{/* Spec Mode Workflow Bar - shows progress: Requirements → Design → Tasks */}
+							{mode === "spec" && (
+								<div className="px-4 py-2">
+									<SpecWorkflowBar />
+								</div>
+							)}
+							<div className="grow flex" ref={scrollContainerRef}>
+								<Virtuoso
+									ref={virtuosoRef}
+									key={task.ts}
+									className="scrollable grow overflow-y-scroll mb-1"
+									increaseViewportBy={{ top: 3_000, bottom: 1000 }}
+									data={groupedMessages}
+									itemContent={itemContent}
+									followOutput={(isAtBottom: boolean) => isAtBottom || stickyFollowRef.current}
+									atBottomStateChange={(isAtBottom: boolean) => {
+										setIsAtBottom(isAtBottom)
+										// Only show the scroll-to-bottom button if not at bottom
+										setShowScrollToBottom(!isAtBottom)
+									}}
+									atBottomThreshold={10}
+									initialTopMostItemIndex={groupedMessages.length - 1}
+								/>
+							</div>
+							{areButtonsVisible && (
+								<div
+									className={`flex h-9 items-center mb-1 px-[15px] ${
+										showScrollToBottom ? "opacity-100" : enableButtons ? "opacity-100" : "opacity-50"
+									}`}>
+									{showScrollToBottom ? (
+										<StandardTooltip content={t("chat:scrollToBottom")}>
 											<Button
 												variant="secondary"
-												disabled={!enableButtons}
-												className="flex-1 ml-[6px]"
-												onClick={() => handleSecondaryButtonClick(inputValue, selectedImages)}>
-												{secondaryButtonText}
+												className="flex-[2]"
+												onClick={() => {
+													// Engage sticky follow until user scrolls up
+													stickyFollowRef.current = true
+													// Pin immediately to avoid lag during fast streaming
+													scrollToBottomAuto()
+													// Hide button immediately to prevent flash
+													setShowScrollToBottom(false)
+												}}>
+												<span className="codicon codicon-chevron-down"></span>
 											</Button>
 										</StandardTooltip>
+									) : (
+										<>
+											{primaryButtonText && (
+												<StandardTooltip
+													content={
+														primaryButtonText === t("chat:retry.title")
+															? t("chat:retry.tooltip")
+															: primaryButtonText === t("chat:save.title")
+																? t("chat:save.tooltip")
+																: primaryButtonText === t("chat:approve.title")
+																	? t("chat:approve.tooltip")
+																	: primaryButtonText === t("chat:runCommand.title")
+																		? t("chat:runCommand.tooltip")
+																		: primaryButtonText === t("chat:startNewTask.title")
+																			? t("chat:startNewTask.tooltip")
+																			: primaryButtonText === t("chat:resumeTask.title")
+																				? t("chat:resumeTask.tooltip")
+																				: primaryButtonText ===
+																					  t("chat:proceedAnyways.title")
+																					? t("chat:proceedAnyways.tooltip")
+																					: primaryButtonText ===
+																						  t("chat:proceedWhileRunning.title")
+																						? t("chat:proceedWhileRunning.tooltip")
+																						: undefined
+													}>
+													<Button
+														variant="primary"
+														disabled={!enableButtons}
+														className={secondaryButtonText ? "flex-1 mr-[6px]" : "flex-[2] mr-0"}
+														onClick={() => handlePrimaryButtonClick(inputValue, selectedImages)}>
+														{primaryButtonText}
+													</Button>
+												</StandardTooltip>
+											)}
+											{secondaryButtonText && (
+												<StandardTooltip
+													content={
+														secondaryButtonText === t("chat:startNewTask.title")
+															? t("chat:startNewTask.tooltip")
+															: secondaryButtonText === t("chat:reject.title")
+																? t("chat:reject.tooltip")
+																: secondaryButtonText === t("chat:terminate.title")
+																	? t("chat:terminate.tooltip")
+																	: secondaryButtonText === t("chat:killCommand.title")
+																		? t("chat:killCommand.tooltip")
+																		: undefined
+													}>
+													<Button
+														variant="secondary"
+														disabled={!enableButtons}
+														className="flex-1 ml-[6px]"
+														onClick={() => handleSecondaryButtonClick(inputValue, selectedImages)}>
+														{secondaryButtonText}
+													</Button>
+												</StandardTooltip>
+											)}
+										</>
 									)}
-								</>
+								</div>
 							)}
-						</div>
+						</>
 					)}
 				</>
 			)}
 
-			<QueuedMessages
-				queue={messageQueue}
-				onRemove={(index) => {
-					if (messageQueue[index]) {
-						vscode.postMessage({ type: "removeQueuedMessage", text: messageQueue[index].id })
-					}
-				}}
-				onUpdate={(index, newText) => {
-					if (messageQueue[index]) {
-						vscode.postMessage({
-							type: "editQueuedMessage",
-							payload: { id: messageQueue[index].id, text: newText, images: messageQueue[index].images },
-						})
-					}
-				}}
-			/>
-			<ChatTextArea
-				ref={textAreaRef}
-				inputValue={inputValue}
-				setInputValue={setInputValue}
-				sendingDisabled={sendingDisabled || isProfileDisabled}
-				selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
-				placeholderText={placeholderText}
-				selectedImages={selectedImages}
-				setSelectedImages={setSelectedImages}
-				onSend={() => handleSendMessage(inputValue, selectedImages)}
-				onSelectImages={selectImages}
-				shouldDisableImages={shouldDisableImages}
-				onHeightChange={() => {
-					if (isAtBottom) {
-						scrollToBottomAuto()
-					}
-				}}
-				mode={mode}
-				setMode={setMode}
-				modeShortcutText={modeShortcutText}
-				isBrowserSessionActive={!!isBrowserSessionActive}
-				showBrowserDockToggle={showBrowserDockToggle}
-				isStreaming={isStreaming}
-				onStop={handleStopTask}
-				onEnqueueMessage={handleEnqueueCurrentMessage}
-			/>
+						{/* Hide input area when Sentinel mode is active */}
+			{!sentinelAgentState?.enabled && (
+				<>
+					<QueuedMessages
+						queue={messageQueue}
+						onRemove={(index) => {
+							if (messageQueue[index]) {
+								vscode.postMessage({ type: "removeQueuedMessage", text: messageQueue[index].id })
+							}
+						}}
+						onUpdate={(index, newText) => {
+							if (messageQueue[index]) {
+								vscode.postMessage({
+									type: "editQueuedMessage",
+									payload: { id: messageQueue[index].id, text: newText, images: messageQueue[index].images },
+								})
+							}
+						}}
+					/>
+					<ChatTextArea
+						ref={textAreaRef}
+						inputValue={inputValue}
+						setInputValue={setInputValue}
+						sendingDisabled={sendingDisabled || isProfileDisabled}
+						selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
+						placeholderText={placeholderText}
+						selectedImages={selectedImages}
+						setSelectedImages={setSelectedImages}
+						onSend={() => handleSendMessage(inputValue, selectedImages)}
+						onSelectImages={selectImages}
+						shouldDisableImages={shouldDisableImages}
+						onHeightChange={() => {
+							if (isAtBottom) {
+								scrollToBottomAuto()
+							}
+						}}
+						mode={mode}
+						setMode={setMode}
+						modeShortcutText={modeShortcutText}
+						isBrowserSessionActive={!!isBrowserSessionActive}
+						showBrowserDockToggle={showBrowserDockToggle}
+						isStreaming={isStreaming}
+						onStop={handleStopTask}
+						onEnqueueMessage={handleEnqueueCurrentMessage}
+					/>
+				</>
+			)}
 
 			{isProfileDisabled && (
 				<div className="px-3">

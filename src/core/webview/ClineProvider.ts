@@ -1153,6 +1153,28 @@ export class ClineProvider
 		await this.view?.webview.postMessage(message)
 	}
 
+	/**
+	 * Broadcast agent visualization state to webview
+	 * Used for the Agent Orchestration Dashboard
+	 */
+	public broadcastAgentVisualization(state: import("@roo-code/types").AgentVisualizationState): void {
+		this.postMessageToWebview({
+			type: "agentStateUpdate",
+			agentVisualization: state,
+		})
+	}
+
+	/**
+	 * Broadcast a tool call update to webview
+	 * Used for the Tool Activity Feed in the dashboard
+	 */
+	public broadcastToolCall(toolCall: import("@roo-code/types").ToolCallInfo): void {
+		this.postMessageToWebview({
+			type: "toolCallUpdate",
+			toolCall,
+		})
+	}
+
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
 		let localPort = "5173"
 

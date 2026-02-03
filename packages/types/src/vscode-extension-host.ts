@@ -117,6 +117,9 @@ export interface ExtensionMessage {
 		| "specsStatus"
 		| "specTasksList"
 		| "specFileContent"
+		// Agent Visualization Dashboard types
+		| "agentStateUpdate"
+		| "toolCallUpdate"
 	text?: string
 	html?: string // MCP-UI HTML output
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -296,6 +299,9 @@ export interface ExtensionMessage {
 	copyProgressItemName?: string
 	// folderSelected
 	path?: string
+	// Agent Visualization Dashboard
+	agentVisualization?: import("./agent-visualization.js").AgentVisualizationState
+	toolCall?: import("./agent-visualization.js").ToolCallInfo
 }
 
 export interface OpenAiCodexRateLimitsMessage {

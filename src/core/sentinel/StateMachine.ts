@@ -261,6 +261,14 @@ export class SentinelStateMachine {
 		},
 
 		// ===== PHASE 2: IMPLEMENTATION & CODE REVIEW =====
+		// Builder needs design revision → Return to Designer
+		{
+			from: AgentState.BUILDER,
+			to: AgentState.DESIGNER,
+			condition: (ctx) => ctx?.needsDesignRevision === true || ctx?.returnToDesigner === true,
+			label: "Design revision needed, return to Designer",
+		},
+
 		// Builder completes → Architect reviews code
 		{
 			from: AgentState.BUILDER,
@@ -268,6 +276,7 @@ export class SentinelStateMachine {
 			condition: (ctx) => !!ctx?.builderTestContext,
 			label: "Code committed, Architect reviews",
 		},
+
 
 		// Architect approves code → QA tests
 		{
@@ -298,8 +307,16 @@ export class SentinelStateMachine {
 		{
 			from: AgentState.QA_ENGINEER,
 			to: AgentState.BUILDER,
-			condition: (ctx) => ctx?.qaAuditContext?.testsPassed === false,
+			condition: (ctx) => ctx?.qaAuditContext?.testsPassed === false && ctx?.needsDesignRevision !== true,
 			label: "Tests failed, return to Builder to fix",
+		},
+
+		// QA finds design issues → Return to Designer
+		{
+			from: AgentState.QA_ENGINEER,
+			to: AgentState.DESIGNER,
+			condition: (ctx) => ctx?.needsDesignRevision === true || ctx?.returnToDesigner === true,
+			label: "Design issues found, return to Designer",
 		},
 
 		// Architect approves tests → Sentinel security audit

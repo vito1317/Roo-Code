@@ -355,6 +355,7 @@ export async function addCustomInstructions(
 		language?: string
 		rooIgnoreInstructions?: string
 		settings?: SystemPromptSettings
+		originalPrompt?: string // User's original prompt for Spec Mode context
 	} = {},
 ): Promise<string> {
 	const sections = []
@@ -426,7 +427,7 @@ export async function addCustomInstructions(
 	// Add Spec mode dynamic context if in spec mode
 	if (mode === "spec") {
 		try {
-			const specContext = getSpecModeContext(cwd)
+			const specContext = getSpecModeContext(cwd, options.originalPrompt)
 			sections.push(`Spec Mode Dynamic Context:\n${specContext.dynamicPrompt}`)
 		} catch (err) {
 			// Silently ignore errors - spec context is optional enhancement
