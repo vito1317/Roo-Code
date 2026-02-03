@@ -874,7 +874,7 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 						)}
 					</div>
 					{/* Recent Messages with SSE Streaming Integration */}
-					<div ref={messagesContainerRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", paddingRight: "4px" }}>
+					<div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", paddingRight: "4px" }}>
 				{recentMessages.slice(-10).map((msg: any, idx: number) => {
 					const text = msg.text || ""
 					if (!text.trim()) return null
