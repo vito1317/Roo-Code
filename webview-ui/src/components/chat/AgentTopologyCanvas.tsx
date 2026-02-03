@@ -287,17 +287,17 @@ export const AgentTopologyCanvas: React.FC<AgentTopologyCanvasProps> = ({
 						const lineColor = getLineColor("CODE_REVIEW", "QA")
 						const isActive = lineColor === "#10B981"
 						// Both are at col 4, so arrow goes straight down from CODE_REVIEW bottom to QA top
-						// Moved arrow start point down to avoid overlapping with the node
 						const centerX = from.x + NODE_WIDTH / 2
-						const bottomOfFrom = from.y + NODE_HEIGHT + 5 // Start below the node
-						const topOfTo = to.y - 15 // End slightly above the target node
+						// Position arrow outside the nodes - from bottom of CODE_REVIEW to top of QA
+						const startY = from.y + NODE_HEIGHT - 25 // Bottom edge of CODE_REVIEW node
+						const endY = to.y - 30 // Top edge of QA node (adjusted for node y offset)
 						return (
 							<line
 								key="conn-4-5"
 								x1={centerX}
-								y1={bottomOfFrom}
+								y1={startY}
 								x2={centerX}
-								y2={topOfTo}
+								y2={endY}
 								stroke={lineColor}
 								strokeWidth="2"
 								markerEnd={isActive ? "url(#arrow-active)" : "url(#arrow)"}
@@ -305,14 +305,15 @@ export const AgentTopologyCanvas: React.FC<AgentTopologyCanvasProps> = ({
 						)
 					})()}
 
-					{/* Row 1 horizontal connections (reversed direction) */}
+					{/* Row 1 horizontal connections (right-to-left direction: from left side of current to right side of next) */}
 					{[5, 6, 7].map((i) => {
 						const from = getNodePosition(i)
 						const to = getNodePosition(i + 1)
 						const fromAgent = AGENTS[i].id
 						const toAgent = AGENTS[i + 1].id
 						const lineColor = getLineColor(fromAgent, toAgent)
-						// Direction is right-to-left on row 1
+						// Row 1 is reversed: higher index = further left
+						// Arrow should go from left edge of 'from' node to right edge of 'to' node
 						return (
 							<line
 								key={`conn-${i}`}

@@ -5,9 +5,12 @@
  * agent topology canvas, and AI-to-AI conversation panel.
  * Follows Pencil design specs.
  */
-import React, { useMemo } from "react"
+import React, { useMemo, useCallback, useRef, useEffect } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { AgentTopologyCanvas } from "./AgentTopologyCanvas"
+import { ApiConfigSelector } from "./ApiConfigSelector"
+import { UIDesignCanvasPreview } from "./UIDesignCanvasPreview"
+import { vscode } from "@src/utils/vscode"
 
 // Workflow stages
 const WORKFLOW_STAGES = [
@@ -42,14 +45,61 @@ interface SentinelWorkflowViewProps {
 export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 	className,
 }) => {
-		const { sentinelAgentState } = useExtensionState()
+		const { 
+			sentinelAgentState, 
+			clineMessages, 
+			apiConfiguration,
+			listApiConfigMeta,
+			currentApiConfigName,
+			pinnedApiConfigs,
+			togglePinnedApiConfig,
+		} = useExtensionState()
 
 	// Get current agent and state - default to ARCHITECT if no agent set
-	const currentAgent = sentinelAgentState?.currentAgent || "ARCHITECT"
+	// Map special agent names to their display equivalents
+	const rawAgent = sentinelAgentState?.currentAgent || "ARCHITECT"
+	
+	// Agent name mapping for display in topology
+	const AGENT_MAPPING: Record<string, string> = {
+		"ARCHITECT_REVIEW": "ARCHITECT", // Architect reviewing goes back to ARCHITECT display
+		"sentinel-architect": "ARCHITECT",
+		"sentinel-designer": "DESIGNER", 
+		"sentinel-builder": "BUILDER",
+		"sentinel-qa": "QA",
+		"sentinel-architect-review": "DESIGN_REVIEW", // Maps to nearest review stage
+	}
+	
+	const currentAgent = AGENT_MAPPING[rawAgent] || rawAgent
 	const activity = sentinelAgentState?.currentActivity || "正在分析需求與設計架構..."
 	
 	// Use actual handoff data from state - no hardcoded fallback
 	const handoff = sentinelAgentState?.lastHandoff || null
+
+	// Detect if currently streaming (last message is partial/streaming)
+	const isStreaming = useMemo(() => {
+		if (!clineMessages || clineMessages.length === 0) return false
+		const lastMsg = clineMessages[clineMessages.length - 1]
+		return lastMsg?.partial === true || lastMsg?.type === "say"
+	}, [clineMessages])
+
+	// Get streaming content (last say message text)
+	const streamingContent = useMemo(() => {
+		if (!clineMessages || clineMessages.length === 0) return ""
+		// Find the last "say" message with text
+		for (let i = clineMessages.length - 1; i >= 0; i--) {
+			const msg = clineMessages[i]
+			if (msg.type === "say" && msg.say === "text" && msg.text) {
+				return msg.text
+			}
+		}
+		return ""
+	}, [clineMessages])
+
+	// Get recent messages for display (last 20)
+	const recentMessages = useMemo(() => {
+		if (!clineMessages || clineMessages.length === 0) return []
+		return clineMessages.slice(-20)
+	}, [clineMessages])
 
 		// Calculate completed agents
 	const completedAgents = useMemo(() => {
@@ -64,9 +114,184 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 		if (currentAgent === stageId) return "active"
 		return "pending"
 	}
+	
+	// Helper function to detect agent from message content (defined early for useMemo)
+	const detectAgentFromContent = useCallback((text: string): string => {
+		const lowerText = text.toLowerCase()
+		// Check for explicit agent mentions in the text
+		if (lowerText.includes("**architect") || lowerText.includes("architect:") || lowerText.includes("架構師")) return "ARCHITECT"
+		if (lowerText.includes("**designer") || lowerText.includes("designer:") || lowerText.includes("設計師")) return "DESIGNER"
+		if (lowerText.includes("**design review") || lowerText.includes("design_review") || lowerText.includes("設計審核")) return "DESIGN_REVIEW"
+		if (lowerText.includes("**builder") || lowerText.includes("builder:") || lowerText.includes("建置者")) return "BUILDER"
+		if (lowerText.includes("**code review") || lowerText.includes("code_review") || lowerText.includes("程式碼審核")) return "CODE_REVIEW"
+		if (lowerText.includes("**qa") || lowerText.includes("qa:") || lowerText.includes("品質保證")) return "QA"
+		if (lowerText.includes("**test review") || lowerText.includes("test_review") || lowerText.includes("測試審核")) return "TEST_REVIEW"
+		if (lowerText.includes("**sentinel") || lowerText.includes("sentinel:") || lowerText.includes("哨兵")) return "SENTINEL"
+		if (lowerText.includes("**final review") || lowerText.includes("final_review") || lowerText.includes("最終審核")) return "FINAL_REVIEW"
+		// Default to currentAgent if no specific agent detected
+		return currentAgent
+	}, [currentAgent])
+	
+	// Extract agent activities from recent messages for topology display
+	const agentActivities = useMemo(() => {
+		const activities: Record<string, string> = {}
+		if (!clineMessages || clineMessages.length === 0) return activities
+		
+		// Scan messages to find activities for each agent
+		clineMessages.slice(-50).forEach((msg: any) => {
+			const text = (msg.text || "").toLowerCase()
+			const agent = detectAgentFromContent(text)
+			
+			// Detect file operations
+			if (text.includes("read_file") || text.includes("reading file") || text.includes("讀取")) {
+				const fileMatch = text.match(/(?:read_file|reading|讀取)[^\n]*?([a-zA-Z0-9_.-]+\.(ts|tsx|js|md|json))/i)
+				activities[agent] = `📖 讀取 ${fileMatch ? fileMatch[1] : "檔案"}`
+			} else if (text.includes("write_to_file") || text.includes("creating") || text.includes("創建") || text.includes("write")) {
+				const fileMatch = text.match(/(?:write_to_file|creating|創建|write)[^\n]*?([a-zA-Z0-9_.-]+\.(ts|tsx|js|md|json))/i)
+				activities[agent] = `📝 創建 ${fileMatch ? fileMatch[1] : "檔案"}`
+			} else if (text.includes("edit") || text.includes("replace") || text.includes("修改")) {
+				activities[agent] = "✏️ 編輯檔案"
+			} else if (text.includes("run_command") || text.includes("執行") || text.includes("npm") || text.includes("pnpm")) {
+				activities[agent] = "⚡ 執行命令"
+			} else if (text.includes("plan") || text.includes("計劃") || text.includes("規劃")) {
+				activities[agent] = "📋 規劃任務"
+			} else if (text.includes("test") || text.includes("測試")) {
+				activities[agent] = "🧪 執行測試"
+			} else if (text.includes("review") || text.includes("審核")) {
+				activities[agent] = "🔍 審核中"
+			}
+		})
+		
+		// Make sure current agent always has an activity
+		if (!activities[currentAgent]) {
+			activities[currentAgent] = activity
+		}
+		
+		return activities
+	}, [clineMessages, currentAgent, activity, detectAgentFromContent])
 
 	// Current agent color
 	const agentColor = AGENT_COLORS[currentAgent] || "#475569"
+
+	// Parse AI-to-AI conversation from message text
+	// Detects patterns like "💬 **agent-name 問：**" and "🤖 **Agent AI 回覆：**"
+	interface AIConversation {
+		hasQA: boolean
+		asker: string
+		askerContent: string
+		responder: string
+		responderContent: string
+	}
+	
+	const parseAIConversation = useCallback((text: string): AIConversation => {
+		// Default empty structure
+		const empty: AIConversation = {
+			hasQA: false,
+			asker: "",
+			askerContent: "",
+			responder: "",
+			responderContent: ""
+		}
+		
+		if (!text) return empty
+		
+		// Pattern 1: 💬 **agent 問：** ... 🤖 **Agent AI 回覆：**
+		const questionPattern = /💬\s*\*\*([^*]+)\s*問[：:]\*\*\s*>?\s*(.+?)(?=🤖|\*\*.*回覆|$)/s
+		const responsePattern = /🤖\s*\*\*([^*]+)\s*(?:AI\s*)?回覆[：:]\*\*\s*(.+?)$/s
+		
+		// Pattern 2: sentinel-xxx-review format
+		const sentinelQuestionPattern = /(?:\*\*)?sentinel-([a-z-]+)(?:-review)?\s*問[：:](?:\*\*)?\s*>?\s*(.+?)(?=🤖|\*\*.*回覆|$)/si
+		
+		// Pattern 3: **Agent**: or 【Agent】format
+		const agentPrefixPattern = /(?:\*\*|【)([A-Za-z_\s]+)(?:\*\*|】)[:\s]*(.+)/s
+		
+		// Pattern 4: Handoff from/to patterns
+		const handoffFromPattern = /(?:from|由|來自)[\s:]*\*?\*?([A-Za-z_]+)\*?\*?/i
+		const handoffToPattern = /(?:to|至|移交)[\s:]*\*?\*?([A-Za-z_]+)\*?\*?/i
+		
+		const questionMatch = text.match(questionPattern) || text.match(sentinelQuestionPattern)
+		const responseMatch = text.match(responsePattern)
+		
+		if (questionMatch && responseMatch) {
+			return {
+				hasQA: true,
+				asker: questionMatch[1].trim(),
+				askerContent: questionMatch[2].trim(),
+				responder: responseMatch[1].trim(),
+				responderContent: responseMatch[2].trim()
+			}
+		}
+		
+		// Check for simpler patterns
+		const simpleQuestionPattern = /\*\*([^*]+)\*\*[^:]*[問asking][：:]/i
+		const simpleResponsePattern = /\*\*([^*]+)\*\*[^:]*[回覆response][：:]/i
+		
+		const simpleQ = text.match(simpleQuestionPattern)
+		const simpleR = text.match(simpleResponsePattern)
+		
+		if (simpleQ || simpleR) {
+			return {
+				hasQA: true,
+				asker: simpleQ?.[1]?.trim() || "Agent",
+				askerContent: text.split("回覆")[0] || text.substring(0, 200),
+				responder: simpleR?.[1]?.trim() || "Architect",
+				responderContent: text.split("回覆")[1] || ""
+			}
+		}
+		
+		// Check for agent prefix pattern (e.g., **Builder**: I have a question...)
+		const agentMatch = text.match(agentPrefixPattern)
+		if (agentMatch && (text.includes("?") || text.includes("？") || text.includes("問"))) {
+			return {
+				hasQA: true,
+				asker: agentMatch[1].trim(),
+				askerContent: agentMatch[2].trim().substring(0, 300),
+				responder: "",
+				responderContent: ""
+			}
+		}
+		
+		// Check for handoff patterns
+		const fromMatch = text.match(handoffFromPattern)
+		const toMatch = text.match(handoffToPattern)
+		if (fromMatch && toMatch) {
+			return {
+				hasQA: true,
+				asker: fromMatch[1].trim(),
+				askerContent: text.substring(0, 200),
+				responder: toMatch[1].trim(),
+				responderContent: ""
+			}
+		}
+		
+		return empty
+	}, [])
+	
+	// Map agent slug to display name & color
+	const getAgentDisplayInfo = useCallback((slug: string): { name: string; color: string; icon: string } => {
+		const normalized = slug.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_")
+		if (normalized.includes("architect")) return { name: "Architect", color: "#10B981", icon: "🔷" }
+		if (normalized.includes("designer")) return { name: "Designer", color: "#EC4899", icon: "🎨" }
+		if (normalized.includes("builder")) return { name: "Builder", color: "#3B82F6", icon: "🟩" }
+		if (normalized.includes("qa")) return { name: "QA", color: "#F59E0B", icon: "🧪" }
+		if (normalized.includes("sentinel")) return { name: "Sentinel", color: "#EF4444", icon: "🛡️" }
+		if (normalized.includes("code")) return { name: "Code Review", color: "#8B5CF6", icon: "📝" }
+		if (normalized.includes("design")) return { name: "Design Review", color: "#F59E0B", icon: "🔎" }
+		if (normalized.includes("test")) return { name: "Test Review", color: "#22D3EE", icon: "✅" }
+		if (normalized.includes("final")) return { name: "Final Review", color: "#10B981", icon: "🏁" }
+		return { name: slug, color: "#64748B", icon: "💬" }
+	}, [])
+	
+	// Ref for auto-scrolling messages container
+	const messagesContainerRef = useRef<HTMLDivElement>(null)
+	const messagesEndRef = useRef<HTMLDivElement>(null)
+	
+	// Auto-scroll to bottom when new messages arrive
+	useEffect(() => {
+		if (messagesEndRef.current) {
+			messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+		}
+	}, [recentMessages, streamingContent])
 
 	return (
 		<div
@@ -117,68 +342,88 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 
 								{/* Status badges and controls */}
 				<div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-					{/* Task ID */}
-					<div
-						style={{
-							padding: "4px 10px",
-							borderRadius: "4px",
-							background: "#1E293B",
-							fontFamily: "'JetBrains Mono', monospace",
-							fontSize: "10px",
-							color: "#64748B",
-						}}
-					>
-						TASK-001 WORKFLOW.RUN
-					</div>
+					{/* API Config Profile Selector */}
+				<ApiConfigSelector
+					value={(() => {
+						const currentConfig = listApiConfigMeta?.find((config) => config.name === currentApiConfigName)
+						return currentConfig?.id || ""
+					})()}
+					displayName={currentApiConfigName || apiConfiguration?.apiModelId || "設定檔"}
+					title="選擇 API 設定檔"
+					disabled={false}
+					onChange={(configId) => {
+						// configId is the ID, not the name - use the correct message type
+						vscode.postMessage({ type: "loadApiConfigurationById", text: configId })
+					}}
+					listApiConfigMeta={listApiConfigMeta || []}
+					pinnedApiConfigs={pinnedApiConfigs}
+					togglePinnedApiConfig={togglePinnedApiConfig}
+				/>
 
-					{/* Control buttons */}
-					<button
-						onClick={() => {
-							// eslint-disable-next-line @typescript-eslint/no-explicit-any
-							(window as any).vscode?.postMessage({ type: "cancelTask" })
-						}}
-						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: "4px",
-							padding: "6px 12px",
-							borderRadius: "6px",
-							background: "#EF4444",
-							border: "none",
-							cursor: "pointer",
-							fontFamily: "'Inter', sans-serif",
-							fontSize: "10px",
-							fontWeight: 600,
-							color: "#FFFFFF",
-						}}
-					>
-						<span style={{ fontSize: "12px" }}>⏹</span>
-						中斷
-					</button>
+					{/* Show simple model display when no configs available */}
+					{(!listApiConfigMeta || listApiConfigMeta.length === 0) && apiConfiguration?.apiModelId && (
+						<div
+							style={{
+								padding: "4px 10px",
+								borderRadius: "4px",
+								background: "#1E293B",
+								fontFamily: "'JetBrains Mono', monospace",
+								fontSize: "10px",
+								color: "#94A3B8",
+							}}
+						>
+							🤖 {apiConfiguration.apiModelId}
+						</div>
+					)}
 
-					<button
-						onClick={() => {
-							// eslint-disable-next-line @typescript-eslint/no-explicit-any
-							(window as any).vscode?.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
-						}}
-						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: "4px",
-							padding: "6px 12px",
-							borderRadius: "6px",
-							background: "#10B981",
-							border: "none",
-							cursor: "pointer",
-							fontFamily: "'Inter', sans-serif",
-							fontSize: "10px",
-							fontWeight: 600,
-							color: "#FFFFFF",
-						}}
-					>
-						<span style={{ fontSize: "12px" }}>▶</span>
-						繼續
-					</button>
+					{/* Control buttons - show Cancel when streaming, Continue when not */}
+					{isStreaming ? (
+						<button
+							onClick={() => {
+								vscode.postMessage({ type: "cancelTask" })
+							}}
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "4px",
+								padding: "6px 12px",
+								borderRadius: "6px",
+								background: "#EF4444",
+								border: "none",
+								cursor: "pointer",
+								fontFamily: "'Inter', sans-serif",
+								fontSize: "10px",
+								fontWeight: 600,
+								color: "#FFFFFF",
+							}}
+						>
+							<span style={{ fontSize: "12px" }}>⏹</span>
+							中斷
+						</button>
+					) : (
+						<button
+							onClick={() => {
+								vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
+							}}
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "4px",
+								padding: "6px 12px",
+								borderRadius: "6px",
+								background: "#10B981",
+								border: "none",
+								cursor: "pointer",
+								fontFamily: "'Inter', sans-serif",
+								fontSize: "10px",
+								fontWeight: 600,
+								color: "#FFFFFF",
+							}}
+						>
+							<span style={{ fontSize: "12px" }}>▶</span>
+							繼續
+						</button>
+					)}
 
 					{/* Active status */}
 					<div
@@ -222,7 +467,11 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 					alignItems: "center",
 					overflowX: "auto",
 					padding: "8px 0",
+					// Hide scrollbar while maintaining scroll functionality
+					scrollbarWidth: "none", // Firefox
+					msOverflowStyle: "none", // IE/Edge
 				}}
+				className="hide-scrollbar"
 			>
 				{WORKFLOW_STAGES.map((stage, index) => {
 					const status = getStageStatus(stage.id)
@@ -291,9 +540,65 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 					<AgentTopologyCanvas
 						currentAgent={currentAgent}
 						completedAgents={completedAgents}
-						activities={{ [currentAgent]: activity }}
+						activities={agentActivities}
 						tasks={{}}
+						isStreaming={isStreaming}
 					/>
+					
+					{/* UI Design Preview - Shows when Designer is active */}
+					{(currentAgent === "DESIGNER" || currentAgent === "DESIGN_REVIEW") && (
+						<div
+							style={{
+								marginTop: "12px",
+								background: "#1E293B",
+								borderRadius: "12px",
+								border: "1px solid rgba(236, 72, 153, 0.3)",
+								padding: "12px",
+								minHeight: "200px",
+								maxHeight: "400px",
+								overflowY: "auto",
+							}}
+						>
+							{/* Header */}
+							<div
+								style={{
+									display: "flex",
+									justifyContent: "space-between",
+									alignItems: "center",
+									marginBottom: "10px",
+								}}
+							>
+								<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+									<span style={{ fontSize: "14px" }}>🎨</span>
+									<span
+										style={{
+											color: "#EC4899",
+											fontFamily: "'Inter', sans-serif",
+											fontSize: "12px",
+											fontWeight: 600,
+										}}
+									>
+										UI Design Canvas
+									</span>
+								</div>
+								<span
+									style={{
+										padding: "3px 8px",
+										borderRadius: "100px",
+										background: "rgba(236, 72, 153, 0.2)",
+										color: "#EC4899",
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "9px",
+									}}
+								>
+									{currentAgent === "DESIGN_REVIEW" ? "REVIEWING" : "DESIGNING"}
+								</span>
+							</div>
+							
+							{/* UIDesignCanvasPreview Component */}
+							<UIDesignCanvasPreview />
+						</div>
+					)}
 				</div>
 
 				{/* AI-to-AI Conversation Panel */}
@@ -301,10 +606,14 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 					style={{
 						flex: "1 1 35%",
 						minWidth: "280px",
+						maxHeight: "400px", // Fixed height for independent scrolling
 						background: "#1E293B",
 						borderRadius: "12px",
 						padding: "12px",
 						border: "1px solid rgba(71, 85, 105, 0.3)",
+						display: "flex",
+						flexDirection: "column",
+						overflow: "hidden",
 					}}
 				>
 					{/* Conversation Header */}
@@ -352,187 +661,609 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 						</span>
 					</div>
 
-					{/* Agent Badges */}
-					{handoff && (
+					{/* Pencil-Style Agent Status Indicators */}
+					<div style={{ display: "flex", gap: "12px", marginBottom: "12px" }}>
+						{/* Left: Asking Agent Status */}
 						<div
 							style={{
-								display: "flex",
-								gap: "8px",
-								marginBottom: "12px",
+								flex: 1,
+								padding: "10px 12px",
+								borderRadius: "8px",
+								background: "#0F172A",
+								border: `1px solid ${handoff ? (AGENT_COLORS[handoff.from] || "#3B82F6") : agentColor}`,
 							}}
 						>
-							<div
-								style={{
-									flex: 1,
-									padding: "8px",
-									borderRadius: "8px",
-									background: "#0F172A",
-									border: `1px solid ${AGENT_COLORS[handoff.from] || "#475569"}`,
-								}}
-							>
-								<div
-									style={{
-										fontFamily: "'Inter', sans-serif",
-										fontSize: "10px",
-										fontWeight: 600,
-										color: AGENT_COLORS[handoff.from] || "#64748B",
-									}}
-								>
-									{handoff.from} Agent
+							<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+								<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+									<span style={{ fontSize: "12px" }}>{handoff ? "🟦" : "🔷"}</span>
+									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "11px", fontWeight: 600, color: handoff ? (AGENT_COLORS[handoff.from] || "#3B82F6") : agentColor }}>
+										{handoff?.from || currentAgent} Agent
+									</span>
 								</div>
-								<div
-									style={{
-										fontFamily: "'JetBrains Mono', monospace",
-										fontSize: "8px",
-										color: "#475569",
-										marginTop: "2px",
-									}}
-								>
-									STATE: WAITING_FOR_RESPONSE
-								</div>
+								<span style={{
+									padding: "2px 8px",
+									borderRadius: "100px",
+									background: "#F59E0B",
+									fontFamily: "'JetBrains Mono', monospace",
+									fontSize: "8px",
+									fontWeight: 700,
+									color: "#0A0F1C",
+								}}>ASKING</span>
 							</div>
-							<div
-								style={{
-									flex: 1,
-									padding: "8px",
-									borderRadius: "8px",
-									background: AGENT_COLORS[handoff.to || currentAgent] || "#0F172A",
-								}}
-							>
-								<div
-									style={{
-										fontFamily: "'Inter', sans-serif",
-										fontSize: "10px",
-										fontWeight: 600,
-										color: "#FFFFFF",
-									}}
-								>
-									{handoff.to || currentAgent} Agent
-								</div>
-								<div
-									style={{
-										fontFamily: "'JetBrains Mono', monospace",
-										fontSize: "8px",
-										color: "rgba(255,255,255,0.7)",
-										marginTop: "2px",
-									}}
-								>
-									STATE: PROCESSING
-								</div>
+							<div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "8px", color: "#64748B", marginTop: "4px" }}>
+								State: WAITING_FOR_ANSWER
 							</div>
 						</div>
-					)}
+						
+						{/* Right: Responding Agent Status */}
+						<div
+							style={{
+								flex: 1,
+								padding: "10px 12px",
+								borderRadius: "8px",
+								background: "#0F172A",
+								border: `1px solid ${agentColor}`,
+							}}
+						>
+							<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+								<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+									<span style={{ fontSize: "12px" }}>🟢</span>
+									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "11px", fontWeight: 600, color: agentColor }}>
+										{currentAgent} Agent
+									</span>
+								</div>
+								<span style={{
+									padding: "2px 8px",
+									borderRadius: "100px",
+									background: "#10B981",
+									fontFamily: "'JetBrains Mono', monospace",
+									fontSize: "8px",
+									fontWeight: 700,
+									color: "#0A0F1C",
+								}}>RESPONDING</span>
+							</div>
+							<div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "8px", color: "#64748B", marginTop: "4px" }}>
+								State: ANSWERING_QUESTION
+							</div>
+						</div>
+					</div>
 
-					{/* Conversation Messages */}
-					<div
-						style={{
-							display: "flex",
-							flexDirection: "column",
-							gap: "8px",
-							maxHeight: "200px",
-							overflowY: "auto",
-						}}
-					>
+					{/* Pencil-Style Vertical Message Stack */}
+					<div ref={messagesContainerRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px", paddingRight: "4px" }}>
+						{/* Asking Agent Message Card */}
 						{handoff && handoff.summary && (
-							<div
-								style={{
-									padding: "10px",
-									borderRadius: "8px",
-									background: "#0F172A",
-									border: `2px solid ${AGENT_COLORS[handoff.from] || "#475569"}`,
-								}}
-							>
-								<div
-									style={{
-										display: "flex",
-										justifyContent: "space-between",
-										alignItems: "center",
-										marginBottom: "6px",
-									}}
-								>
-									<span
-										style={{
-											fontFamily: "'Inter', sans-serif",
-											fontSize: "10px",
-											fontWeight: 600,
-											color: AGENT_COLORS[handoff.from] || "#64748B",
-										}}
-									>
+							<div style={{
+								background: "#0F172A",
+								borderRadius: "10px",
+								border: `2px solid ${AGENT_COLORS[handoff.from] || "#3B82F6"}`,
+								overflow: "hidden",
+							}}>
+								{/* Header */}
+								<div style={{
+									display: "flex",
+									justifyContent: "space-between",
+									alignItems: "center",
+									padding: "10px 14px",
+									background: `linear-gradient(135deg, ${AGENT_COLORS[handoff.from] || "#3B82F6"}20, ${AGENT_COLORS[handoff.from] || "#3B82F6"}10)`,
+									borderBottom: `1px solid ${AGENT_COLORS[handoff.from] || "#3B82F6"}30`,
+								}}>
+									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", fontWeight: 600, color: AGENT_COLORS[handoff.from] || "#3B82F6" }}>
 										{handoff.from}
 									</span>
-									<span
-										style={{
-											fontFamily: "'JetBrains Mono', monospace",
-											fontSize: "8px",
-											color: "#475569",
-										}}
-									>
-										DELEGATING_WORK
-									</span>
+									<span style={{
+										padding: "3px 10px",
+										borderRadius: "6px",
+										background: "rgba(139, 92, 246, 0.2)",
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "9px",
+										fontWeight: 600,
+										color: "#A78BFA",
+									}}>ask_followup_question</span>
 								</div>
-								<div
-									style={{
+								{/* Content */}
+								<div style={{ padding: "14px" }}>
+									<div style={{
 										fontFamily: "'Inter', sans-serif",
-										fontSize: "10px",
-										color: "#94A3B8",
-										lineHeight: "1.4",
-									}}
-								>
-									{handoff.summary}
+										fontSize: "12px",
+										color: AGENT_COLORS[handoff.from] || "#3B82F6",
+										marginBottom: "8px",
+										fontWeight: 600,
+									}}>? 關於實現的問題：</div>
+									<div style={{
+										fontFamily: "'Inter', sans-serif",
+										fontSize: "12px",
+										color: "#E2E8F0",
+										lineHeight: "1.7",
+										whiteSpace: "pre-wrap",
+									}}>
+										{handoff.summary}
+									</div>
 								</div>
 							</div>
 						)}
-
+						
+						{/* Responding Agent Message Card */}
 						{activity && (
+							<div style={{
+								background: "#0F172A",
+								borderRadius: "10px",
+								border: `2px solid ${agentColor}`,
+								overflow: "hidden",
+							}}>
+								{/* Header */}
+								<div style={{
+									display: "flex",
+									justifyContent: "space-between",
+									alignItems: "center",
+									padding: "10px 14px",
+									background: `linear-gradient(135deg, ${agentColor}20, ${agentColor}10)`,
+									borderBottom: `1px solid ${agentColor}30`,
+								}}>
+									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", fontWeight: 600, color: agentColor }}>
+										{currentAgent}
+									</span>
+									<span style={{
+										padding: "3px 10px",
+										borderRadius: "6px",
+										background: "rgba(16, 185, 129, 0.2)",
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "9px",
+										fontWeight: 600,
+										color: "#10B981",
+									}}>response</span>
+								</div>
+								{/* Content */}
+								<div style={{ padding: "14px" }}>
+									<div style={{
+										fontFamily: "'Inter', sans-serif",
+										fontSize: "12px",
+										color: agentColor,
+										marginBottom: "8px",
+										fontWeight: 600,
+									}}>💬 {isStreaming ? "正在回覆..." : "回覆"}</div>
+									<div style={{
+										fontFamily: "'Inter', sans-serif",
+										fontSize: "12px",
+										color: "#E2E8F0",
+										lineHeight: "1.7",
+										whiteSpace: "pre-wrap",
+										maxHeight: "200px",
+										overflowY: "auto",
+									}}>
+										{streamingContent || activity}
+										{isStreaming && (
+											<span style={{
+												display: "inline-block",
+												width: "2px",
+												height: "14px",
+												background: agentColor,
+												marginLeft: "2px",
+												animation: "pulse 0.5s ease-in-out infinite",
+											}} />
+										)}
+									</div>
+								</div>
+							</div>
+						)}
+						{/* API Request Loading Indicator - shows when streaming but no content yet */}
+						{isStreaming && !streamingContent && (
 							<div
 								style={{
-									padding: "10px",
+									display: "flex",
+									alignItems: "center",
+									gap: "8px",
+									padding: "12px",
 									borderRadius: "8px",
-									background: agentColor,
+									background: "rgba(16, 185, 129, 0.1)",
+									border: "1px solid rgba(16, 185, 129, 0.3)",
 								}}
 							>
 								<div
 									style={{
-										display: "flex",
-										justifyContent: "space-between",
-										alignItems: "center",
-										marginBottom: "6px",
+										width: "8px",
+										height: "8px",
+										borderRadius: "50%",
+										background: "#10B981",
+										animation: "pulse 1s ease-in-out infinite",
 									}}
-								>
-									<span
+								/>
+								<span style={{ color: "#10B981", fontFamily: "'Inter', sans-serif", fontSize: "12px", fontWeight: 500 }}>
+									API 請求中...
+								</span>
+							</div>
+						)}
+					{/* Recent Messages with SSE Streaming Integration */}
+					<div ref={messagesContainerRef} style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", paddingRight: "4px" }}>
+				{recentMessages.slice(-10).map((msg: any, idx: number) => {
+					const text = msg.text || ""
+					if (!text.trim()) return null
+					
+					// Check if this is the last message and it's streaming (partial)
+					const isLastMessage = idx === recentMessages.slice(-10).length - 1
+					const isPartialMessage = msg.partial === true
+					const isCurrentlyStreaming = isLastMessage && isPartialMessage && isStreaming
+
+					// Skip JSON config messages (starts with { and contains common config keys)
+					const trimmedText = text.trim()
+					if (trimmedText.startsWith("{") && (
+						trimmedText.includes('"apiProtocol"') ||
+						trimmedText.includes('"tokensIn"') ||
+						trimmedText.includes('"cacheWrites"') ||
+						trimmedText.includes('"cacheReads"') ||
+						trimmedText.includes('"cost"')
+					)) {
+						return null
+					}
+					
+						// Detect error messages
+					const isError = trimmedText.includes("Error") || 
+						trimmedText.includes("error") ||
+						trimmedText.includes("failed") ||
+						trimmedText.includes("FAILED") ||
+						trimmedText.includes("ERR_")
+					
+						// Detect ask type messages (AI requesting user action)
+					const isAskMessage = msg.type === "ask"
+					const askType = msg.ask // e.g., "tool", "followup", "command", etc.
+					
+					// Clean up display text early for use in ask messages and regular messages
+					const displayText = trimmedText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+					
+					// Render ask messages with Pencil-style UI
+					if (isAskMessage) {
+						return (
+							<div key={msg.ts || idx} style={{
+								padding: "16px",
+								borderRadius: "12px",
+								background: "linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(59, 130, 246, 0.1) 100%)",
+								border: "1px solid rgba(139, 92, 246, 0.4)",
+								backdropFilter: "blur(8px)",
+							}}>
+								{/* Header with icon */}
+								<div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+									<div style={{
+										width: "32px",
+										height: "32px",
+										borderRadius: "50%",
+										background: "linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%)",
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "center",
+										fontSize: "14px",
+									}}>
+										💬
+									</div>
+									<div>
+										<div style={{ fontFamily: "'Inter', sans-serif", fontSize: "12px", fontWeight: 600, color: "#A78BFA" }}>
+											{currentAgent} 請求確認
+										</div>
+										<div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "9px", color: "#94A3B8" }}>
+											{askType === "tool" ? "工具執行請求" : 
+											 askType === "followup" ? "跟進問題" : 
+											 askType === "command" ? "命令執行" : "等待回應"}
+										</div>
+									</div>
+								</div>
+								
+								{/* Content */}
+								<div style={{
+									fontFamily: "'Inter', sans-serif",
+									fontSize: "11px",
+									color: "#E2E8F0",
+									lineHeight: "1.6",
+									padding: "10px",
+									borderRadius: "8px",
+									background: "rgba(0, 0, 0, 0.2)",
+									marginBottom: "12px",
+									maxHeight: "150px",
+									overflowY: "auto",
+								}}>
+									{displayText}
+								</div>
+								
+								{/* Quick action buttons */}
+								<div style={{ display: "flex", gap: "8px" }}>
+									<button
+										onClick={() => vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })}
 										style={{
+											flex: 1,
+											padding: "8px 12px",
+											borderRadius: "6px",
+											background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+											border: "none",
+											cursor: "pointer",
 											fontFamily: "'Inter', sans-serif",
 											fontSize: "10px",
 											fontWeight: 600,
-											color: "#0A0F1C",
+											color: "#FFFFFF",
+											display: "flex",
+											alignItems: "center",
+											justifyContent: "center",
+											gap: "4px",
 										}}
 									>
-										{currentAgent}
-									</span>
-									<span
+										✓ 允許
+									</button>
+									<button
+										onClick={() => vscode.postMessage({ type: "askResponse", askResponse: "noButtonClicked" })}
 										style={{
-											fontFamily: "'JetBrains Mono', monospace",
-											fontSize: "8px",
-											color: "rgba(0,0,0,0.5)",
+											flex: 1,
+											padding: "8px 12px",
+											borderRadius: "6px",
+											background: "rgba(239, 68, 68, 0.2)",
+											border: "1px solid rgba(239, 68, 68, 0.4)",
+											cursor: "pointer",
+											fontFamily: "'Inter', sans-serif",
+											fontSize: "10px",
+											fontWeight: 600,
+											color: "#F87171",
+											display: "flex",
+											alignItems: "center",
+											justifyContent: "center",
+											gap: "4px",
 										}}
 									>
-										WORKING
-									</span>
-								</div>
-								<div
-									style={{
-										fontFamily: "'Inter', sans-serif",
-										fontSize: "10px",
-										color: "#0A0F1C",
-										lineHeight: "1.4",
-									}}
-								>
-									{activity}
+										✕ 拒絕
+									</button>
 								</div>
 							</div>
-						)}
+						)
+					}
+					
+					// Detect AI-to-AI Q&A conversations and render as dual-card
+					const aiConversation = parseAIConversation(text)
+					if (aiConversation.hasQA) {
+						const askerInfo = getAgentDisplayInfo(aiConversation.asker)
+						const responderInfo = getAgentDisplayInfo(aiConversation.responder)
+						return (
+							<div key={msg.ts || idx} style={{
+								display: "flex",
+								gap: "12px",
+								marginBottom: "12px",
+							}}>
+								{/* Asker Card (ASKING) */}
+								<div style={{
+									flex: 1,
+									background: "#0F172A",
+									borderRadius: "12px",
+									border: `2px solid ${askerInfo.color}`,
+									overflow: "hidden",
+								}}>
+									<div style={{
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "space-between",
+										padding: "10px 12px",
+										background: `linear-gradient(135deg, ${askerInfo.color}20, ${askerInfo.color}10)`,
+										borderBottom: `1px solid ${askerInfo.color}30`,
+									}}>
+										<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+											<span style={{ fontSize: "16px" }}>{askerInfo.icon}</span>
+											<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "12px", fontWeight: 600, color: askerInfo.color }}>
+												{askerInfo.name} Agent
+											</span>
+										</div>
+										<span style={{
+											padding: "3px 8px",
+											borderRadius: "100px",
+											background: "#F59E0B20",
+											color: "#F59E0B",
+											fontFamily: "'JetBrains Mono', monospace",
+											fontSize: "8px",
+											fontWeight: 600,
+										}}>ASKING</span>
+									</div>
+									<div style={{ padding: "12px" }}>
+										<div style={{
+											fontFamily: "'Inter', sans-serif",
+											fontSize: "12px",
+											color: askerInfo.color,
+											marginBottom: "8px",
+											fontWeight: 600,
+										}}>? 提問</div>
+										<div style={{
+											fontFamily: "'Inter', sans-serif",
+											fontSize: "11px",
+											color: "#E2E8F0",
+											lineHeight: "1.6",
+											maxHeight: "120px",
+											overflowY: "auto",
+										}}>
+											{aiConversation.askerContent.substring(0, 300)}{aiConversation.askerContent.length > 300 ? "..." : ""}
+										</div>
+									</div>
+								</div>
+								
+								{/* Responder Card (RESPONDING) */}
+								<div style={{
+									flex: 1,
+									background: "#0F172A",
+									borderRadius: "12px",
+									border: `2px solid ${responderInfo.color}`,
+									overflow: "hidden",
+								}}>
+									<div style={{
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "space-between",
+										padding: "10px 12px",
+										background: `linear-gradient(135deg, ${responderInfo.color}20, ${responderInfo.color}10)`,
+										borderBottom: `1px solid ${responderInfo.color}30`,
+									}}>
+										<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+											<span style={{ fontSize: "16px" }}>{responderInfo.icon}</span>
+											<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "12px", fontWeight: 600, color: responderInfo.color }}>
+												{responderInfo.name} Agent
+											</span>
+										</div>
+										<span style={{
+											padding: "3px 8px",
+											borderRadius: "100px",
+											background: "#10B98120",
+											color: "#10B981",
+											fontFamily: "'JetBrains Mono', monospace",
+											fontSize: "8px",
+											fontWeight: 600,
+										}}>RESPONDING</span>
+									</div>
+									<div style={{ padding: "12px" }}>
+										<div style={{
+											fontFamily: "'Inter', sans-serif",
+											fontSize: "12px",
+											color: responderInfo.color,
+											marginBottom: "8px",
+											fontWeight: 600,
+										}}>💬 回覆</div>
+										<div style={{
+											fontFamily: "'Inter', sans-serif",
+											fontSize: "11px",
+											color: "#E2E8F0",
+											lineHeight: "1.6",
+											maxHeight: "120px",
+											overflowY: "auto",
+										}}>
+											{aiConversation.responderContent.substring(0, 300)}{aiConversation.responderContent.length > 300 ? "..." : ""}
+										</div>
+									</div>
+								</div>
+							</div>
+						)
+					}
+					
+					// Detect file operations (write_to_file)
+					const fileWriteMatch = text.match(/write_to_file[^]*?(?:path|file)[:\s]*[`"']?([^\s`"'<>]+\.(ts|tsx|js|jsx|md|json|vue|css|html|py))[`"']?/i)
+					const fileCreateMatch = text.match(/(?:created|創建|建立)[^]*?(?:file|檔案)?[:\s]*[`"']?([^\s`"'<>]+\.(ts|tsx|js|jsx|md|json|vue|css|html|py))[`"']?/i)
+					const detectedFile = fileWriteMatch?.[1] || fileCreateMatch?.[1]
+					
+					if (detectedFile) {
+						return (
+							<div key={msg.ts || idx} style={{
+								padding: "12px",
+								borderRadius: "10px",
+								background: "linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(59, 130, 246, 0.1) 100%)",
+								border: "1px solid rgba(16, 185, 129, 0.4)",
+								display: "flex",
+								alignItems: "center",
+								gap: "12px",
+							}}>
+								<div style={{
+									width: "36px",
+									height: "36px",
+									borderRadius: "8px",
+									background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+									display: "flex",
+									alignItems: "center",
+									justifyContent: "center",
+									fontSize: "18px",
+								}}>📄</div>
+								<div>
+									<div style={{ fontFamily: "'Inter', sans-serif", fontSize: "12px", fontWeight: 600, color: "#10B981" }}>
+										檔案已建立
+									</div>
+									<div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#E2E8F0", marginTop: "2px" }}>
+										{detectedFile}
+									</div>
+								</div>
+								<div style={{
+									marginLeft: "auto",
+									padding: "4px 10px",
+									borderRadius: "6px",
+									background: "rgba(16, 185, 129, 0.2)",
+									fontFamily: "'JetBrains Mono', monospace",
+									fontSize: "9px",
+									color: "#10B981",
+								}}>✓ CREATED</div>
+							</div>
+						)
+					}
+					
+					// Skip non-error SYSTEM messages
+					const isAI = msg.type === "say" && msg.say === "text"
+					if (!isAI && !isError) return null
+					
+					// For streaming messages, show full content; for completed, truncate
+					let truncatedDisplayText = displayText
+					if (!isCurrentlyStreaming) {
+						truncatedDisplayText = displayText.length > 200 ? displayText.substring(0, 200) + "..." : displayText
+					}
+					
+					// Streaming message style - use agent color background
+					if (isCurrentlyStreaming) {
+						return (
+							<div key={msg.ts || idx} style={{ 
+								padding: "10px", 
+								borderRadius: "8px", 
+								background: agentColor,
+								border: `2px solid ${agentColor}`,
+								animation: "borderPulse 1.5s ease-in-out infinite",
+							}}>
+								<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "10px", fontWeight: 600, color: "#0A0F1C" }}>
+										{currentAgent}
+									</span>
+									<span style={{ 
+										display: "flex", 
+										alignItems: "center", 
+										gap: "4px", 
+										fontFamily: "'JetBrains Mono', monospace", 
+										fontSize: "8px", 
+										color: "rgba(0,0,0,0.6)",
+									}}>
+										<span style={{ 
+											width: "4px", 
+											height: "4px", 
+											borderRadius: "50%", 
+											background: "#0A0F1C",
+											animation: "pulse 0.8s ease-in-out infinite",
+										}} />
+										STREAMING
+									</span>
+								</div>
+								<div style={{ 
+									fontFamily: "'Inter', sans-serif", 
+									fontSize: "11px", 
+									color: "#0A0F1C", 
+									lineHeight: "1.5",
+									whiteSpace: "pre-wrap",
+									wordBreak: "break-word",
+									maxHeight: "300px",
+									overflowY: "auto",
+								}}>
+									{displayText}
+									<span style={{ 
+										display: "inline-block",
+										width: "2px",
+										height: "14px",
+										background: "#0A0F1C",
+										marginLeft: "2px",
+										animation: "pulse 0.5s ease-in-out infinite",
+									}} />
+								</div>
+							</div>
+						)
+					}
+					
+					// Regular completed message style
+					return (
+						<div key={msg.ts || idx} style={{ 
+							padding: "8px", 
+							borderRadius: "6px", 
+							background: isError ? "rgba(239, 68, 68, 0.1)" : (isAI ? "rgba(16, 185, 129, 0.1)" : "#1E293B"), 
+							border: isError ? "1px solid rgba(239, 68, 68, 0.3)" : (isAI ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid #334155") 
+						}}>
+							<div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "8px", color: isError ? "#EF4444" : (isAI ? "#10B981" : "#64748B"), marginBottom: "4px" }}>
+								{isError ? "⚠ ERROR" : (isAI ? detectAgentFromContent(text) : "SYSTEM")}
+							</div>
+							<div style={{ fontFamily: "'Inter', sans-serif", fontSize: "10px", color: isError ? "#F87171" : "#94A3B8", lineHeight: "1.4", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+								{truncatedDisplayText}
+							</div>
+						</div>
+					)
+				})}
+					{/* Scroll anchor for auto-scroll to bottom */}
+					<div ref={messagesEndRef} />
 					</div>
-				</div>
+					</div>
 			</div>
 
 			<style>{`
@@ -594,6 +1325,13 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 					background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
 					background-size: 200% 100%;
 					animation: shimmer 2s ease-in-out infinite;
+				}
+				.hide-scrollbar::-webkit-scrollbar {
+					display: none;
+				}
+				.hide-scrollbar {
+					-ms-overflow-style: none;
+					scrollbar-width: none;
 				}
 			`}</style>
 		</div>
