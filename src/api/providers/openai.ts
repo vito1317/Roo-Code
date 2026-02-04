@@ -151,21 +151,39 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
+			// vLLM/Ollama compatibility mode: disable tools and stream_options
+			const nativeToolsDisabled = this.options.openAiNativeToolsDisabled === true
 
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
 				temperature: this.options.modelTemperature ?? (deepseekReasoner ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
 				messages: convertedMessages,
 				stream: true as const,
-				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
+				// Skip stream_options for Grok and vLLM/Ollama compatibility mode
+				...((isGrokXAI || nativeToolsDisabled) ? {} : { stream_options: { include_usage: true } }),
 				...(reasoning && reasoning),
-				tools: this.convertToolsForOpenAI(metadata?.tools),
-				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				// Only include tools-related params when not disabled and tools are provided
+				...(!nativeToolsDisabled && metadata?.tools?.length ? {
+					tools: this.convertToolsForOpenAI(metadata.tools),
+					tool_choice: metadata.tool_choice,
+					parallel_tool_calls: metadata.parallelToolCalls ?? true,
+				} : {}),
 			}
 
 			// Add max_tokens if needed
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+
+			// Debug logging for vLLM/Ollama compatibility issues
+			console.log("[OpenAI] Request options:", JSON.stringify({
+				model: requestOptions.model,
+				temperature: requestOptions.temperature,
+				stream: requestOptions.stream,
+				stream_options: (requestOptions as any).stream_options,
+				tools: requestOptions.tools ? `[${requestOptions.tools.length} tools]` : undefined,
+				tool_choice: requestOptions.tool_choice,
+				parallel_tool_calls: requestOptions.parallel_tool_calls,
+				max_completion_tokens: (requestOptions as any).max_completion_tokens,
+			}, null, 2))
 
 			let stream
 			try {
@@ -221,15 +239,20 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				yield this.processUsageMetrics(lastUsage, modelInfo)
 			}
 		} else {
+			// vLLM/Ollama compatibility mode: disable tools
+			const nativeToolsDisabled = this.options.openAiNativeToolsDisabled === true
+			
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
 				messages: deepseekReasoner
 					? convertToR1Format([{ role: "user", content: systemPrompt }, ...messages])
 					: [systemMessage, ...convertToOpenAiMessages(messages)],
-				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
-				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				// Only include tools-related params when not disabled and tools are provided
+				...(!nativeToolsDisabled && metadata?.tools?.length ? {
+					tools: this.convertToolsForOpenAI(metadata.tools),
+					tool_choice: metadata.tool_choice,
+					parallel_tool_calls: metadata.parallelToolCalls ?? true,
+				} : {}),
 			}
 
 			// Add max_tokens if needed
@@ -331,6 +354,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 		if (this.options.openAiStreamingEnabled ?? true) {
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
+			// vLLM/Ollama compatibility mode: disable tools and stream_options
+			const nativeToolsDisabled = this.options.openAiNativeToolsDisabled === true
 
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
@@ -342,13 +367,16 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					...convertToOpenAiMessages(messages),
 				],
 				stream: true,
-				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
+				// Skip stream_options for Grok and vLLM/Ollama compatibility mode
+				...((isGrokXAI || nativeToolsDisabled) ? {} : { stream_options: { include_usage: true } }),
 				reasoning_effort: modelInfo.reasoningEffort as "low" | "medium" | "high" | undefined,
 				temperature: undefined,
-				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
-				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				// Only include tools-related params when not disabled and tools are provided
+				...(!nativeToolsDisabled && metadata?.tools?.length ? {
+					tools: this.convertToolsForOpenAI(metadata.tools),
+					tool_choice: metadata.tool_choice,
+					parallel_tool_calls: metadata.parallelToolCalls ?? true,
+				} : {}),
 			}
 
 			// O3 family models do not support the deprecated max_tokens parameter
@@ -368,6 +396,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			yield* this.handleStreamResponse(stream)
 		} else {
+			// vLLM/Ollama compatibility mode: disable tools
+			const nativeToolsDisabled = this.options.openAiNativeToolsDisabled === true
+			
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
 				messages: [
@@ -379,10 +410,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				],
 				reasoning_effort: modelInfo.reasoningEffort as "low" | "medium" | "high" | undefined,
 				temperature: undefined,
-				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
-				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				// Only include tools-related params when not disabled and tools are provided
+				...(!nativeToolsDisabled && metadata?.tools?.length ? {
+					tools: this.convertToolsForOpenAI(metadata.tools),
+					tool_choice: metadata.tool_choice,
+					parallel_tool_calls: metadata.parallelToolCalls ?? true,
+				} : {}),
 			}
 
 			// O3 family models do not support the deprecated max_tokens parameter

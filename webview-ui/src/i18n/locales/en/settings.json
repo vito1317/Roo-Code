@@ -380,6 +380,8 @@
 		"headerName": "Header name",
 		"headerValue": "Header value",
 		"noCustomHeaders": "No custom headers defined. Click the + button to add one.",
+		"disableNativeTools": "Disable Native Tools (vLLM/Ollama Compatibility)",
+		"disableNativeToolsDescription": "Disable tools, tool_choice, and stream_options parameters for servers like vLLM that don't support these features.",
 		"requestyApiKey": "Requesty API Key",
 		"refreshModels": {
 			"label": "Refresh Models",

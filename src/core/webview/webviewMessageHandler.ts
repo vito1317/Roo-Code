@@ -568,10 +568,15 @@ export const webviewMessageHandler = async (
 
 		case "askResponse":
 			{
+				console.log("[webviewMessageHandler] askResponse received:", message.askResponse, "text:", message.text?.substring(0, 50))
+				const currentTask = provider.getCurrentTask()
+				if (!currentTask) {
+					console.warn("[webviewMessageHandler] askResponse received but NO CURRENT TASK! Response will be lost.")
+				} else {
+					console.log("[webviewMessageHandler] askResponse forwarding to task:", currentTask.taskId)
+				}
 				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-				provider
-					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+				currentTask?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
 			}
 			break
 

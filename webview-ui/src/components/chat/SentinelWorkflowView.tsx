@@ -815,9 +815,17 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 					</div>
 					{/* Recent Messages with SSE Streaming Integration */}
 					<div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", paddingRight: "4px" }}>
-				{recentMessages.slice(-10).map((msg: any, idx: number) => {
+				{(() => {
+					// Pre-calculate the last ask message index for button activation
+					const messagesSlice = recentMessages.slice(-10)
+					const lastAskIndex = messagesSlice.map((m: any, i: number) => m.type === "ask" ? i : -1).filter((i: number) => i >= 0).pop() ?? -1
+					
+					return messagesSlice.map((msg: any, idx: number) => {
 					const text = msg.text || ""
 					if (!text.trim()) return null
+					
+					// Check if this ask message is the LAST (active) one
+					const isLastAskMessage = msg.type === "ask" && idx === lastAskIndex
 					
 					// Check if this is the last message and it's streaming (partial)
 					const isLastMessage = idx === recentMessages.slice(-10).length - 1
@@ -902,51 +910,72 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 									{displayText}
 								</div>
 								
-								{/* Quick action buttons */}
-								<div style={{ display: "flex", gap: "8px" }}>
-									<button
-										onClick={() => vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })}
-										style={{
-											flex: 1,
-											padding: "8px 12px",
-											borderRadius: "6px",
-											background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
-											border: "none",
-											cursor: "pointer",
-											fontFamily: "'Inter', sans-serif",
-											fontSize: "10px",
-											fontWeight: 600,
-											color: "#FFFFFF",
-											display: "flex",
-											alignItems: "center",
-											justifyContent: "center",
-											gap: "4px",
-										}}
-									>
-										✓ 允許
-									</button>
-									<button
-										onClick={() => vscode.postMessage({ type: "askResponse", askResponse: "noButtonClicked" })}
-										style={{
-											flex: 1,
-											padding: "8px 12px",
-											borderRadius: "6px",
-											background: "rgba(239, 68, 68, 0.2)",
-											border: "1px solid rgba(239, 68, 68, 0.4)",
-											cursor: "pointer",
-											fontFamily: "'Inter', sans-serif",
-											fontSize: "10px",
-											fontWeight: 600,
-											color: "#F87171",
-											display: "flex",
-											alignItems: "center",
-											justifyContent: "center",
-											gap: "4px",
-										}}
-									>
-										✕ 拒絕
-									</button>
-								</div>
+								{/* Quick action buttons - only active for the LAST ask message */}
+								{isLastAskMessage ? (
+									<div style={{ display: "flex", gap: "8px" }}>
+										<button
+											onClick={() => {
+												console.log("[SentinelWorkflowView] Tool APPROVE button clicked, sending askResponse yesButtonClicked")
+												vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
+											}}
+											style={{
+												flex: 1,
+												padding: "8px 12px",
+												borderRadius: "6px",
+												background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+												border: "none",
+												cursor: "pointer",
+												fontFamily: "'Inter', sans-serif",
+												fontSize: "10px",
+												fontWeight: 600,
+												color: "#FFFFFF",
+												display: "flex",
+												alignItems: "center",
+												justifyContent: "center",
+												gap: "4px",
+											}}
+										>
+											✓ 允許
+										</button>
+										<button
+											onClick={() => {
+												console.log("[SentinelWorkflowView] Tool REJECT button clicked, sending askResponse noButtonClicked")
+												vscode.postMessage({ type: "askResponse", askResponse: "noButtonClicked" })
+											}}
+											style={{
+												flex: 1,
+												padding: "8px 12px",
+												borderRadius: "6px",
+												background: "rgba(239, 68, 68, 0.2)",
+												border: "1px solid rgba(239, 68, 68, 0.4)",
+												cursor: "pointer",
+												fontFamily: "'Inter', sans-serif",
+												fontSize: "10px",
+												fontWeight: 600,
+												color: "#F87171",
+												display: "flex",
+												alignItems: "center",
+												justifyContent: "center",
+												gap: "4px",
+											}}
+										>
+											✕ 拒絕
+										</button>
+									</div>
+								) : (
+									<div style={{
+										padding: "8px 12px",
+										borderRadius: "6px",
+										background: "rgba(100, 116, 139, 0.2)",
+										border: "1px solid rgba(100, 116, 139, 0.3)",
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "9px",
+										color: "#64748B",
+										textAlign: "center",
+									}}>
+										已處理
+									</div>
+								)}
 							</div>
 						)
 					}
@@ -1119,6 +1148,37 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 						)
 					}
 					
+					// Detect USER messages (user_feedback) - render with USER styling
+					const isUserMessage = msg.type === "say" && msg.say === "user_feedback"
+					if (isUserMessage && displayText) {
+						return (
+							<div key={msg.ts || idx} style={{
+								padding: "12px 16px",
+								borderRadius: "10px",
+								background: "linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(99, 102, 241, 0.1) 100%)",
+								border: "1px solid rgba(59, 130, 246, 0.4)",
+								marginLeft: "20px",
+							}}>
+								<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+									<span style={{ fontSize: "14px" }}>👤</span>
+									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "10px", fontWeight: 600, color: "#3B82F6" }}>
+										USER
+									</span>
+								</div>
+								<div style={{
+									fontFamily: "'Inter', sans-serif",
+									fontSize: "11px",
+									color: "#E2E8F0",
+									lineHeight: "1.5",
+									whiteSpace: "pre-wrap",
+									wordBreak: "break-word",
+								}}>
+									{displayText}
+								</div>
+							</div>
+						)
+					}
+					
 					// Skip non-error SYSTEM messages
 					const isAI = msg.type === "say" && msg.say === "text"
 					if (!isAI && !isError) return null
@@ -1201,7 +1261,7 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 							</div>
 						</div>
 					)
-				})}
+				})})()} 
 					{/* Scroll anchor for auto-scroll to bottom */}
 					<div ref={messagesEndRef} />
 					</div>

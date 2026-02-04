@@ -243,6 +243,8 @@ const openAiSchema = baseProviderSettingsSchema.extend({
 	openAiStreamingEnabled: z.boolean().optional(),
 	openAiHostHeader: z.string().optional(), // Keep temporarily for backward compatibility during migration.
 	openAiHeaders: z.record(z.string(), z.string()).optional(),
+	// vLLM/Ollama compatibility: disable tools/stream_options that these servers don't support
+	openAiNativeToolsDisabled: z.boolean().optional(),
 })
 
 const ollamaSchema = baseProviderSettingsSchema.extend({

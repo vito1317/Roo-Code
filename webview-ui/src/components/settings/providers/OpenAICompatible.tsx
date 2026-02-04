@@ -158,6 +158,17 @@ export const OpenAICompatible = ({
 				onChange={handleInputChange("openAiStreamingEnabled", noTransform)}>
 				{t("settings:modelInfo.enableStreaming")}
 			</Checkbox>
+			{/* vLLM/Ollama compatibility mode */}
+			<div>
+				<Checkbox
+					checked={apiConfiguration?.openAiNativeToolsDisabled ?? false}
+					onChange={handleInputChange("openAiNativeToolsDisabled", noTransform)}>
+					{t("settings:providers.disableNativeTools")}
+				</Checkbox>
+				<div className="text-sm text-vscode-descriptionForeground ml-6">
+					{t("settings:providers.disableNativeToolsDescription")}
+				</div>
+			</div>
 			<div>
 				<Checkbox
 					checked={apiConfiguration?.includeMaxTokens ?? true}

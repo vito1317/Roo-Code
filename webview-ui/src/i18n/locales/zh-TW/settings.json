@@ -333,6 +333,8 @@
 		"headerName": "標頭名稱",
 		"headerValue": "標頭值",
 		"noCustomHeaders": "尚未定義自訂標頭。點選 + 按鈕以新增。",
+		"disableNativeTools": "停用原生工具（vLLM/Ollama 相容性）",
+		"disableNativeToolsDescription": "停用 tools、tool_choice 和 stream_options 參數，適用於不支援這些功能的伺服器（如 vLLM）。",
 		"requestyApiKey": "Requesty API 金鑰",
 		"refreshModels": {
 			"label": "重新整理模型",
