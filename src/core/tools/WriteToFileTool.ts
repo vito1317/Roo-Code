@@ -79,168 +79,128 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			}
 		}
 
+		// =====================================
+		// STRICT PHASE-BASED FILE BLOCKING
+		// =====================================
+		// In Spec Mode, AI can ONLY write the file that corresponds to the CURRENT phase
+		// This prevents AI from jumping ahead to create wrong files
+		console.log(`[WriteToFileTool] Checking spec file: fileName=${fileName}, isSpecsPath=${isSpecsPath}, relPath=${relPath}`)
+		
+		if (isSpecsPath && (fileName === "requirements.md" || fileName === "design.md" || fileName === "tasks.md")) {
+			console.log(`[WriteToFileTool] SPEC FILE DETECTED: ${fileName}, checking phase...`)
+			try {
+				const { checkSpecFilesStatus, determineCurrentPhase, SPEC_MIN_LINES } = await import("../specs/SpecModeContextProvider")
+				const specStatus = checkSpecFilesStatus(task.cwd)
+				const currentPhase = determineCurrentPhase(specStatus, task.cwd)
+				
+				console.log(`[WriteToFileTool] PHASE CHECK:`, {
+					currentPhase,
+					fileName,
+					requirementsExists: specStatus.requirementsExists,
+					requirementsLineCount: specStatus.requirementsLineCount,
+					requirementsComplete: specStatus.requirementsComplete,
+					minRequirements: SPEC_MIN_LINES.requirements
+				})
+				
+				const expectedFile = {
+					requirements: "requirements.md",
+					design: "design.md",
+					tasks: "tasks.md",
+					execution: null // In execution phase, no spec files should be created
+				}[currentPhase]
+				
+				console.log(`[WriteToFileTool] expectedFile=${expectedFile}, fileName=${fileName}, shouldBlock=${expectedFile && fileName !== expectedFile}`)
+				
+				if (expectedFile && fileName !== expectedFile) {
+					console.log(`[WriteToFileTool] *** BLOCKING ${fileName} - wrong phase! ***`)
+					task.consecutiveMistakeCount++
+					task.recordToolError("write_to_file")
+					const phaseNames = {
+						requirements: "Requirements（需求分析）",
+						design: "Design（設計規劃）",
+						tasks: "Tasks（任務分解）",
+						execution: "Execution（任務執行）"
+					}
+					pushToolResult(
+						`🚫 **BLOCKED: 禁止在 ${phaseNames[currentPhase]} 階段建立 ${fileName}！**\n\n` +
+						`目前階段: **${phaseNames[currentPhase]}**\n` +
+						`允許建立的檔案: **${expectedFile}**\n` +
+						`您嘗試建立的檔案: **${fileName}**\n\n` +
+						`**必須按順序完成: requirements.md → design.md → tasks.md**\n\n` +
+						`請專注於完成當前階段的 \`${expectedFile}\`，達到最低行數要求後系統會自動進入下一階段。`
+					)
+					await task.diffViewProvider.reset()
+					return
+				}
+				
+				// In execution phase, block ALL spec file creation
+				if (currentPhase === "execution") {
+					console.log(`[WriteToFileTool] *** BLOCKING ${fileName} - execution phase! ***`)
+					task.consecutiveMistakeCount++
+					task.recordToolError("write_to_file")
+					pushToolResult(
+						`🚫 **BLOCKED: Spec 文件已全部完成！**\n\n` +
+						`所有 spec 文件（requirements.md, design.md, tasks.md）都已經完成。\n\n` +
+						`現在是 Execution 階段，請專注於執行任務，不要再修改 spec 文件。`
+					)
+					await task.diffViewProvider.reset()
+					return
+				}
+			} catch (importError) {
+				console.error(`[WriteToFileTool] ERROR importing SpecModeContextProvider:`, importError)
+			}
+		}
+
 		// GATE: Block design.md creation if requirements.md is incomplete
 		
 		if (fileName === "design.md" && isSpecsPath) {
-			// Check if requirements.md exists and has sufficient coverage
-			const requirementsPath = path.resolve(task.cwd, relPath.replace("design.md", "requirements.md"))
-			try {
-				const requirementsContent = await fs.readFile(requirementsPath, "utf-8")
-				const requirementsLines = requirementsContent.split("\n").length
-				
-				// Get user mentioned files to check coverage
-				const metadata = await task.fileContextTracker.getTaskMetadata(task.taskId)
-				const allFilesInContext = metadata.files_in_context || []
-				const mentionedFiles = allFilesInContext.filter(
-					(entry) => entry.record_source === "file_mentioned"
-				)
-				
-				if (mentionedFiles.length > 0) {
-					let totalUserLines = 0
-					for (const file of mentionedFiles) {
-						try {
-							const filePath = path.resolve(task.cwd, file.path)
-							const fileContent = await fs.readFile(filePath, "utf-8")
-							totalUserLines += fileContent.split("\n").length
-						} catch (e) {
-							// Skip unreadable files
-						}
-					}
-					
-					const coverageRatio = totalUserLines > 0 ? requirementsLines / totalUserLines : 1
-					console.log(`[WriteToFileTool] GATE CHECK - design.md blocked? requirements has ${requirementsLines} lines, user files have ${totalUserLines} lines, coverage: ${(coverageRatio * 100).toFixed(1)}%`)
-					
-					if (totalUserLines > 20 && coverageRatio < 0.8) {
-						// Block design.md creation - requirements not complete
-						task.consecutiveMistakeCount++
-						pushToolResult(
-							`🚫 **BLOCKED: Cannot create design.md yet!**\n\n` +
-							`requirements.md 覆蓋率只有 ${(coverageRatio * 100).toFixed(1)}%（需要至少 80%）。\n\n` +
-							`**必須先完成 requirements.md！**\n\n` +
-							`請立即調用 write_to_file，使用 \`<!-- APPEND -->\` 繼續寫入 .specs/requirements.md，直到覆蓋率達到 80%。\n\n` +
-							`**目前狀態:** ${requirementsLines} 行 / 需要 ${Math.ceil(totalUserLines * 0.8)} 行`
-						)
-						console.log(`[WriteToFileTool] BLOCKED design.md creation - requirements.md incomplete!`)
-						return
-					}
-				} else {
-					// FALLBACK: No mentioned files - use absolute minimum line threshold
-					const MIN_REQUIREMENTS_LINES = 100
-					console.log(`[WriteToFileTool] GATE CHECK - design.md: no mentioned files, using fallback. requirements has ${requirementsLines} lines, minimum: ${MIN_REQUIREMENTS_LINES}`)
-					
-					if (requirementsLines < MIN_REQUIREMENTS_LINES) {
-						task.consecutiveMistakeCount++
-						pushToolResult(
-							`🚫 **BLOCKED: Cannot create design.md yet!**\n\n` +
-							`requirements.md 只有 ${requirementsLines} 行（需要至少 ${MIN_REQUIREMENTS_LINES} 行）。\n\n` +
-							`**必須先完成 requirements.md！**\n\n` +
-							`請立即調用 write_to_file，使用 \`<!-- APPEND -->\` 繼續寫入 .specs/requirements.md。`
-						)
-						console.log(`[WriteToFileTool] BLOCKED design.md creation - requirements.md below minimum lines!`)
-						return
-					}
-				}
-			} catch (e) {
-				// requirements.md doesn't exist - also block
+			// Use unified SPEC_MIN_LINES for consistent checks
+			const { checkSpecFilesStatus, SPEC_MIN_LINES } = await import("../specs/SpecModeContextProvider")
+			const specStatus = checkSpecFilesStatus(task.cwd)
+			
+			if (!specStatus.requirementsComplete) {
+				// Block design.md creation - requirements not complete
 				task.consecutiveMistakeCount++
 				pushToolResult(
 					`🚫 **BLOCKED: Cannot create design.md yet!**\n\n` +
-					`requirements.md 尚未創建或無法讀取。\n\n` +
-					`**必須先創建並完成 requirements.md！**`
+					`requirements.md 只有 ${specStatus.requirementsLineCount} 行（需要至少 ${SPEC_MIN_LINES.requirements} 行）。\n\n` +
+					`**必須先完成 requirements.md！**\n\n` +
+					`請立即調用 write_to_file，使用 \`<!-- APPEND -->\` 繼續寫入 .specs/requirements.md。`
 				)
-				console.log(`[WriteToFileTool] BLOCKED design.md creation - requirements.md not found!`)
+				console.log(`[WriteToFileTool] BLOCKED design.md creation - requirements.md incomplete (${specStatus.requirementsLineCount}/${SPEC_MIN_LINES.requirements} lines)!`)
 				return
 			}
 		}
 
-		// GATE: Block tasks.md creation if requirements.md is incomplete OR design.md doesn't exist
+		// GATE: Block tasks.md creation if requirements.md or design.md is incomplete
 		if (fileName === "tasks.md" && isSpecsPath) {
-			const specsDir = path.dirname(path.resolve(task.cwd, relPath))
-			const requirementsPath = path.join(specsDir, "requirements.md")
-			const designPath = path.join(specsDir, "design.md")
+			// Use unified SPEC_MIN_LINES for consistent checks
+			const { checkSpecFilesStatus, SPEC_MIN_LINES } = await import("../specs/SpecModeContextProvider")
+			const specStatus = checkSpecFilesStatus(task.cwd)
 			
-			try {
-				// First check: requirements.md must exist and be complete
-				const requirementsContent = await fs.readFile(requirementsPath, "utf-8")
-				const requirementsLines = requirementsContent.split("\n").length
-				
-				// Get user mentioned files to check coverage
-				const metadata = await task.fileContextTracker.getTaskMetadata(task.taskId)
-				const allFilesInContext = metadata.files_in_context || []
-				const mentionedFiles = allFilesInContext.filter(
-					(entry) => entry.record_source === "file_mentioned"
-				)
-				
-					if (mentionedFiles.length > 0) {
-					let totalUserLines = 0
-					for (const file of mentionedFiles) {
-						try {
-							const filePath = path.resolve(task.cwd, file.path)
-							const fileContent = await fs.readFile(filePath, "utf-8")
-							totalUserLines += fileContent.split("\n").length
-						} catch (e) {
-							// Skip unreadable files
-						}
-					}
-					
-					const coverageRatio = totalUserLines > 0 ? requirementsLines / totalUserLines : 1
-					console.log(`[WriteToFileTool] GATE CHECK - tasks.md: requirements has ${requirementsLines} lines, coverage: ${(coverageRatio * 100).toFixed(1)}%`)
-					
-					if (totalUserLines > 20 && coverageRatio < 0.8) {
-						// Block tasks.md - requirements not complete
-						task.consecutiveMistakeCount++
-						pushToolResult(
-							`🚫 **BLOCKED: Cannot create tasks.md yet!**\n\n` +
-							`requirements.md 覆蓋率只有 ${(coverageRatio * 100).toFixed(1)}%（需要至少 80%）。\n\n` +
-							`**必須先完成 requirements.md！**\n\n` +
-							`請立即調用 write_to_file，使用 \`<!-- APPEND -->\` 繼續寫入 .specs/requirements.md，直到覆蓋率達到 80%。`
-						)
-						console.log(`[WriteToFileTool] BLOCKED tasks.md creation - requirements.md incomplete!`)
-						return
-					}
-				} else {
-					// FALLBACK: No mentioned files - use absolute minimum line threshold
-					const MIN_REQUIREMENTS_LINES = 100
-					console.log(`[WriteToFileTool] GATE CHECK - tasks.md: no mentioned files, using fallback. requirements has ${requirementsLines} lines, minimum: ${MIN_REQUIREMENTS_LINES}`)
-					
-					if (requirementsLines < MIN_REQUIREMENTS_LINES) {
-						task.consecutiveMistakeCount++
-						pushToolResult(
-							`🚫 **BLOCKED: Cannot create tasks.md yet!**\n\n` +
-							`requirements.md 只有 ${requirementsLines} 行（需要至少 ${MIN_REQUIREMENTS_LINES} 行）。\n\n` +
-							`**必須先完成 requirements.md！**\n\n` +
-							`請立即調用 write_to_file，使用 \`<!-- APPEND -->\` 繼續寫入 .specs/requirements.md。`
-						)
-						console.log(`[WriteToFileTool] BLOCKED tasks.md creation - requirements.md below minimum lines!`)
-						return
-					}
-				}
-				
-				// Second check: design.md must exist
-				try {
-					await fs.access(designPath)
-				} catch (e) {
-					// design.md doesn't exist
-					task.consecutiveMistakeCount++
-					pushToolResult(
-						`🚫 **BLOCKED: Cannot create tasks.md yet!**\n\n` +
-						`design.md 尚未創建。\n\n` +
-						`**必須按順序完成: requirements.md → design.md → tasks.md**\n\n` +
-						`請先創建 .specs/design.md 文件。`
-					)
-					console.log(`[WriteToFileTool] BLOCKED tasks.md creation - design.md not found!`)
-					return
-				}
-			} catch (e) {
-				// requirements.md doesn't exist
+			// Check requirements.md first
+			if (!specStatus.requirementsComplete) {
 				task.consecutiveMistakeCount++
 				pushToolResult(
 					`🚫 **BLOCKED: Cannot create tasks.md yet!**\n\n` +
-					`requirements.md 尚未創建或無法讀取。\n\n` +
+					`requirements.md 只有 ${specStatus.requirementsLineCount} 行（需要至少 ${SPEC_MIN_LINES.requirements} 行）。\n\n` +
 					`**必須按順序完成: requirements.md → design.md → tasks.md**\n\n` +
-					`請先創建並完成 .specs/requirements.md 文件。`
+					`請先完成 .specs/requirements.md 文件。`
 				)
-				console.log(`[WriteToFileTool] BLOCKED tasks.md creation - requirements.md not found!`)
+				console.log(`[WriteToFileTool] BLOCKED tasks.md creation - requirements.md incomplete!`)
+				return
+			}
+			
+			// Check design.md
+			if (!specStatus.designComplete) {
+				task.consecutiveMistakeCount++
+				pushToolResult(
+					`🚫 **BLOCKED: Cannot create tasks.md yet!**\n\n` +
+					`design.md 只有 ${specStatus.designLineCount} 行（需要至少 ${SPEC_MIN_LINES.design} 行）。\n\n` +
+					`**必須按順序完成: requirements.md → design.md → tasks.md**\n\n` +
+					`請先完成 .specs/design.md 文件。`
+				)
+				console.log(`[WriteToFileTool] BLOCKED tasks.md creation - design.md incomplete!`)
 				return
 			}
 		}

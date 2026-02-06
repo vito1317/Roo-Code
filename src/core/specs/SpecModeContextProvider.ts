@@ -10,11 +10,96 @@ import * as fs from "fs"
 
 export type SpecPhase = "requirements" | "design" | "tasks" | "execution"
 
+/**
+ * Minimum line count requirements for each spec file to be considered "complete"
+ * These thresholds prevent premature phase transitions when files are too short
+ */
+export const SPEC_MIN_LINES = {
+	requirements: 100, // At least 100 lines for a proper requirements doc
+	design: 20, // At least 20 lines for a proper design doc (with diagrams)
+	tasks: 15, // At least 15 lines for a proper task breakdown
+} as const
+
+// =====================================
+// PHASE APPROVAL MECHANISM
+// =====================================
+// Phase only advances when user explicitly approves via Spec Workflow Panel
+// This prevents AI from jumping ahead without user confirmation
+
+const PHASE_APPROVED_FILE = ".specs/.phase-approved"
+
+interface ApprovedPhases {
+	requirements: boolean // User approved requirements phase as complete
+	design: boolean // User approved design phase as complete
+}
+
+/**
+ * Read the approved phases from the .specs/.phase-approved file
+ */
+export function getApprovedPhases(workspacePath: string): ApprovedPhases {
+	const filePath = path.join(workspacePath, PHASE_APPROVED_FILE)
+	console.log(`[getApprovedPhases] Checking file: ${filePath}`)
+	try {
+		if (fs.existsSync(filePath)) {
+			const content = fs.readFileSync(filePath, "utf-8")
+			const parsed = JSON.parse(content)
+			console.log(`[getApprovedPhases] Found approved phases:`, parsed)
+			return parsed
+		} else {
+			console.log(`[getApprovedPhases] File does not exist: ${filePath}`)
+		}
+	} catch (e) {
+		console.error("[SpecModeContextProvider] Error reading approved phases:", e)
+	}
+	return { requirements: false, design: false }
+}
+
+/**
+ * Save approved phases to the .specs/.phase-approved file
+ */
+export function saveApprovedPhases(workspacePath: string, phases: ApprovedPhases): void {
+	const specsDir = path.join(workspacePath, ".specs")
+	const filePath = path.join(workspacePath, PHASE_APPROVED_FILE)
+	try {
+		if (!fs.existsSync(specsDir)) {
+			fs.mkdirSync(specsDir, { recursive: true })
+		}
+		fs.writeFileSync(filePath, JSON.stringify(phases, null, 2))
+		console.log("[SpecModeContextProvider] Saved approved phases:", phases)
+	} catch (e) {
+		console.error("[SpecModeContextProvider] Error saving approved phases:", e)
+	}
+}
+
+/**
+ * Approve a phase and save to file
+ */
+export function approvePhase(workspacePath: string, phase: "requirements" | "design"): void {
+	const current = getApprovedPhases(workspacePath)
+	current[phase] = true
+	saveApprovedPhases(workspacePath, current)
+}
+
+/**
+ * Reset all phase approvals (when starting fresh)
+ */
+export function resetPhaseApprovals(workspacePath: string): void {
+	saveApprovedPhases(workspacePath, { requirements: false, design: false })
+}
+
 export interface SpecFilesStatus {
 	requirementsExists: boolean
 	designExists: boolean
 	tasksExists: boolean
 	specsDirectoryExists: boolean
+	// Line counts for quality validation
+	requirementsLineCount: number
+	designLineCount: number
+	tasksLineCount: number
+	// Whether the file meets minimum requirements
+	requirementsComplete: boolean
+	designComplete: boolean
+	tasksComplete: boolean
 }
 
 export interface SpecModeContext {
@@ -24,33 +109,94 @@ export interface SpecModeContext {
 }
 
 /**
- * Check which spec files exist in the workspace
+ * Count non-empty lines in a file
+ */
+function countFileLines(filePath: string): number {
+	try {
+		if (!fs.existsSync(filePath)) {
+			return 0
+		}
+		const content = fs.readFileSync(filePath, "utf-8")
+		// Count non-empty, non-whitespace-only lines
+		const lines = content.split("\n").filter((line) => line.trim().length > 0)
+		return lines.length
+	} catch {
+		return 0
+	}
+}
+
+/**
+ * Check which spec files exist in the workspace and validate their content
  */
 export function checkSpecFilesStatus(workspacePath: string): SpecFilesStatus {
 	const specsDir = path.join(workspacePath, ".specs")
 	const specsDirectoryExists = fs.existsSync(specsDir)
 
+	const requirementsPath = path.join(specsDir, "requirements.md")
+	const designPath = path.join(specsDir, "design.md")
+	const tasksPath = path.join(specsDir, "tasks.md")
+
+	const requirementsExists = specsDirectoryExists && fs.existsSync(requirementsPath)
+	const designExists = specsDirectoryExists && fs.existsSync(designPath)
+	const tasksExists = specsDirectoryExists && fs.existsSync(tasksPath)
+
+	const requirementsLineCount = requirementsExists ? countFileLines(requirementsPath) : 0
+	const designLineCount = designExists ? countFileLines(designPath) : 0
+	const tasksLineCount = tasksExists ? countFileLines(tasksPath) : 0
+
 	return {
 		specsDirectoryExists,
-		requirementsExists: specsDirectoryExists && fs.existsSync(path.join(specsDir, "requirements.md")),
-		designExists: specsDirectoryExists && fs.existsSync(path.join(specsDir, "design.md")),
-		tasksExists: specsDirectoryExists && fs.existsSync(path.join(specsDir, "tasks.md")),
+		requirementsExists,
+		designExists,
+		tasksExists,
+		requirementsLineCount,
+		designLineCount,
+		tasksLineCount,
+		requirementsComplete: requirementsExists && requirementsLineCount >= SPEC_MIN_LINES.requirements,
+		designComplete: designExists && designLineCount >= SPEC_MIN_LINES.design,
+		tasksComplete: tasksExists && tasksLineCount >= SPEC_MIN_LINES.tasks,
 	}
 }
 
 /**
- * Determine current workflow phase based on file existence
+ * Determine current workflow phase based on file existence AND content completeness
+ * Files must exist AND meet minimum line count requirements to be considered complete
+ * 
+ * IMPORTANT: This version also checks for user approval before advancing phases.
+ * If workspacePath is provided, it will check the .specs/.phase-approved file.
  */
-export function determineCurrentPhase(status: SpecFilesStatus): SpecPhase {
-	if (!status.requirementsExists) {
+export function determineCurrentPhase(status: SpecFilesStatus, workspacePath?: string): SpecPhase {
+	// Get approval status if workspacePath is provided
+	const approvedPhases = workspacePath ? getApprovedPhases(workspacePath) : { requirements: false, design: false }
+	
+	// Phase 1: Requirements - not complete until file exists AND has enough content
+	if (!status.requirementsComplete) {
 		return "requirements"
 	}
-	if (!status.designExists) {
+	
+	// Requirements complete, but need user approval to proceed to design
+	if (!approvedPhases.requirements) {
+		console.log(`[determineCurrentPhase] Requirements complete (${status.requirementsLineCount} lines), but NOT APPROVED. Staying in requirements phase.`)
+		return "requirements"
+	}
+	
+	// Phase 2: Design - requirements approved and complete, design not yet complete
+	if (!status.designComplete) {
+		console.log(`[determineCurrentPhase] Requirements APPROVED! Advancing to design phase.`)
 		return "design"
 	}
-	if (!status.tasksExists) {
+	
+	// Design complete, but need user approval to proceed to tasks
+	if (!approvedPhases.design) {
+		console.log(`[determineCurrentPhase] Design complete (${status.designLineCount} lines), but NOT APPROVED. Staying in design phase.`)
+		return "design"
+	}
+	
+	// Phase 3: Tasks - design approved and complete, tasks not yet complete
+	if (!status.tasksComplete) {
 		return "tasks"
 	}
+	// Phase 4: Execution - all spec files complete
 	return "execution"
 }
 
@@ -74,17 +220,24 @@ export function generateSpecModePrompt(status: SpecFilesStatus, originalPrompt?:
 		: ""
 
 	const statusIndicators = [
-		status.requirementsExists ? "✅" : "⬜",
-		status.designExists ? "✅" : "⬜",
-		status.tasksExists ? "✅" : "⬜",
+		status.requirementsComplete ? "✅" : status.requirementsExists ? "🔄" : "⬜",
+		status.designComplete ? "✅" : status.designExists ? "🔄" : "⬜",
+		status.tasksComplete ? "✅" : status.tasksExists ? "🔄" : "⬜",
 	]
+
+	// Helper to show line count status
+	const lineStatus = (current: number, required: number, exists: boolean) => {
+		if (!exists) return "- Not created"
+		if (current >= required) return `✓ ${current} lines (min: ${required})`
+		return `⚠️ ${current}/${required} lines - INCOMPLETE`
+	}
 
 	const header = `
 ## 📊 SPEC WORKFLOW STATUS
 \`\`\`
-${statusIndicators[0]} Requirements  ${status.requirementsExists ? "(.specs/requirements.md)" : "- Not created"}
-${statusIndicators[1]} Design        ${status.designExists ? "(.specs/design.md)" : "- Not created"}
-${statusIndicators[2]} Tasks         ${status.tasksExists ? "(.specs/tasks.md)" : "- Not created"}
+${statusIndicators[0]} Requirements  ${lineStatus(status.requirementsLineCount, SPEC_MIN_LINES.requirements, status.requirementsExists)}
+${statusIndicators[1]} Design        ${lineStatus(status.designLineCount, SPEC_MIN_LINES.design, status.designExists)}
+${statusIndicators[2]} Tasks         ${lineStatus(status.tasksLineCount, SPEC_MIN_LINES.tasks, status.tasksExists)}
 \`\`\`
 
 **Current Phase: ${phase.toUpperCase()}**
@@ -138,16 +291,24 @@ ${(phase === "tasks" || phase === "execution") ? `
 \`\`\`
 
 **⚠️ 重要：如果子任務訊息太簡短（例如只寫「完成 TASK-001」），子 Agent 無法得知需求，會產出錯誤結果！**
-` : `
-### ❌ DO NOT DELEGATE!
+` : (phase === "requirements" || phase === "design") ? `
+### 🔄 PHASE 1-2: 專注於當前階段
 
-- ❌ **禁止使用 \`new_task\` 工具** 建立子任務或委派給其他模式
-- ❌ **禁止切換到 Architect / Code / Designer 模式** 來處理 spec 檔案
-- ✅ **你必須親自建立** \`.specs/requirements.md\`、\`.specs/design.md\`、\`.specs/tasks.md\`
-- ✅ **使用 \`write_to_file\` 工具** 直接建立這些檔案
+**在 Requirements/Design 階段，你的工作流程是：**
 
-**原因**：Spec Mode 在 Phase 1-2 的目的是收集需求、設計架構、分解任務。這些都是你在 Spec Mode 中的職責，不應交給其他 agent。
-`}
+1. ✅ **親自建立當前階段的檔案** - 使用 \`write_to_file\` 建立 spec 檔案
+2. ✅ **確保達到最低行數要求** - 檔案達標後系統會自動進入下一階段
+3. ✅ **專注於內容品質** - 系統會在檔案完成後自動建立下一個任務
+
+**❌ 禁止事項：**
+- ❌ 禁止將當前階段的工作委派給其他模式（Architect/Code/Designer）
+- ❌ 禁止使用 \`new_task\` 建立子任務（系統會自動處理）
+- ❌ 禁止在一個任務中完成多個階段
+
+**📝 自動交接機制：**
+當檔案達到最低行數要求後，系統會自動建立新的 Spec Mode 任務進入下一階段。
+你只需要專注於建立高品質的 spec 檔案內容！
+` : ``}
 
 ---
 `
@@ -155,23 +316,56 @@ ${(phase === "tasks" || phase === "execution") ? `
 
 	switch (phase) {
 		case "requirements":
-			// 如果檔案已存在，顯示保護警告
-			if (status.requirementsExists) {
+			// 動態注入：根據 requirements.md 的完成狀態選擇不同的 prompt
+			if (status.requirementsComplete) {
+				// Requirements 已完成（達到最低行數），告訴 AI 調用 attempt_completion
 				return (
 					header +
 					`
-## 📋 PHASE 1: Requirements (⚠️ Already Exists)
+## 🎉 PHASE 1: Requirements - 已完成！
 
-**⚠️ WARNING: \`.specs/requirements.md\` already exists!**
+**✅ requirements.md 已達到最低行數要求！** (${status.requirementsLineCount} 行，需要 ${SPEC_MIN_LINES.requirements} 行)
+
+---
+
+### 🚀 立即執行：調用 attempt_completion
+
+**你的 requirements.md 已經完成！請立即調用 \`attempt_completion\` 工具。**
+
+系統會自動彈出對話框詢問用戶是否進入 Design 階段。
+
+\`\`\`
+attempt_completion(result: "Requirements 階段已完成，共 ${status.requirementsLineCount} 行。請確認是否進入 Design 階段。")
+\`\`\`
+
+---
+
+### ❌ 禁止事項
+
+- ❌ **禁止使用 ask_followup_question** 詢問是否進入下一階段
+- ❌ **禁止繼續添加內容** - requirements 已經完成
+- ❌ **禁止建立 design.md** - 必須先調用 attempt_completion
+
+**只需調用 attempt_completion，系統會處理其他一切。**
+`
+				)
+			} else if (status.requirementsExists) {
+				// Requirements 存在但未完成，繼續添加內容
+				return (
+					header +
+					`
+## 📋 PHASE 1: Requirements (⚠️ 尚未完成)
+
+**requirements.md 目前只有 ${status.requirementsLineCount} 行，需要至少 ${SPEC_MIN_LINES.requirements} 行！**
+
+請繼續使用 \`<!-- APPEND -->\` 添加更多內容。
 
 **DO NOT** overwrite the existing file. Instead:
 1. **Read the current content** first using \`read_file\`
 2. **Review** what's already documented
-3. **Update or append** new requirements if needed
-4. **Ask user to confirm** before any changes
+3. **Append** new requirements using \`<!-- APPEND -->\`
 
-If the user explicitly wants to start fresh, they must confirm this action.
-Otherwise, preserve the existing content!
+還需要添加 **${SPEC_MIN_LINES.requirements - status.requirementsLineCount} 行** 才能完成此階段。
 `
 				)
 			}
@@ -182,7 +376,19 @@ Otherwise, preserve the existing content!
 
 You are in the **Requirements Phase**. Create comprehensive, detailed requirements documentation.
 
-### 📌 Context
+---
+
+### � 最低行數要求（必達！）
+
+**requirements.md 必須至少 ${SPEC_MIN_LINES.requirements} 行內容！**
+
+- ❌ 少於 ${SPEC_MIN_LINES.requirements} 行 = 階段未完成，無法進入 Design 階段
+- ✅ 至少 ${SPEC_MIN_LINES.requirements} 行 = 可以進入下一階段
+- 目前狀態：${status.requirementsExists ? `${status.requirementsLineCount} 行` : "尚未建立"}
+
+---
+
+### �📌 Context
 
 When the user uses \`@filename\` to mention files, the file content is **already included in the conversation context**.
 Look for \`[read_file for 'xxx']\` blocks above - that's the user's file content.
@@ -208,11 +414,12 @@ write_to_file(".specs/requirements.md", "<!-- APPEND -->\\n\\n## 4. [Next Sectio
 
 ### ⚠️ CRITICAL RULES
 
-1. **Count the sections** in user's file first
-2. **Process each section** one by one
-3. **APPEND after each section** - don't try to write everything at once
-4. **DO NOT say "complete"** until you have processed EVERY section
-5. **Your output must be LONGER** than user's input - expand, don't summarize
+1. **必須達到 ${SPEC_MIN_LINES.requirements} 行以上** - 這是硬性要求！
+2. **Count the sections** in user's file first
+3. **Process each section** one by one
+4. **APPEND after each section** - don't try to write everything at once
+5. **DO NOT say "complete"** until you have processed EVERY section AND reached ${SPEC_MIN_LINES.requirements}+ lines
+6. **Your output must be LONGER** than user's input - expand, don't summarize
 
 ### 📝 Example Workflow
 
@@ -226,26 +433,76 @@ You should make **5 separate write_to_file calls**:
 5. \`write_to_file(..., "<!-- APPEND -->\\n\\n## 驗收條件\\n...")\` - Append
 
 **Only after the 5th write can you say the requirements phase is complete.**
+
+---
+
+### 🚨 嚴格禁止（在達到 ${SPEC_MIN_LINES.requirements} 行之前）
+
+1. ❌ **禁止詢問用戶是否進入 Design 階段** - 這是系統自動判斷的
+2. ❌ **禁止使用 ask_followup_question 詢問階段轉換**  
+3. ❌ **禁止建立 design.md** - 系統會阻止
+4. ❌ **禁止說「requirements 已完成」**
+
+**當你完成 requirements.md 並確認達到 ${SPEC_MIN_LINES.requirements} 行後：**
+
+請使用 \`attempt_completion\` 工具結束當前任務，並告知用戶：
+「Requirements 階段已完成（X 行），請在 Spec Workflow Panel 中點擊『進入 Design 階段』按鈕開始下一階段。」
+
+**不要在聊天中詢問是否進入下一階段！用戶必須通過 UI 按鈕來確認。**
 `
 			)
 
 		case "design":
-			// 如果 design.md 已存在，顯示保護警告
-			if (status.designExists) {
+			// 動態注入：根據 design.md 的完成狀態選擇不同的 prompt
+			if (status.designComplete) {
+				// Design 已完成（達到最低行數），告訴 AI 調用 attempt_completion
 				return (
 					header +
 					`
-## 🎨 PHASE 2: Design (⚠️ Already Exists)
+## � PHASE 2: Design - 已完成！
 
-**⚠️ WARNING: \`.specs/design.md\` already exists!**
+**✅ design.md 已達到最低行數要求！** (${status.designLineCount} 行，需要 ${SPEC_MIN_LINES.design} 行)
+
+---
+
+### 🚀 立即執行：調用 attempt_completion
+
+**你的 design.md 已經完成！請立即調用 \`attempt_completion\` 工具。**
+
+系統會自動彈出對話框詢問用戶是否進入 Tasks 階段。
+
+\`\`\`
+attempt_completion(result: "Design 階段已完成，共 ${status.designLineCount} 行。請確認是否進入 Tasks 階段。")
+\`\`\`
+
+---
+
+### ❌ 禁止事項
+
+- ❌ **禁止使用 ask_followup_question** 詢問是否進入下一階段
+- ❌ **禁止繼續添加內容** - design 已經完成
+- ❌ **禁止建立 tasks.md** - 必須先調用 attempt_completion
+
+**只需調用 attempt_completion，系統會處理其他一切。**
+`
+				)
+			} else if (status.designExists) {
+				// Design 存在但未完成，繼續添加內容
+				return (
+					header +
+					`
+## 🎨 PHASE 2: Design (⚠️ 尚未完成)
+
+**design.md 目前只有 ${status.designLineCount} 行，需要至少 ${SPEC_MIN_LINES.design} 行！**
+
+請繼續使用 \`<!-- APPEND -->\` 添加更多內容。
 
 **DO NOT** overwrite the existing file. Instead:
 1. **Read the current content** first using \`read_file\`
 2. **Review** what's already designed
-3. **Update or append** new design elements if needed
-4. **Ask user to confirm** before any changes
+3. **Append** new design elements using \`<!-- APPEND -->\`
 
-If the user explicitly wants to redesign from scratch, they must confirm.
+還需要添加 **${SPEC_MIN_LINES.design - status.designLineCount} 行** 才能完成此階段。
 `
 				)
 			}
@@ -259,21 +516,25 @@ You are in the **Design Phase**. Requirements documentation is complete.
 
 ---
 
-### 📏 文件長度要求（必達！）
+### � 最低行數要求（必達！）
 
-**design.md 必須至少 800-1500 字！**
+**design.md 必須至少 ${SPEC_MIN_LINES.design} 行內容！**
 
-- 必須包含系統架構圖（Mermaid）
-- 必須包含資料庫 ER 圖
-- 必須包含 API 規格
-- 少於 800 字 = 不合格
+- ❌ 少於 ${SPEC_MIN_LINES.design} 行 = 階段未完成，無法進入 Tasks 階段
+- ✅ 至少 ${SPEC_MIN_LINES.design} 行 = 可以進入下一階段
+- 目前狀態：${status.designExists ? `${status.designLineCount} 行` : "尚未建立"}
+
+**必須包含：**
+- 系統架構圖（Mermaid）
+- 資料庫 ER 圖
+- API 規格
 
 ---
 
 ### 🎯 你的任務
 
 1. **閱讀 \`.specs/requirements.md\`** 完全理解需求（特別注意技術堆疊）
-2. **建立 \`.specs/design.md\`** 包含完整的系統設計（至少 800-1500 字）
+2. **建立 \`.specs/design.md\`** 包含完整的系統設計（至少 ${SPEC_MIN_LINES.design} 行）
 
 ### 📐 design.md 必須包含的內容
 
@@ -406,7 +667,79 @@ graph TD
 			)
 
 		case "tasks":
-			// 如果 tasks.md 已存在，顯示保護警告
+			// PHASE 4: EXECUTION - All spec files complete, allow new_task for task execution
+			if (status.tasksComplete) {
+				return (
+					header +
+					`
+## 🚀 PHASE 4: Execution Mode - 現在可以執行任務！
+
+**✅ 所有 Spec 文件都已完成！tasks.md 包含 ${status.tasksLineCount} 行。**
+
+---
+
+### ✅ 現在可以使用的工具
+
+**⚠️ 重要：以下權限覆蓋之前的禁止規則！**
+
+1. **\`new_task\` - 現在已允許使用！**
+   - 用於將任務分派給專門的 Agent（Architect, Designer, Builder, QA）
+   - 每個子任務必須包含完整的上下文和具體指令
+
+2. **\`attempt_completion\` - 標記任務完成**
+   - 當所有 TASK 都完成時使用
+
+---
+
+### 📋 任務執行流程
+
+1. **讀取 tasks.md** - 找到第一個 \`[ ]\` 狀態的任務
+2. **使用 \`new_task\`** 將任務分派給適當的 Agent:
+   - **Architect** - 架構設計任務
+   - **Designer** - UI/UX 設計任務  
+   - **Builder/Code** - 程式碼實作任務
+   - **QA** - 測試任務
+
+3. **等待子任務完成** - 子任務完成後會自動回報
+4. **更新 tasks.md** - 將完成的任務標記為 \`[x]\`
+5. **繼續下一個任務**
+
+---
+
+### 📝 new_task 使用範例
+
+\`\`\`xml
+<new_task>
+<mode>code</mode>
+<message>
+## TASK-001: 建立使用者認證系統
+
+### 需求（來自 requirements.md）
+- 使用 JWT 認證
+- 支援登入、登出、註冊
+
+### 設計（來自 design.md）
+- 使用 Laravel Sanctum
+- API endpoints: /login, /logout, /register
+
+### 驗收標準
+- [ ] 可成功註冊新用戶
+- [ ] 可成功登入並取得 token
+- [ ] 可成功登出
+
+完成後請確認所有驗收標準。
+</message>
+</new_task>
+\`\`\`
+
+---
+
+**開始執行！讀取 tasks.md 並執行第一個待處理任務。**
+`
+				)
+			}
+			
+			// 如果 tasks.md 已存在但未完成，顯示保護警告
 			if (status.tasksExists) {
 				return (
 					header +
@@ -440,13 +773,17 @@ You are in the **Task Breakdown Phase**. Requirements and Design are complete.
 
 ---
 
-### 📏 文件長度要求（必達！）
+### � 最低行數要求（必達！）
 
-**tasks.md 必須至少 800-1500 字！**
+**tasks.md 必須至少 ${SPEC_MIN_LINES.tasks} 行內容！**
 
+- ❌ 少於 ${SPEC_MIN_LINES.tasks} 行 = 階段未完成，無法進入 Execution 階段
+- ✅ 至少 ${SPEC_MIN_LINES.tasks} 行 = 可以進入下一階段
+- 目前狀態：${status.tasksExists ? `${status.tasksLineCount} 行` : "尚未建立"}
+
+**必須包含：**
 - 每個任務必須有完整的描述、涉及檔案、驗收標準
 - 任務數量至少 8-15 個（依專案規模調整）
-- 少於 800 字 = 不合格
 
 ---
 

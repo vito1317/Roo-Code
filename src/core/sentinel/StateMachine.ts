@@ -20,9 +20,9 @@ import { UIDesignCanvasPanel } from "../../services/ui-design/UIDesignCanvasPane
 
 /**
  * Agent states in the FSM
- * 
+ *
  * Supervisor Workflow:
- * IDLE → ARCHITECT (plan) → BUILDER → ARCHITECT_REVIEW_CODE → 
+ * IDLE → ARCHITECT (plan) → BUILDER → ARCHITECT_REVIEW_CODE →
  *        QA → ARCHITECT_REVIEW_TESTS → SENTINEL → ARCHITECT_REVIEW_FINAL → COMPLETED
  */
 export enum AgentState {
@@ -154,7 +154,14 @@ export class SentinelStateMachine {
 				if (isTruthy(plan?.useUIDesignCanvas) || isTruthy(plan?.use_ui_design_canvas)) return true
 				// Check notes for keywords
 				const notes = ctx.previousAgentNotes?.toLowerCase() || ""
-				if (notes.includes("figma") || notes.includes("penpot") || notes.includes("designer") || notes.includes("ui design") || notes.includes("ui canvas")) return true
+				if (
+					notes.includes("figma") ||
+					notes.includes("penpot") ||
+					notes.includes("designer") ||
+					notes.includes("ui design") ||
+					notes.includes("ui canvas")
+				)
+					return true
 				return false
 			},
 			label: "Plan completed with UI design, handoff to Designer",
@@ -174,41 +181,69 @@ export class SentinelStateMachine {
 			condition: (ctx) => {
 				// Minimum element threshold - prevents placeholder-only designs
 				const MIN_ELEMENTS = 15
-				const MIN_COMPONENTS_FALLBACK = 10  // Increased from 3
-				
+				const MIN_COMPONENTS_FALLBACK = 10 // Increased from 3
+
 				// Designer must have created enough elements for a real UI
 				const elementCount = typeof ctx?.expectedElements === "number" ? ctx.expectedElements : 0
 				const hasEnoughElements = elementCount >= MIN_ELEMENTS
-				
+
 				// Check for actual UI components (not just frames)
 				const components = ctx?.createdComponents || []
 				const actualUIComponents = components.filter((name: string) => {
 					const lower = name.toLowerCase()
 					// Only count actual UI elements, not just container frames
-					const uiKeywords = ['button', 'text', 'input', 'label', 'icon', 'image', 'title', 'subtitle', 
-						'header', 'footer', 'nav', 'card', 'list', 'item', 'badge', 'avatar', 'tab', 
-						'按鈕', '文字', '輸入', '標題', '圖標', '標籤', '導航', '卡片']
-					return uiKeywords.some(keyword => lower.includes(keyword))
+					const uiKeywords = [
+						"button",
+						"text",
+						"input",
+						"label",
+						"icon",
+						"image",
+						"title",
+						"subtitle",
+						"header",
+						"footer",
+						"nav",
+						"card",
+						"list",
+						"item",
+						"badge",
+						"avatar",
+						"tab",
+						"按鈕",
+						"文字",
+						"輸入",
+						"標題",
+						"圖標",
+						"標籤",
+						"導航",
+						"卡片",
+					]
+					return uiKeywords.some((keyword) => lower.includes(keyword))
 				})
-				
+
 				// Primary check: expectedElements >= 15
 				if (hasEnoughElements) {
 					console.log(`[SentinelFSM] Designer handoff approved: ${elementCount} elements created`)
 					return true
 				}
-				
+
 				// Strict fallback: require 10+ components with at least 5 actual UI elements
 				const hasDesignSpecs = !!ctx?.designSpecs
 				const hasEnoughComponents = components.length >= MIN_COMPONENTS_FALLBACK
 				const hasActualUIElements = actualUIComponents.length >= 5
-				
+
 				if (hasDesignSpecs && hasEnoughComponents && hasActualUIElements) {
-					console.log(`[SentinelFSM] Designer handoff approved via fallback: ${components.length} components, ${actualUIComponents.length} UI elements`)
+					console.log(
+						`[SentinelFSM] Designer handoff approved via fallback: ${components.length} components, ${actualUIComponents.length} UI elements`,
+					)
 					return true
 				}
-				
+
 				// Reject handoff if design quality is too low
-				console.log(`[SentinelFSM] Designer handoff REJECTED: only ${elementCount} elements (minimum ${MIN_ELEMENTS}), components=${components.length}, actualUIElements=${actualUIComponents.length}`)
+				console.log(
+					`[SentinelFSM] Designer handoff REJECTED: only ${elementCount} elements (minimum ${MIN_ELEMENTS}), components=${components.length}, actualUIElements=${actualUIComponents.length}`,
+				)
 				console.log(`[SentinelFSM] Components list: ${JSON.stringify(components)}`)
 				return false
 			},
@@ -229,7 +264,9 @@ export class SentinelStateMachine {
 				const task = (this as any).taskRef?.deref?.()
 				const isSubtask = !!task?.parentTaskId
 				if (isSubtask) {
-					console.log(`[SentinelFSM] Design subtask completed, returning to parent task (${task.parentTaskId})`)
+					console.log(
+						`[SentinelFSM] Design subtask completed, returning to parent task (${task.parentTaskId})`,
+					)
 				}
 				return isSubtask
 			},
@@ -276,7 +313,6 @@ export class SentinelStateMachine {
 			condition: (ctx) => !!ctx?.builderTestContext,
 			label: "Code committed, Architect reviews",
 		},
-
 
 		// Architect approves code → QA tests
 		{
@@ -379,7 +415,7 @@ export class SentinelStateMachine {
 	 */
 	getCurrentAgent(): string {
 		// Map AgentState to actual mode slugs
-			const stateToModeSlug: Record<AgentState, string> = {
+		const stateToModeSlug: Record<AgentState, string> = {
 			[AgentState.IDLE]: "code",
 			[AgentState.COMPLETED]: "code",
 			[AgentState.BLOCKED]: "sentinel-builder", // Stay in workflow, let Builder try to fix
@@ -489,16 +525,16 @@ export class SentinelStateMachine {
 	 */
 	private buildArchitectInstructionsFromSpec(spec: import("./HandoffContext").SpecTaskContext): string {
 		const lines: string[] = []
-		
+
 		lines.push("## 📋 Spec Mode Task Execution")
 		lines.push("")
 		lines.push(`### Task: ${spec.title}`)
-		
+
 		if (spec.description) {
 			lines.push("")
 			lines.push(`**Description:** ${spec.description}`)
 		}
-		
+
 		if (spec.acceptanceCriteria && spec.acceptanceCriteria.length > 0) {
 			lines.push("")
 			lines.push("**Acceptance Criteria:**")
@@ -506,17 +542,17 @@ export class SentinelStateMachine {
 				lines.push(`- ${criteria}`)
 			}
 		}
-		
+
 		if (spec.complexity) {
 			lines.push("")
 			lines.push(`**Complexity:** ${spec.complexity}/5`)
 		}
-		
+
 		if (spec.specFile) {
 			lines.push("")
 			lines.push(`**Source Spec:** \`${spec.specFile}\``)
 		}
-		
+
 		lines.push("")
 		lines.push("---")
 		lines.push("")
@@ -529,10 +565,9 @@ export class SentinelStateMachine {
 		lines.push("5. Code Review → Verify code quality")
 		lines.push("6. 資安審核 (Sentinel) → Security audit")
 		lines.push("7. Final Review → Final sign-off")
-		
+
 		return lines.join("\n")
 	}
-
 
 	/**
 	 * Handle agent completion - called when attempt_completion is intercepted
@@ -568,7 +603,9 @@ export class SentinelStateMachine {
 				}
 			} else if (fromState === AgentState.SENTINEL) {
 				this.securityRejectionCount++
-				console.log(`[SentinelFSM] Security rejection count: ${this.securityRejectionCount}/${this.config.maxSecurityRetries}`)
+				console.log(
+					`[SentinelFSM] Security rejection count: ${this.securityRejectionCount}/${this.config.maxSecurityRetries}`,
+				)
 				if (this.securityRejectionCount >= this.config.maxSecurityRetries) {
 					return this.triggerHumanIntervention(
 						`Security audit failed ${this.securityRejectionCount} times. Human intervention required.`,
@@ -580,15 +617,19 @@ export class SentinelStateMachine {
 		// Check for Design Review → Designer loop prevention
 		if (nextState === AgentState.DESIGNER && fromState === AgentState.DESIGN_REVIEW) {
 			this.designReviewRejectionCount++
-			console.log(`[SentinelFSM] Design Review rejection count: ${this.designReviewRejectionCount}/${this.config.maxDesignReviewRetries}`)
+			console.log(
+				`[SentinelFSM] Design Review rejection count: ${this.designReviewRejectionCount}/${this.config.maxDesignReviewRetries}`,
+			)
 
 			if (this.designReviewRejectionCount >= this.config.maxDesignReviewRetries) {
 				// Check if this is a subtask - if so, complete instead of continuing to Builder
 				const task = this.taskRef?.deref?.()
 				const isSubtask = !!task?.parentTaskId
-				
+
 				if (isSubtask) {
-					console.log(`[SentinelFSM] Max Design Review retries reached (subtask). Auto-approving and returning to parent.`)
+					console.log(
+						`[SentinelFSM] Max Design Review retries reached (subtask). Auto-approving and returning to parent.`,
+					)
 					if (this.currentContext) {
 						this.currentContext.designReviewPassed = true
 						this.currentContext.previousAgentNotes =
@@ -597,7 +638,9 @@ export class SentinelStateMachine {
 					}
 					return this.transition(AgentState.COMPLETED)
 				} else {
-					console.log(`[SentinelFSM] Max Design Review retries reached. Auto-approving and proceeding to Builder.`)
+					console.log(
+						`[SentinelFSM] Max Design Review retries reached. Auto-approving and proceeding to Builder.`,
+					)
 					// Auto-approve and proceed to Builder instead of looping forever
 					if (this.currentContext) {
 						this.currentContext.designReviewPassed = true
@@ -633,7 +676,10 @@ export class SentinelStateMachine {
 		switch (this.currentState) {
 			// Phase 1: Initial planning → Designer (if Figma or UI needed) or Builder
 			case AgentState.ARCHITECT: {
-				console.log("[SentinelFSM] determineNextState from ARCHITECT, handoffData:", JSON.stringify(handoffData, null, 2))
+				console.log(
+					"[SentinelFSM] determineNextState from ARCHITECT, handoffData:",
+					JSON.stringify(handoffData, null, 2),
+				)
 
 				// Check if there's a Figma URL to route to Designer first
 				if (handoffData.figmaUrl) {
@@ -655,7 +701,7 @@ export class SentinelStateMachine {
 				// Check flags at both root level AND inside architectPlan
 				// Architect might set these flags in either location
 				const rootData = handoffData as Record<string, unknown>
-				
+
 				// Debug: Log the exact raw values before isTruthy check
 				console.log("[SentinelFSM] Raw flag values from plan:", {
 					needsDesign: plan?.needsDesign,
@@ -663,7 +709,7 @@ export class SentinelStateMachine {
 					hasUI: plan?.hasUI,
 					has_ui: plan?.has_ui,
 					useUIDesignCanvas: plan?.useUIDesignCanvas,
-					use_ui_design_canvas: plan?.use_ui_design_canvas
+					use_ui_design_canvas: plan?.use_ui_design_canvas,
 				})
 				console.log("[SentinelFSM] Raw flag values from root:", {
 					needsDesign: rootData.needsDesign,
@@ -671,30 +717,67 @@ export class SentinelStateMachine {
 					hasUI: rootData.hasUI,
 					has_ui: rootData.has_ui,
 					useUIDesignCanvas: rootData.useUIDesignCanvas,
-					use_ui_design_canvas: rootData.use_ui_design_canvas
+					use_ui_design_canvas: rootData.use_ui_design_canvas,
 				})
-				
-				const needsDesign = isTruthy(plan?.needsDesign) || isTruthy(plan?.needs_design) || 
-					isTruthy(rootData.needsDesign) || isTruthy(rootData.needs_design)
-				const hasUI = isTruthy(plan?.hasUI) || isTruthy(plan?.has_ui) || isTruthy(plan?.hasUi) ||
-					isTruthy(rootData.hasUI) || isTruthy(rootData.has_ui) || isTruthy(rootData.hasUi)
-				const useFigma = isTruthy(plan?.useFigma) || isTruthy(plan?.use_figma) ||
-					isTruthy(rootData.useFigma) || isTruthy(rootData.use_figma)
-				const usePenpot = isTruthy(plan?.usePenpot) || isTruthy(plan?.use_penpot) ||
-					isTruthy(rootData.usePenpot) || isTruthy(rootData.use_penpot)
-				const useUIDesignCanvas = isTruthy(plan?.useUIDesignCanvas) || isTruthy(plan?.use_ui_design_canvas) ||
-					isTruthy(rootData.useUIDesignCanvas) || isTruthy(rootData.use_ui_design_canvas)
+
+				const needsDesign =
+					isTruthy(plan?.needsDesign) ||
+					isTruthy(plan?.needs_design) ||
+					isTruthy(rootData.needsDesign) ||
+					isTruthy(rootData.needs_design)
+				const hasUI =
+					isTruthy(plan?.hasUI) ||
+					isTruthy(plan?.has_ui) ||
+					isTruthy(plan?.hasUi) ||
+					isTruthy(rootData.hasUI) ||
+					isTruthy(rootData.has_ui) ||
+					isTruthy(rootData.hasUi)
+				const useFigma =
+					isTruthy(plan?.useFigma) ||
+					isTruthy(plan?.use_figma) ||
+					isTruthy(rootData.useFigma) ||
+					isTruthy(rootData.use_figma)
+				const usePenpot =
+					isTruthy(plan?.usePenpot) ||
+					isTruthy(plan?.use_penpot) ||
+					isTruthy(rootData.usePenpot) ||
+					isTruthy(rootData.use_penpot)
+				const useUIDesignCanvas =
+					isTruthy(plan?.useUIDesignCanvas) ||
+					isTruthy(plan?.use_ui_design_canvas) ||
+					isTruthy(rootData.useUIDesignCanvas) ||
+					isTruthy(rootData.use_ui_design_canvas)
 
 				// CRITICAL: Check if hasUI is EXPLICITLY set to false
 				// This allows tasks like testing, backend work, etc. to skip Designer completely
-				const hasUIExplicitlyFalse = (plan?.hasUI === false || plan?.has_ui === false || plan?.hasUi === false ||
-					rootData.hasUI === false || rootData.has_ui === false || rootData.hasUi === false)
+				const hasUIExplicitlyFalse =
+					plan?.hasUI === false ||
+					plan?.has_ui === false ||
+					plan?.hasUi === false ||
+					rootData.hasUI === false ||
+					rootData.has_ui === false ||
+					rootData.hasUi === false
 
-				console.log("[SentinelFSM] Design flags (after isTruthy) - needsDesign:", needsDesign, "hasUI:", hasUI, "useFigma:", useFigma, "usePenpot:", usePenpot, "useUIDesignCanvas:", useUIDesignCanvas, "hasUIExplicitlyFalse:", hasUIExplicitlyFalse)
+				console.log(
+					"[SentinelFSM] Design flags (after isTruthy) - needsDesign:",
+					needsDesign,
+					"hasUI:",
+					hasUI,
+					"useFigma:",
+					useFigma,
+					"usePenpot:",
+					usePenpot,
+					"useUIDesignCanvas:",
+					useUIDesignCanvas,
+					"hasUIExplicitlyFalse:",
+					hasUIExplicitlyFalse,
+				)
 
 				// If hasUI is explicitly set to false, skip Designer entirely
 				if (hasUIExplicitlyFalse) {
-					console.log("[SentinelFSM] hasUI explicitly set to false - skipping Designer, routing directly to Builder")
+					console.log(
+						"[SentinelFSM] hasUI explicitly set to false - skipping Designer, routing directly to Builder",
+					)
 					return AgentState.BUILDER
 				}
 
@@ -705,7 +788,14 @@ export class SentinelStateMachine {
 
 				// Also check notes for Figma/UI keywords as fallback
 				const notes = handoffData.previousAgentNotes?.toLowerCase() || ""
-				if (notes.includes("figma") || notes.includes("penpot") || notes.includes("designer") || notes.includes("ui design") || notes.includes("ui 設計") || notes.includes("ui canvas")) {
+				if (
+					notes.includes("figma") ||
+					notes.includes("penpot") ||
+					notes.includes("designer") ||
+					notes.includes("ui design") ||
+					notes.includes("ui 設計") ||
+					notes.includes("ui canvas")
+				) {
 					console.log("[SentinelFSM] Design tool keywords found in notes - routing to Designer")
 					return AgentState.DESIGNER
 				}
@@ -719,64 +809,115 @@ export class SentinelStateMachine {
 					// In Sentinel mode, the first message might be "text" instead of "user_feedback"
 					const allMessages = task.clineMessages || []
 					console.log("[SentinelFSM] Total clineMessages:", allMessages.length)
-					console.log("[SentinelFSM] Message types:", allMessages.map(m => `${m.type}/${m.say || m.ask}`).slice(0, 10).join(", "))
-					
+					console.log(
+						"[SentinelFSM] Message types:",
+						allMessages
+							.map((m) => `${m.type}/${m.say || m.ask}`)
+							.slice(0, 10)
+							.join(", "),
+					)
+
 					// First try to find user_feedback, then fall back to first text message with content
-					let firstUserMessage = allMessages.find(m => m.type === "say" && m.say === "user_feedback")
+					let firstUserMessage = allMessages.find((m) => m.type === "say" && m.say === "user_feedback")
 					if (!firstUserMessage) {
 						// In Sentinel mode, the first message might be a "text" type that contains the user's request
-						firstUserMessage = allMessages.find(m => m.type === "say" && m.say === "text" && m.text && m.text.length > 0)
+						firstUserMessage = allMessages.find(
+							(m) => m.type === "say" && m.say === "text" && m.text && m.text.length > 0,
+						)
 					}
-					console.log("[SentinelFSM] First user message found:", !!firstUserMessage, "type:", firstUserMessage?.say, "text:", firstUserMessage?.text?.substring(0, 50))
-					
+					console.log(
+						"[SentinelFSM] First user message found:",
+						!!firstUserMessage,
+						"type:",
+						firstUserMessage?.say,
+						"text:",
+						firstUserMessage?.text?.substring(0, 50),
+					)
+
 					if (firstUserMessage && firstUserMessage.text) {
 						const userRequest = firstUserMessage.text.toLowerCase()
 						console.log("[SentinelFSM] User request (first 100 chars):", userRequest.substring(0, 100))
-						
+
 						// Check for explicit design tool keywords
-						const figmaKeywords = ["figma", "使用figma", "用figma", "請先使用figma", "先figma", "設計稿", "mockup"]
-						if (figmaKeywords.some(keyword => userRequest.includes(keyword))) {
-							console.log("[SentinelFSM] Figma keywords found in ORIGINAL USER REQUEST - routing to Designer")
+						const figmaKeywords = [
+							"figma",
+							"使用figma",
+							"用figma",
+							"請先使用figma",
+							"先figma",
+							"設計稿",
+							"mockup",
+						]
+						if (figmaKeywords.some((keyword) => userRequest.includes(keyword))) {
+							console.log(
+								"[SentinelFSM] Figma keywords found in ORIGINAL USER REQUEST - routing to Designer",
+							)
 							if (this.currentContext?.architectPlan) {
-								(this.currentContext.architectPlan as unknown as Record<string, unknown>).useFigma = true
+								;(this.currentContext.architectPlan as unknown as Record<string, unknown>).useFigma =
+									true
 							}
 							return AgentState.DESIGNER
 						}
-						
+
 						// Check for Penpot keywords
 						const penpotKeywords = ["penpot", "使用penpot", "用penpot", "請先使用penpot", "先penpot"]
-						if (penpotKeywords.some(keyword => userRequest.includes(keyword))) {
-							console.log("[SentinelFSM] Penpot keywords found in ORIGINAL USER REQUEST - routing to Designer")
+						if (penpotKeywords.some((keyword) => userRequest.includes(keyword))) {
+							console.log(
+								"[SentinelFSM] Penpot keywords found in ORIGINAL USER REQUEST - routing to Designer",
+							)
 							if (this.currentContext?.architectPlan) {
-								(this.currentContext.architectPlan as unknown as Record<string, unknown>).usePenpot = true
+								;(this.currentContext.architectPlan as unknown as Record<string, unknown>).usePenpot =
+									true
 							}
 							return AgentState.DESIGNER
 						}
-						
-						// AGGRESSIVE UI DETECTION: Check for ANY UI/app/design related keywords
-						// If found, route to Designer with UIDesignCanvas as default
+
+						// UI DETECTION: Only detect explicit UI/design related keywords
+						// Removed generic keywords like "app", "應用", "note" to prevent false positives
 						const designKeywords = [
-							// Chinese design keywords
-							"設計", "ui設計", "介面設計", "界面設計", "視覺設計", "畫面設計",
-							"幫我設計", "請設計", "設計一個", "設計個",
-							// App/Web keywords
-							"app", "應用", "應用程式", "網頁", "網站", "web", "網絡應用", "webapp",
-							"手機app", "行動應用", "mobile app",
-							// UI component keywords
-							"介面", "界面", "interface", "畫面", "頁面", "page", "screen",
-							"dashboard", "儀表板", "控制面板",
-							"登入", "login", "註冊", "register", "表單", "form",
-							"按鈕", "button", "選單", "menu", "導航", "navigation", "nav",
-							"卡片", "card", "列表", "list", "表格", "table",
-							// Design style keywords
-							"ui", "ux", "前端", "frontend", "視覺", "visual",
-							"布局", "layout", "排版", "版面",
-							// Specific app types
-							"運動app", "健身app", "計算機", "calculator", "todo", "待辦", "筆記", "note"
+							// Explicit design keywords (Chinese)
+							"ui設計",
+							"介面設計",
+							"界面設計",
+							"視覺設計",
+							"畫面設計",
+							"幫我設計介面",
+							"設計一個畫面",
+							"設計一個頁面",
+							// Explicit design keywords (English)
+							"ui design",
+							"design the interface",
+							"design a page",
+							"design mockup",
+							// UI component keywords that clearly indicate UI work
+							"dashboard設計",
+							"儀表板設計",
+							"控制面板設計",
+							"登入頁面",
+							"login page",
+							"註冊頁面",
+							"register page",
+							"按鈕設計",
+							"選單設計",
+							"導航設計",
+							"navigation design",
+							// Design tool keywords
+							"figma",
+							"penpot",
+							"ui canvas",
+							"mockup",
+							"設計稿",
+							"wireframe",
+							// Specific UI component requests
+							"前端介面",
+							"frontend ui",
+							"視覺介面",
 						]
-						
-						if (designKeywords.some(keyword => userRequest.includes(keyword))) {
-							console.log("[SentinelFSM] UI/Design keywords detected in user request - routing to Designer with UIDesignCanvas")
+
+						if (designKeywords.some((keyword) => userRequest.includes(keyword))) {
+							console.log(
+								"[SentinelFSM] UI/Design keywords detected in user request - routing to Designer with UIDesignCanvas",
+							)
 							// Set UIDesignCanvas as default for UI tasks
 							if (this.currentContext?.architectPlan) {
 								const plan = this.currentContext.architectPlan as unknown as Record<string, unknown>
@@ -802,43 +943,45 @@ export class SentinelStateMachine {
 				// [HANDOFF LOGGING] Full handoff data dump for debugging
 				console.log("[SentinelFSM] ========== DESIGN REVIEW HANDOFF DECISION ==========")
 				console.log("[SentinelFSM] Full handoffData:", JSON.stringify(handoffData, null, 2))
-				
+
 				// Check for approval - support multiple formats
 				// Accept boolean true, string "true", or status-based approval
 				// Cast to any to allow flexible comparison (AI may output various formats)
 				const designReviewPassedValue = handoffData.designReviewPassed as any
-				const isApprovedByFlag = 
+				const isApprovedByFlag =
 					designReviewPassedValue === true ||
 					designReviewPassedValue === "true" ||
 					designReviewPassedValue === 1 ||
 					designReviewPassedValue === "1"
-				
+
 				// Also check status field for approval indicators
-				const statusLower = (handoffData.designReviewStatus || handoffData.status || "").toString().toLowerCase()
-				const isApprovedByStatus = 
+				const statusLower = (handoffData.designReviewStatus || handoffData.status || "")
+					.toString()
+					.toLowerCase()
+				const isApprovedByStatus =
 					statusLower === "approved" ||
 					statusLower === "passed" ||
 					statusLower === "pass" ||
 					statusLower.includes("通過") ||
 					statusLower.includes("approved")
-				
+
 				// Check notes for approval keywords
 				const notesLower = (handoffData.previousAgentNotes || "").toString().toLowerCase()
-				const isApprovedByNotes = 
+				const isApprovedByNotes =
 					notesLower.includes("設計審查通過") ||
 					notesLower.includes("design review passed") ||
 					notesLower.includes("審查通過") ||
 					notesLower.includes("勉強可以") ||
 					notesLower.includes("通過了")
-				
+
 				const isApproved = isApprovedByFlag || isApprovedByStatus || isApprovedByNotes
 
 				// Only reject if NOT approved AND has explicit rejection indicators
 				// Key fix: if isApproved is true, we should NOT reject
-				const hasExplicitRejection = 
+				const hasExplicitRejection =
 					handoffData.designReviewStatus === "rejected" ||
 					(handoffData.completion_percentage && parseInt(handoffData.completion_percentage) < 80)
-				
+
 				const isRejected = !isApproved && hasExplicitRejection
 
 				console.log("[SentinelFSM] Design Review check:", {
@@ -859,14 +1002,16 @@ export class SentinelStateMachine {
 					console.log("[SentinelFSM] Design Review REJECTED - returning to Designer")
 					return AgentState.DESIGNER
 				}
-				
+
 				// Check if this is a subtask - if so, complete instead of continuing to Builder
 				const task = this.taskRef?.deref?.()
 				if (task?.parentTaskId) {
-					console.log(`[SentinelFSM] Design Review PASSED - this is a subtask, returning COMPLETED to return to parent (${task.parentTaskId})`)
+					console.log(
+						`[SentinelFSM] Design Review PASSED - this is a subtask, returning COMPLETED to return to parent (${task.parentTaskId})`,
+					)
 					return AgentState.COMPLETED
 				}
-				
+
 				console.log("[SentinelFSM] Design Review PASSED - continuing to Builder")
 				return AgentState.BUILDER
 			}
@@ -893,10 +1038,18 @@ export class SentinelStateMachine {
 				// Method 2: Check for failure indicators in the notes if no explicit flag
 				const notes = handoffData.previousAgentNotes?.toLowerCase() || ""
 				const failureIndicators = [
-					"critical issue", "failed", "error", "not working", "broken",
-					"❌", "x critical", "tests failed", "test failed", "failure"
+					"critical issue",
+					"failed",
+					"error",
+					"not working",
+					"broken",
+					"❌",
+					"x critical",
+					"tests failed",
+					"test failed",
+					"failure",
 				]
-				const hasFailure = failureIndicators.some(indicator => notes.includes(indicator))
+				const hasFailure = failureIndicators.some((indicator) => notes.includes(indicator))
 				if (hasFailure && !notes.includes("all tests pass") && !notes.includes("tests passed")) {
 					console.log("[SentinelFSM] QA tests FAILED (detected from notes) - returning to Builder for fixes")
 					return AgentState.BUILDER
@@ -911,9 +1064,10 @@ export class SentinelStateMachine {
 					console.log("[SentinelFSM] Architect rejected tests - returning to Builder with issues to fix")
 					// Pass the rejection notes to Builder
 					if (this.currentContext && handoffData.previousAgentNotes) {
-						this.currentContext.previousAgentNotes = 
+						this.currentContext.previousAgentNotes =
 							(this.currentContext.previousAgentNotes || "") +
-							"\n\n**Architect Test Review Feedback:**\n" + handoffData.previousAgentNotes
+							"\n\n**Architect Test Review Feedback:**\n" +
+							handoffData.previousAgentNotes
 					}
 					return AgentState.BUILDER // Direct to Builder, not Architect
 				}
@@ -924,15 +1078,26 @@ export class SentinelStateMachine {
 				}
 				// Method 3: Check for failure keywords in current handoff notes
 				const reviewNotes = handoffData.previousAgentNotes?.toLowerCase() || ""
-				const testFailIndicators = ["tests: failed", "test failed", "tests failed", "critical issue", "❌", "needs fix", "need to fix", "bug found", "issue found"]
-				const hasTestFailure = testFailIndicators.some(indicator => reviewNotes.includes(indicator))
+				const testFailIndicators = [
+					"tests: failed",
+					"test failed",
+					"tests failed",
+					"critical issue",
+					"❌",
+					"needs fix",
+					"need to fix",
+					"bug found",
+					"issue found",
+				]
+				const hasTestFailure = testFailIndicators.some((indicator) => reviewNotes.includes(indicator))
 				if (hasTestFailure) {
 					console.log("[SentinelFSM] Test failure detected in review notes - returning to Builder")
 					// Pass issue details to Builder
 					if (this.currentContext && handoffData.previousAgentNotes) {
-						this.currentContext.previousAgentNotes = 
+						this.currentContext.previousAgentNotes =
 							(this.currentContext.previousAgentNotes || "") +
-							"\n\n**Issues to Fix:**\n" + handoffData.previousAgentNotes
+							"\n\n**Issues to Fix:**\n" +
+							handoffData.previousAgentNotes
 					}
 					return AgentState.BUILDER
 				}
@@ -948,7 +1113,7 @@ export class SentinelStateMachine {
 				this.securityRejectionCount = 0
 				this.designReviewRejectionCount = 0
 				console.log("[SentinelFSM] BLOCKED recovery: Reset rejection counters")
-				
+
 				// If tests passed in the handoff, go to Architect Code Review for verification
 				const qaResult = handoffData.qaAuditContext
 				if (qaResult?.testsPassed === true) {
@@ -968,8 +1133,10 @@ export class SentinelStateMachine {
 			// Phase 4: Sentinel security audit → Architect final review (or back to Builder if failed)
 			case AgentState.SENTINEL:
 				// Check if security audit failed
-				if (handoffData.sentinelResult?.securityPassed === false || 
-					handoffData.sentinelResult?.recommendation === "reject") {
+				if (
+					handoffData.sentinelResult?.securityPassed === false ||
+					handoffData.sentinelResult?.recommendation === "reject"
+				) {
 					return AgentState.ARCHITECT // Return to Architect to re-plan fixes
 				}
 				return AgentState.ARCHITECT_REVIEW_FINAL
@@ -1022,7 +1189,7 @@ export class SentinelStateMachine {
 
 		// Update context - track the actual fromState for each transition
 		if (this.currentContext) {
-			this.currentContext.fromAgent = fromState  // Update fromAgent to reflect current transition
+			this.currentContext.fromAgent = fromState // Update fromAgent to reflect current transition
 			this.currentContext.toAgent = targetState
 			this.currentContext.status = "in_progress"
 		} else {
@@ -1043,26 +1210,28 @@ export class SentinelStateMachine {
 		// Generate walkthrough on completion and clear agent memory
 		if (targetState === AgentState.COMPLETED && this.currentContext) {
 			const task = this.taskRef.deref()
-			
+
 			// Check if this is a subtask - if so, trigger parent return
 			if (task?.parentTaskId) {
-				console.log(`[SentinelFSM] Subtask workflow completed. Triggering return to parent (${task.parentTaskId})`)
-				
+				console.log(
+					`[SentinelFSM] Subtask workflow completed. Triggering return to parent (${task.parentTaskId})`,
+				)
+
 				// Clear agent memory first
 				task.clearSentinelAgentMemory()
 				console.log("[SentinelFSM] Cleared agent memory for subtask completion")
-				
+
 				// Add a message that instructs the AI to use attempt_completion
 				// This will trigger the normal subtask return flow
 				await task.say(
 					"text",
 					`✅ **設計子任務已完成**\n\n` +
-					`設計審查已通過，現在需要返回父任務。\n\n` +
-					`⚠️ **重要：請立即使用 \`attempt_completion\` 工具返回父任務！**\n\n` +
-					`父任務 ID: \`${task.parentTaskId}\`\n` +
-					`請在 result 參數中總結設計結果，然後返回父任務繼續後續工作。`,
+						`設計審查已通過，現在需要返回父任務。\n\n` +
+						`⚠️ **重要：請立即使用 \`attempt_completion\` 工具返回父任務！**\n\n` +
+						`父任務 ID: \`${task.parentTaskId}\`\n` +
+						`請在 result 參數中總結設計結果，然後返回父任務繼續後續工作。`,
 				)
-				
+
 				// Skip walkthrough generation for subtasks
 				return {
 					success: true,
@@ -1071,7 +1240,7 @@ export class SentinelStateMachine {
 					context: this.currentContext ?? undefined,
 				}
 			}
-			
+
 			// For non-subtasks, generate walkthrough
 			await this.generateWalkthrough()
 
@@ -1113,7 +1282,9 @@ export class SentinelStateMachine {
 			// The subtask needs to stay in current mode to use attempt_completion
 			const task = this.taskRef.deref()
 			if (task?.parentTaskId && agentState === AgentState.COMPLETED) {
-				console.log("[SentinelFSM] switchToAgentMode: Subtask completing - skipping mode switch to allow parent return")
+				console.log(
+					"[SentinelFSM] switchToAgentMode: Subtask completing - skipping mode switch to allow parent return",
+				)
 				return
 			}
 			// Return to default mode for non-subtasks
@@ -1135,13 +1306,21 @@ export class SentinelStateMachine {
 				const mcpHub = provider.getMcpHub()
 				const mcpConnectionStatus = {
 					uiDesignCanvas: mcpHub?.isUIDesignCanvasConnected?.() ?? false,
-					penpot: mcpHub?.getServers()?.some(s => s.name.toLowerCase().includes("penpot") && s.status === "connected") ?? false,
+					penpot:
+						mcpHub
+							?.getServers()
+							?.some((s) => s.name.toLowerCase().includes("penpot") && s.status === "connected") ?? false,
 					talkToFigma: mcpHub?.isTalkToFigmaConnected?.() ?? false,
-					figmaWrite: mcpHub?.getServers()?.some(s => s.name === "figma-write" && s.status === "connected") ?? false,
-					mcpUi: mcpHub?.getServers()?.some(s => s.name.toLowerCase().includes("mcp-ui") && s.status === "connected") ?? false,
+					figmaWrite:
+						mcpHub?.getServers()?.some((s) => s.name === "figma-write" && s.status === "connected") ??
+						false,
+					mcpUi:
+						mcpHub
+							?.getServers()
+							?.some((s) => s.name.toLowerCase().includes("mcp-ui") && s.status === "connected") ?? false,
 				}
 				console.log(`[SentinelFSM] Populating mcpConnectionStatus for Designer:`, mcpConnectionStatus)
-				
+
 				// Update currentContext with mcpConnectionStatus
 				if (this.currentContext) {
 					this.currentContext.mcpConnectionStatus = mcpConnectionStatus
@@ -1173,21 +1352,23 @@ export class SentinelStateMachine {
 			// Check if we should use UIDesignCanvas (from handoff context, state, or as default)
 			const mcpHub = provider.getMcpHub()
 			const uiDesignCanvasConnected = mcpHub?.isUIDesignCanvasConnected?.() ?? false
-			const uiDesignCanvasEnabled = state.uiDesignCanvasEnabled ?? true  // Default true for built-in tool
+			const uiDesignCanvasEnabled = state.uiDesignCanvasEnabled ?? true // Default true for built-in tool
 
 			// Check Figma connection status
 			const talkToFigmaConnected = mcpHub?.isTalkToFigmaConnected?.() ?? false
-			const figmaWriteConnected = mcpHub?.getServers()?.some(
-				(s) => s.name === "figma-write" && s.status === "connected"
-			) ?? false
+			const figmaWriteConnected =
+				mcpHub?.getServers()?.some((s) => s.name === "figma-write" && s.status === "connected") ?? false
 
 			// Use UIDesignCanvas if:
 			// 1. Explicitly requested in architect plan, OR
 			// 2. UIDesignCanvas is enabled AND (connected OR no Figma alternatives are connected)
-			const useUIDesignCanvas = this.currentContext?.architectPlan?.useUIDesignCanvas ||
+			const useUIDesignCanvas =
+				this.currentContext?.architectPlan?.useUIDesignCanvas ||
 				(uiDesignCanvasEnabled && (uiDesignCanvasConnected || (!talkToFigmaConnected && !figmaWriteConnected)))
 
-			console.log(`[SentinelFSM] Design preview check - useUIDesignCanvas: ${useUIDesignCanvas}, enabled: ${uiDesignCanvasEnabled}, connected: ${uiDesignCanvasConnected}, talkToFigma: ${talkToFigmaConnected}, figmaWrite: ${figmaWriteConnected}`)
+			console.log(
+				`[SentinelFSM] Design preview check - useUIDesignCanvas: ${useUIDesignCanvas}, enabled: ${uiDesignCanvasEnabled}, connected: ${uiDesignCanvasConnected}, talkToFigma: ${talkToFigmaConnected}, figmaWrite: ${figmaWriteConnected}`,
+			)
 
 			if (useUIDesignCanvas) {
 				// Open UIDesignCanvas preview panel
@@ -1298,34 +1479,34 @@ export class SentinelStateMachine {
 			console.error("[SentinelFSM] generateWalkthrough: No current task")
 			return false
 		}
-		
+
 		let walkthrough = "# 📋 Workflow Walkthrough\n\n"
 		walkthrough += `**Status:** ✅ Completed\n`
 		walkthrough += `**Completed at:** ${new Date().toLocaleString()}\n\n`
-		
+
 		walkthrough += "---\n\n"
-		
+
 		// Add flow comparison diagram
 		walkthrough += "## 📊 Workflow Flow Comparison\n\n"
 		walkthrough += "### Planned Flow vs Actual Flow\n\n"
 		walkthrough += "```mermaid\n"
 		walkthrough += "flowchart LR\n"
-		walkthrough += "    subgraph Planned[\"📋 Planned Flow\"]\n"
+		walkthrough += '    subgraph Planned["📋 Planned Flow"]\n'
 		walkthrough += "        P1[Architect] --> P2[Builder]\n"
 		walkthrough += "        P2 --> P3[Review]\n"
 		walkthrough += "        P3 --> P4[QA]\n"
 		walkthrough += "        P4 --> P5[Security]\n"
 		walkthrough += "        P5 --> P6[Final]\n"
 		walkthrough += "    end\n"
-		walkthrough += "    subgraph Actual[\"✅ Actual Flow\"]\n"
-		walkthrough += "        A1[\"✅ Architect\"] --> A2[\"✅ Builder\"]\n"
-		walkthrough += "        A2 --> A3[\"✅ Review\"]\n"
-		walkthrough += "        A3 --> A4[\"✅ QA\"]\n"
-		walkthrough += "        A4 --> A5[\"✅ Security\"]\n"
-		walkthrough += "        A5 --> A6[\"✅ Final\"]\n"
+		walkthrough += '    subgraph Actual["✅ Actual Flow"]\n'
+		walkthrough += '        A1["✅ Architect"] --> A2["✅ Builder"]\n'
+		walkthrough += '        A2 --> A3["✅ Review"]\n'
+		walkthrough += '        A3 --> A4["✅ QA"]\n'
+		walkthrough += '        A4 --> A5["✅ Security"]\n'
+		walkthrough += '        A5 --> A6["✅ Final"]\n'
 		walkthrough += "    end\n"
 		walkthrough += "```\n\n"
-		
+
 		// Architect Plan Summary
 		if (context.architectPlan) {
 			walkthrough += "## 🏗️ Architect Plan\n\n"
@@ -1361,7 +1542,7 @@ export class SentinelStateMachine {
 			walkthrough += "## 🧪 QA Test Results\n\n"
 			const qa = context.qaAuditContext
 			walkthrough += `**Test Result:** ${qa.testsPassed ? "✅ PASSED" : "❌ FAILED"}\n\n`
-			
+
 			if (qa.testResults && qa.testResults.length > 0) {
 				walkthrough += "**Test Results:**\n"
 				qa.testResults.forEach((r) => {
@@ -1393,20 +1574,22 @@ export class SentinelStateMachine {
 		// Save walkthrough as file
 		const cwd = task.cwd
 		const walkthroughPath = `${cwd}/walkthrough.md`
-		
+
 		console.log(`[SentinelFSM] Attempting to write walkthrough to: ${walkthroughPath}`)
-		
+
 		try {
 			const fs = await import("fs/promises")
-			
+
 			// Collect screenshots from workspace
 			let screenshotSection = ""
 			try {
 				const files = await fs.readdir(cwd)
-				const screenshots = files.filter(f => 
-					f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.jpeg') || f.endsWith('.webp')
-				).filter(f => f.includes('screenshot') || f.includes('test') || f.includes('browser'))
-				
+				const screenshots = files
+					.filter(
+						(f) => f.endsWith(".png") || f.endsWith(".jpg") || f.endsWith(".jpeg") || f.endsWith(".webp"),
+					)
+					.filter((f) => f.includes("screenshot") || f.includes("test") || f.includes("browser"))
+
 				if (screenshots.length > 0) {
 					screenshotSection = "\n## 📸 Test Screenshots\n\n"
 					screenshots.forEach((s, i) => {
@@ -1418,13 +1601,13 @@ export class SentinelStateMachine {
 				// Ignore errors reading screenshots
 				console.warn("[SentinelFSM] Could not read screenshots:", e)
 			}
-			
+
 			// Insert screenshots before the divider
 			const finalWalkthrough = walkthrough.replace(
 				"---\n\n*Generated by Sentinel Code Workflow*",
-				screenshotSection + "---\n\n*Generated by Sentinel Code Workflow*"
+				screenshotSection + "---\n\n*Generated by Sentinel Code Workflow*",
 			)
-			
+
 			await fs.writeFile(walkthroughPath, finalWalkthrough, "utf-8")
 			console.log(`[SentinelFSM] Successfully wrote walkthrough to: ${walkthroughPath}`)
 			await task.say("text", `📋 **Walkthrough saved to:** \`${walkthroughPath}\``)
@@ -1432,7 +1615,10 @@ export class SentinelStateMachine {
 		} catch (error) {
 			// Log the error and notify user
 			console.error(`[SentinelFSM] Failed to write walkthrough to ${walkthroughPath}:`, error)
-			await task.say("text", `⚠️ **Could not save walkthrough file**\n\nError: ${(error as Error).message}\n\nPath attempted: \`${walkthroughPath}\`\n\n---\n\n${walkthrough}`)
+			await task.say(
+				"text",
+				`⚠️ **Could not save walkthrough file**\n\nError: ${(error as Error).message}\n\nPath attempted: \`${walkthroughPath}\`\n\n---\n\n${walkthrough}`,
+			)
 			return false
 		}
 	}
@@ -1506,10 +1692,27 @@ export class SentinelStateMachine {
 	 */
 	private mapToWebviewState(
 		state: AgentState,
-	): "IDLE" | "ARCHITECT" | "DESIGNER" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED" {
+	):
+		| "IDLE"
+		| "ARCHITECT"
+		| "DESIGNER"
+		| "BUILDER"
+		| "ARCHITECT_REVIEW"
+		| "QA"
+		| "SENTINEL"
+		| "COMPLETED"
+		| "BLOCKED" {
 		const mapping: Record<
 			AgentState,
-			"IDLE" | "ARCHITECT" | "DESIGNER" | "BUILDER" | "ARCHITECT_REVIEW" | "QA" | "SENTINEL" | "COMPLETED" | "BLOCKED"
+			| "IDLE"
+			| "ARCHITECT"
+			| "DESIGNER"
+			| "BUILDER"
+			| "ARCHITECT_REVIEW"
+			| "QA"
+			| "SENTINEL"
+			| "COMPLETED"
+			| "BLOCKED"
 		> = {
 			[AgentState.IDLE]: "IDLE",
 			[AgentState.ARCHITECT]: "ARCHITECT",
@@ -1537,7 +1740,7 @@ export class SentinelStateMachine {
 		try {
 			// Special handling for COMPLETED state - still show the completion status
 			const isCompleted = state === AgentState.COMPLETED
-			
+
 			// Get current activity description
 			const activities: Record<AgentState, string> = {
 				[AgentState.IDLE]: "",
@@ -1553,22 +1756,38 @@ export class SentinelStateMachine {
 				[AgentState.COMPLETED]: "Workflow complete! Check walkthrough.md",
 				[AgentState.BLOCKED]: "Waiting for human intervention...",
 			}
-			
+
 			// Build handoff info from context
 			let lastHandoff = undefined
 			if (this.currentContext) {
 				const ctx = this.currentContext
-				// Use display names instead of raw state values for better UI
-				const fromDisplayName = this.getAgentDisplayName(ctx.fromAgent as AgentState) || ctx.fromAgent
-				const toDisplayName = this.getAgentDisplayName(ctx.toAgent as AgentState) || ctx.toAgent
+				// Map agent state to clean display name (without emoji for handoff message)
+				const getCleanAgentName = (agent: any): string => {
+					if (!agent) return "Unknown"
+					const agentStr = String(agent).toUpperCase()
+					// Match against known agent states
+					if (agentStr.includes("ARCHITECT") && agentStr.includes("CODE")) return "Architect (Code Review)"
+					if (agentStr.includes("ARCHITECT") && agentStr.includes("TEST")) return "Architect (Test Review)"
+					if (agentStr.includes("ARCHITECT") && agentStr.includes("FINAL")) return "Architect (Final Review)"
+					if (agentStr.includes("DESIGN_REVIEW")) return "Design Review"
+					if (agentStr.includes("ARCHITECT")) return "Architect"
+					if (agentStr.includes("DESIGNER") || agentStr === "DESIGNER") return "Designer"
+					if (agentStr.includes("BUILDER") || agentStr === "BUILDER") return "Builder"
+					if (agentStr.includes("QA") || agentStr === "QA_ENGINEER") return "QA"
+					if (agentStr.includes("SENTINEL") || agentStr === "SENTINEL") return "Sentinel"
+					if (agentStr.includes("COMPLETED")) return "Completed"
+					if (agentStr.includes("BLOCKED")) return "Blocked"
+					if (agentStr.includes("IDLE")) return "Idle"
+					return String(agent) // Fallback to original value
+				}
 				lastHandoff = {
-					from: fromDisplayName,
-					to: toDisplayName,
+					from: getCleanAgentName(ctx.fromAgent),
+					to: getCleanAgentName(ctx.toAgent),
 					summary: this.getHandoffSummaryForUI(),
 					timestamp: Date.now(),
 				}
 			}
-			
+
 			provider.postMessageToWebview({
 				type: "sentinelAgentState",
 				sentinelAgentState: {
@@ -1583,16 +1802,16 @@ export class SentinelStateMachine {
 			console.error("[SentinelFSM] Failed to notify webview:", error)
 		}
 	}
-	
+
 	/**
 	 * Get simplified handoff summary for UI display
 	 */
 	private getHandoffSummaryForUI(): string {
 		if (!this.currentContext) return ""
-		
+
 		const ctx = this.currentContext
 		const parts: string[] = []
-		
+
 		if (ctx.architectPlan?.projectName) {
 			parts.push(`📐 Plan: ${ctx.architectPlan.projectName}`)
 		}
@@ -1605,7 +1824,7 @@ export class SentinelStateMachine {
 		if (ctx.sentinelResult) {
 			parts.push(`🛡️ Security: ${ctx.sentinelResult.securityPassed ? "OK" : "Issues"}`)
 		}
-		
+
 		return parts.join(" | ")
 	}
 

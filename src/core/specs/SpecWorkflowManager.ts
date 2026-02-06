@@ -4,12 +4,16 @@
  * Responsibilities:
  * - Handle spec file creation events
  * - Manage phase transitions (requirements → design → tasks)
+ * - Auto-handoff when minimum line requirements are met
  * - Orchestrate task execution handoff
  * - Provide phase-specific prompts
  */
 
 import * as vscode from "vscode"
+import * as fs from "fs/promises"
+import * as path from "path"
 import { Task } from "../task/Task"
+import { SPEC_MIN_LINES } from "./SpecModeContextProvider"
 
 export type SpecPhase = "requirements" | "design" | "tasks"
 export type SpecFileType = "requirements.md" | "design.md" | "tasks.md"
@@ -18,18 +22,19 @@ interface PhaseInfo {
 	name: string
 	file: SpecFileType
 	nextPhase: SpecPhase | null
+	minLines: number
 }
 
 const PHASE_CONFIG: Record<SpecPhase, PhaseInfo> = {
-	requirements: { name: "需求", file: "requirements.md", nextPhase: "design" },
-	design: { name: "設計", file: "design.md", nextPhase: "tasks" },
-	tasks: { name: "任務", file: "tasks.md", nextPhase: null },
+	requirements: { name: "需求", file: "requirements.md", nextPhase: "design", minLines: SPEC_MIN_LINES.requirements },
+	design: { name: "設計", file: "design.md", nextPhase: "tasks", minLines: SPEC_MIN_LINES.design },
+	tasks: { name: "任務", file: "tasks.md", nextPhase: null, minLines: SPEC_MIN_LINES.tasks },
 }
 
 export class SpecWorkflowManager {
 	/**
 	 * Handle when a spec file is created
-	 * Shows appropriate handoff UI based on which file was created
+	 * Checks if minimum line requirements are met and auto-handoffs to next phase
 	 */
 	static async handleSpecFileCreated(
 		task: Task,
@@ -40,64 +45,77 @@ export class SpecWorkflowManager {
 		if (!phase) return
 
 		const phaseInfo = PHASE_CONFIG[phase]
+		
+		// Check if file meets minimum line requirements
+		const absolutePath = path.resolve(task.cwd, relPath)
+		const lineCount = await this.countFileLines(absolutePath)
+		
+		console.log(`[SpecWorkflowManager] ${fileName} created with ${lineCount} lines (min: ${phaseInfo.minLines})`)
 
+		if (lineCount < phaseInfo.minLines) {
+			// File is incomplete - show warning and let AI continue
+			await task.say("text", `
+## ⚠️ ${phaseInfo.name}文件尚未達到最低要求！
+
+\`${relPath}\` 目前只有 **${lineCount} 行**（需要至少 **${phaseInfo.minLines} 行**）
+
+請繼續使用 \`<!-- APPEND -->\` 添加更多內容。
+`)
+			return
+		}
+
+		// File is complete - proceed with handoff
 		if (phase === "requirements" || phase === "design") {
-			// Offer to continue to next phase
-			await this.offerNextPhaseHandoff(task, phase, phaseInfo, relPath)
+			// Auto-handoff to next phase
+			await this.autoHandoffToNextPhase(task, phase, phaseInfo, relPath, lineCount)
 		} else if (phase === "tasks") {
-			// Tasks complete - offer to execute individual tasks
+			// Tasks complete - show completion message
 			await this.offerTaskExecution(task, relPath)
 		}
 	}
 
 	/**
-	 * Offer handoff to next spec phase (requirements → design, design → tasks)
+	 * Auto-handoff to next spec phase without showing modal
 	 */
-	private static async offerNextPhaseHandoff(
+	private static async autoHandoffToNextPhase(
 		task: Task,
 		currentPhase: SpecPhase,
 		phaseInfo: PhaseInfo,
-		relPath: string
+		relPath: string,
+		lineCount: number
 	): Promise<void> {
 		const nextPhase = phaseInfo.nextPhase
 		if (!nextPhase) return
 
 		const nextPhaseInfo = PHASE_CONFIG[nextPhase]
 
-		console.log(`[SpecWorkflowManager] Phase completed: ${currentPhase}, offering handoff to ${nextPhase}`)
+		console.log(`[SpecWorkflowManager] Phase completed: ${currentPhase} (${lineCount} lines), auto-handoff to ${nextPhase}`)
 
 		await task.say("text", `
 ## ✅ ${phaseInfo.name}文件已完成！
 
-\`${relPath}\` 已成功建立。
+\`${relPath}\` 已成功建立（${lineCount} 行，達到最低 ${phaseInfo.minLines} 行要求）。
 
-下一階段：**${nextPhaseInfo.name}** (建立 \`.specs/${nextPhaseInfo.file}\`)
+🔄 **自動進入下一階段**: ${nextPhaseInfo.name} (建立 \`.specs/${nextPhaseInfo.file}\`)
 `)
 
-		// Small delay to ensure UI is ready
-		await new Promise(resolve => setTimeout(resolve, 300))
+		// Small delay before handoff
+		await new Promise(resolve => setTimeout(resolve, 500))
 
-		console.log(`[SpecWorkflowManager] Showing modal for handoff...`)
-		
-		// Use showInformationMessage with modal: true for more reliable button handling
-		const continueBtn = `繼續 ${nextPhaseInfo.name} 階段`
-		const endBtn = "結束此任務"
-		
-		const selection = await vscode.window.showInformationMessage(
-			`${phaseInfo.name}文件已完成！是否繼續進行 ${nextPhaseInfo.name} 階段？`,
-			{ modal: true },
-			continueBtn,
-			endBtn
-		)
+		// Auto-create new task for next phase
+		const nextStepPrompt = this.getPhasePrompt(nextPhase)
+		await this.createSpecModeTask(task, nextStepPrompt, nextPhaseInfo.name)
+	}
 
-		console.log(`[SpecWorkflowManager] Modal selection: ${selection}`)
-
-		if (selection === continueBtn) {
-			const nextStepPrompt = this.getPhasePrompt(nextPhase)
-			await this.createSpecModeTask(task, nextStepPrompt, nextPhaseInfo.name)
-		} else {
-			await task.say("text", `✅ **${phaseInfo.name}階段完成！** 任務已結束。您可以稍後從 Spec Workflow Panel 繼續。`)
-			console.log(`[SpecWorkflowManager] User chose to end after ${currentPhase}`)
+	/**
+	 * Count non-empty lines in a file
+	 */
+	private static async countFileLines(filePath: string): Promise<number> {
+		try {
+			const content = await fs.readFile(filePath, "utf-8")
+			return content.split("\n").filter(line => line.trim().length > 0).length
+		} catch {
+			return 0
 		}
 	}
 

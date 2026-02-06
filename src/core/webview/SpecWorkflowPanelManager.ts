@@ -65,20 +65,20 @@ export class SpecWorkflowPanelManager {
 
 			console.log(`[SpecWorkflowPanel] Setting up file watcher for ${workspacePath}`)
 
-		// When a spec file is created, auto-open the panel AND update chat sidebar
+			// When a spec file is created, auto-open the panel AND update chat sidebar
 			watcher.onDidCreate(async (uri) => {
 				try {
 					console.log(`[SpecWorkflowPanel] Spec file created: ${uri.fsPath}`)
 					// Get or create instance
 					const instance = SpecWorkflowPanelManager.getInstance(provider)
-					
+
 					// Detect which spec file was created and switch to the correct step
 					const fileName = path.basename(uri.fsPath)
 					let step: "requirements" | "design" | "tasks" | null = null
 					if (fileName === "requirements.md") step = "requirements"
 					else if (fileName === "design.md") step = "design"
 					else if (fileName === "tasks.md") step = "tasks"
-					
+
 					if (step) {
 						await instance.showAndSwitchToStep(step)
 					} else {
@@ -125,10 +125,10 @@ export class SpecWorkflowPanelManager {
 
 			SpecWorkflowPanelManager.fileWatchers.set(workspacePath, watcher)
 			console.log(`[SpecWorkflowPanel] File watcher initialized for ${workspacePath}`)
-			
+
 			// Send initial status to chat sidebar (delayed to ensure webview is ready)
 			setTimeout(() => {
-				SpecWorkflowPanelManager.broadcastSpecsStatus(provider).catch(err => {
+				SpecWorkflowPanelManager.broadcastSpecsStatus(provider).catch((err) => {
 					console.error(`[SpecWorkflowPanel] Error broadcasting initial status:`, err)
 				})
 			}, 1000)
@@ -208,19 +208,13 @@ export class SpecWorkflowPanelManager {
 
 		const extensionUri = this.provider.context.extensionUri
 
-		this.panel = vscode.window.createWebviewPanel(
-			"roo.specWorkflow",
-			"📋 Spec Workflow",
-			vscode.ViewColumn.One,
-			{
-				enableScripts: true,
-				retainContextWhenHidden: true,
-				localResourceRoots: [extensionUri],
-			}
-		)
+		this.panel = vscode.window.createWebviewPanel("roo.specWorkflow", "📋 Spec Workflow", vscode.ViewColumn.One, {
+			enableScripts: true,
+			retainContextWhenHidden: true,
+			localResourceRoots: [extensionUri],
+		})
 
 		this.panel.webview.html = this.getHtmlContent()
-
 
 		this.panel.webview.onDidReceiveMessage(
 			async (message: any) => {
@@ -243,6 +237,9 @@ export class SpecWorkflowPanelManager {
 					} else if (message?.type === "openSpecFile") {
 						// Handle open file request directly
 						await this.handleOpenSpecFile(message.file)
+					} else if (message?.type === "approvePhaseAndCreateNewTask") {
+						// Handle phase approval and new task creation
+						await this.handleApprovePhaseAndCreateNewTask(message.currentPhase, message.nextPhase)
 					} else if (message?.type) {
 						// Forward other messages to the main handler
 						await webviewMessageHandler(this.provider as any, message)
@@ -252,7 +249,7 @@ export class SpecWorkflowPanelManager {
 				}
 			},
 			undefined,
-			this.disposables
+			this.disposables,
 		)
 
 		this.panel.onDidDispose(
@@ -261,7 +258,7 @@ export class SpecWorkflowPanelManager {
 				this.dispose()
 			},
 			null,
-			this.disposables
+			this.disposables,
 		)
 	}
 
@@ -293,7 +290,7 @@ export class SpecWorkflowPanelManager {
 				status,
 				tasks,
 			})
-			
+
 			// IMPORTANT: Also send updated file contents to refresh webview cache
 			// This ensures the panel shows the latest content, not stale cached content
 			const specFiles = ["requirements.md", "design.md", "tasks.md"]
@@ -307,7 +304,9 @@ export class SpecWorkflowPanelManager {
 							file: filename,
 							content: content,
 						})
-						console.log(`[SpecWorkflowPanel] Sent updated content for ${filename} (${content.split("\n").length} lines)`)
+						console.log(
+							`[SpecWorkflowPanel] Sent updated content for ${filename} (${content.split("\n").length} lines)`,
+						)
 					} catch (e) {
 						console.warn(`[SpecWorkflowPanel] Could not read ${filename}:`, e)
 					}
@@ -325,7 +324,7 @@ export class SpecWorkflowPanelManager {
 		if (tasks.length > 0) {
 			await this.provider.postMessageToWebview({
 				type: "specTasksList",
-				tasks: tasks.map(t => ({
+				tasks: tasks.map((t) => ({
 					id: t.id,
 					title: t.title,
 					status: t.status,
@@ -345,23 +344,24 @@ export class SpecWorkflowPanelManager {
 		// Try parsing TASK-XXX header format with flexible patterns:
 		// - "### TASK-001: Title (complexity: medium)"
 		// - "### TASK-001: Title (complexity: medium) [ ]"
-		// - "### TASK-001: Title [x]" 
+		// - "### TASK-001: Title [x]"
 		// - "TASK-001: Title (complexity: medium)"
-		const taskHeaderRegex = /^(?:#{1,3}\s+)?TASK-(\d+)[:\s]+(.+?)(?:\s*\(complexity:\s*(low|medium|high)\))?(?:\s*\[([ x/])\])?$/i
+		const taskHeaderRegex =
+			/^(?:#{1,3}\s+)?TASK-(\d+)[:\s]+(.+?)(?:\s*\(complexity:\s*(low|medium|high)\))?(?:\s*\[([ x/])\])?$/i
 		let currentTask: SpecTask | null = null
 		let currentSection = ""
 		let sectionContent: string[] = []
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i]
-			
+
 			// Enhanced debug: log lines that contain TASK
-			if (line.includes('TASK-') || line.includes('task-')) {
+			if (line.includes("TASK-") || line.includes("task-")) {
 				console.log(`[SpecWorkflowPanelManager] Line ${i} contains TASK: "${line.substring(0, 80)}"`)
 				const testMatch = line.match(taskHeaderRegex)
 				console.log(`[SpecWorkflowPanelManager] Regex match result:`, testMatch)
 			}
-			
+
 			// Check for TASK-XXX header format
 			const headerMatch = line.match(taskHeaderRegex)
 			if (headerMatch) {
@@ -379,7 +379,7 @@ export class SpecWorkflowPanelManager {
 				let title = headerMatch[2].trim()
 				const complexity = headerMatch[3]?.toLowerCase()
 				const statusChar = headerMatch[4]?.toLowerCase()
-				
+
 				// Remove trailing status checkbox if it was matched inline
 				title = title.replace(/\s*\[([ x/])\]\s*$/i, "").trim()
 
@@ -397,7 +397,10 @@ export class SpecWorkflowPanelManager {
 			// If we have an active task, look for sections
 			if (currentTask) {
 				// Check for section headers
-				if (line.match(/^(?:\*\*)?描述(?:\*\*)?[:\s]*/i) || line.match(/^(?:\*\*)?Description(?:\*\*)?[:\s]*/i)) {
+				if (
+					line.match(/^(?:\*\*)?描述(?:\*\*)?[:\s]*/i) ||
+					line.match(/^(?:\*\*)?Description(?:\*\*)?[:\s]*/i)
+				) {
 					if (currentSection && sectionContent.length > 0) {
 						this.applySection(currentTask, currentSection, sectionContent)
 					}
@@ -405,7 +408,10 @@ export class SpecWorkflowPanelManager {
 					sectionContent = []
 					continue
 				}
-				if (line.match(/^(?:\*\*)?涉及檔案(?:\*\*)?[:\s]*/i) || line.match(/^(?:\*\*)?(?:Files?|涉及)(?:\*\*)?[:\s]*/i)) {
+				if (
+					line.match(/^(?:\*\*)?涉及檔案(?:\*\*)?[:\s]*/i) ||
+					line.match(/^(?:\*\*)?(?:Files?|涉及)(?:\*\*)?[:\s]*/i)
+				) {
 					if (currentSection && sectionContent.length > 0) {
 						this.applySection(currentTask, currentSection, sectionContent)
 					}
@@ -413,7 +419,10 @@ export class SpecWorkflowPanelManager {
 					sectionContent = []
 					continue
 				}
-				if (line.match(/^(?:\*\*)?驗收標準(?:\*\*)?[:\s]*/i) || line.match(/^(?:\*\*)?Acceptance(?:\*\*)?[:\s]*/i)) {
+				if (
+					line.match(/^(?:\*\*)?驗收標準(?:\*\*)?[:\s]*/i) ||
+					line.match(/^(?:\*\*)?Acceptance(?:\*\*)?[:\s]*/i)
+				) {
 					if (currentSection && sectionContent.length > 0) {
 						this.applySection(currentTask, currentSection, sectionContent)
 					}
@@ -421,7 +430,10 @@ export class SpecWorkflowPanelManager {
 					sectionContent = []
 					continue
 				}
-				if (line.match(/^(?:\*\*)?依賴(?:\*\*)?[:\s]*/i) || line.match(/^(?:\*\*)?Dependencies(?:\*\*)?[:\s]*/i)) {
+				if (
+					line.match(/^(?:\*\*)?依賴(?:\*\*)?[:\s]*/i) ||
+					line.match(/^(?:\*\*)?Dependencies(?:\*\*)?[:\s]*/i)
+				) {
 					if (currentSection && sectionContent.length > 0) {
 						this.applySection(currentTask, currentSection, sectionContent)
 					}
@@ -488,13 +500,24 @@ export class SpecWorkflowPanelManager {
 				break
 			case "files":
 				task.files = content
-					.map(line => line.replace(/^\s*[-*•]\s*/, "").replace(/`/g, "").split(/\s*[-–—]\s*/)[0].trim())
-					.filter(f => f.length > 0)
+					.map((line) =>
+						line
+							.replace(/^\s*[-*•]\s*/, "")
+							.replace(/`/g, "")
+							.split(/\s*[-–—]\s*/)[0]
+							.trim(),
+					)
+					.filter((f) => f.length > 0)
 				break
 			case "acceptance":
 				task.acceptance = content
-					.filter(line => line.match(/^\s*[-*•☐☑✓✗]\s*/) || line.match(/^\s*\[[ x]\]/i))
-					.map(line => line.replace(/^\s*[-*•☐☑✓✗]\s*/, "").replace(/^\s*\[[ x]\]\s*/i, "").trim())
+					.filter((line) => line.match(/^\s*[-*•☐☑✓✗]\s*/) || line.match(/^\s*\[[ x]\]/i))
+					.map((line) =>
+						line
+							.replace(/^\s*[-*•☐☑✓✗]\s*/, "")
+							.replace(/^\s*\[[ x]\]\s*/i, "")
+							.trim(),
+					)
 				break
 			case "dependencies":
 				task.dependencies = content.join(", ").replace(/^\s*[-*•]\s*/, "")
@@ -548,6 +571,124 @@ export class SpecWorkflowPanelManager {
 		} catch (error) {
 			console.error(`[SpecWorkflowPanel] Failed to open file: ${error}`)
 			vscode.window.showErrorMessage(`Failed to open ${filename}`)
+		}
+	}
+
+	/**
+	 * Handle phase approval and create a new task for the next spec mode phase
+	 */
+	private async handleApprovePhaseAndCreateNewTask(currentPhase: string, nextPhase: string): Promise<void> {
+		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+		if (!workspacePath) return
+
+		const fs = require("fs")
+		const specsDir = path.join(workspacePath, ".specs")
+
+		try {
+			// 1. Approve the current phase
+			const approvalFile = path.join(specsDir, ".phase-approved")
+			let approved: Record<string, boolean> = {}
+			
+			if (fs.existsSync(approvalFile)) {
+				try {
+					approved = JSON.parse(fs.readFileSync(approvalFile, "utf-8"))
+				} catch {
+					approved = {}
+				}
+			}
+			
+			approved[currentPhase] = true
+			fs.writeFileSync(approvalFile, JSON.stringify(approved, null, 2))
+			console.log(`[SpecWorkflowPanel] Approved phase: ${currentPhase}`)
+
+			// 2. Extract original user prompt from current task
+			let originalUserPrompt = ""
+			const currentTask = this.provider.getCurrentTask()
+			if (currentTask) {
+				const history = currentTask.clineMessages || []
+				const firstUserMessage = history.find((m: any) => m.type === "say" && m.say === "user_feedback")
+				if (firstUserMessage?.text) {
+					originalUserPrompt = firstUserMessage.text
+				}
+			}
+
+			// 3. Read spec file contents for context
+			let requirementsContent = ""
+			let designContent = ""
+			try {
+				const reqPath = path.join(specsDir, "requirements.md")
+				if (fs.existsSync(reqPath)) {
+					requirementsContent = fs.readFileSync(reqPath, "utf-8")
+				}
+			} catch { /* ignore */ }
+			
+			try {
+				const dsnPath = path.join(specsDir, "design.md")
+				if (fs.existsSync(dsnPath)) {
+					designContent = fs.readFileSync(dsnPath, "utf-8")
+				}
+			} catch { /* ignore */ }
+
+			// 4. Create rich task prompt based on next phase
+			let taskPrompt = ""
+			
+			if (nextPhase === "design") {
+				taskPrompt = `## 🎨 Design 階段
+
+### 📝 使用者原始需求
+${originalUserPrompt ? `> ${originalUserPrompt.split('\n').slice(0, 5).join('\n> ')}` : '> [請讀取 .specs/requirements.md 了解原始需求]'}
+
+### 任務
+請根據 requirements.md 建立設計文件 (.specs/design.md)：
+
+1. 先用 read_file 讀取 .specs/requirements.md
+2. 建立 design.md 包含：
+   - 系統架構圖 (Mermaid)
+   - 資料庫設計 (ERD)
+   - API 規格
+   - 前端頁面結構
+
+完成後使用 attempt_completion 結束。`
+			} else if (nextPhase === "tasks") {
+				taskPrompt = `## ✅ Tasks 階段
+
+### 📝 使用者原始需求
+${originalUserPrompt ? `> ${originalUserPrompt.split('\n').slice(0, 5).join('\n> ')}` : '> [請讀取 .specs/requirements.md 了解原始需求]'}
+
+### 任務
+請根據 requirements.md 和 design.md 建立任務列表 (.specs/tasks.md)：
+
+1. 先用 read_file 讀取 .specs/requirements.md 和 .specs/design.md
+2. 建立 tasks.md 包含：
+   - 任務分解 (TASK-001, TASK-002...)
+   - 每個任務的驗收標準
+   - TDD 測試案例
+   - 任務依賴關係
+
+完成後使用 attempt_completion 結束。`
+			} else {
+				taskPrompt = `進入 ${nextPhase} 階段`
+			}
+			
+			// Show confirmation
+			vscode.window.showInformationMessage(`✅ ${currentPhase} 階段已完成！正在啟動 ${nextPhase} 階段任務...`)
+
+			// 5. Create and trigger new task
+			const newTask = await this.provider.createTask(taskPrompt)
+			if (newTask) {
+				// Trigger task execution with fresh system prompt
+				setTimeout(() => {
+					newTask.handleWebviewAskResponse("messageResponse", taskPrompt)
+				}, 200)
+			}
+
+			// Refresh the workflow status
+			await this.refreshWorkflowStatus()
+			
+			console.log(`[SpecWorkflowPanel] Created and started task for phase: ${nextPhase}`)
+		} catch (error) {
+			console.error(`[SpecWorkflowPanel] Failed to approve phase and create task:`, error)
+			vscode.window.showErrorMessage(`Failed to advance to ${nextPhase} phase: ${error}`)
 		}
 	}
 
@@ -1015,7 +1156,10 @@ export class SpecWorkflowPanelManager {
 							<span id="contentFileName">Document</span>
 						</h2>
 					</div>
-					<button class="btn btn-secondary" id="openEditorBtn">📝 Open in Editor</button>
+					<div style="display: flex; gap: 8px;">
+						<button class="btn btn-primary" id="nextPhaseBtn" style="display: none;">🚀 進入下一階段</button>
+						<button class="btn btn-secondary" id="openEditorBtn">📝 Open in Editor</button>
+					</div>
 				</div>
 				<div class="content-body" id="contentBody">
 					<div class="loading-state">Loading...</div>
@@ -1245,6 +1389,9 @@ export class SpecWorkflowPanelManager {
 			// Update step highlights
 			updateStepHighlights();
 			
+			// Update "Next Phase" button visibility
+			updateNextPhaseButton();
+			
 			// Update title
 			const icons = { 'requirements.md': '📋', 'design.md': '🎨', 'tasks.md': '✅' };
 			const names = { 'requirements.md': 'Requirements', 'design.md': 'Design', 'tasks.md': 'Tasks' };
@@ -1384,11 +1531,46 @@ export class SpecWorkflowPanelManager {
 			vscode.postMessage({ type: 'updateSpecs' });
 		}
 		
+		// Function to advance to the next spec mode phase
+		function nextPhase() {
+			const nextPhaseMap = {
+				'requirements.md': 'design',
+				'design.md': 'tasks'
+			};
+			const nextPhase = nextPhaseMap[currentFile];
+			if (nextPhase) {
+				vscode.postMessage({ 
+					type: 'approvePhaseAndCreateNewTask', 
+					currentPhase: currentFile.replace('.md', ''),
+					nextPhase: nextPhase 
+				});
+			}
+		}
+		
+		// Update "Next Phase" button visibility based on current file
+		function updateNextPhaseButton() {
+			const nextPhaseBtn = document.getElementById('nextPhaseBtn');
+			if (!nextPhaseBtn) return;
+			
+			// Show button only for requirements.md and design.md
+			if (currentFile === 'requirements.md' || currentFile === 'design.md') {
+				const nextLabels = {
+					'requirements.md': '🚀 進入 Design 階段',
+					'design.md': '🚀 進入 Tasks 階段'
+				};
+				nextPhaseBtn.textContent = nextLabels[currentFile] || '🚀 進入下一階段';
+				nextPhaseBtn.style.display = 'inline-block';
+			} else {
+				nextPhaseBtn.style.display = 'none';
+			}
+		}
+		
 		// CSP-compliant event listeners for static buttons (added after function definitions)
 		document.getElementById('updateBtn').addEventListener('click', updateSpecs);
 		document.getElementById('runAllBtn').addEventListener('click', runAllTasks);
 		document.getElementById('backBtn').addEventListener('click', showTaskView);
 		document.getElementById('openEditorBtn').addEventListener('click', openInEditor);
+		document.getElementById('nextPhaseBtn').addEventListener('click', nextPhase);
 	</script>
 </body>
 </html>`

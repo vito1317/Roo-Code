@@ -68,6 +68,164 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			return
 		}
 
+		// ========================================
+		// Spec Mode: Handle phase completion and transition
+		// ========================================
+		const provider = task.providerRef.deref()
+		const state = await provider?.getState()
+		
+		if (state?.mode === "spec") {
+			try {
+				const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+				if (workspacePath) {
+					const { checkSpecFilesStatus, determineCurrentPhase, SPEC_MIN_LINES, approvePhase, getApprovedPhases } = await import("../specs/SpecModeContextProvider")
+					const specStatus = checkSpecFilesStatus(workspacePath)
+					const currentPhase = determineCurrentPhase(specStatus, workspacePath)
+					const approvedPhases = getApprovedPhases(workspacePath)
+					
+					// Check if current phase file is INCOMPLETE - block completion
+					let blockMessage = ""
+					
+					if (currentPhase === "requirements" && !specStatus.requirementsComplete) {
+						blockMessage = `🚫 **BLOCKED: requirements.md 尚未完成！**\n\n` +
+							`目前行數: ${specStatus.requirementsLineCount} 行\n` +
+							`最低要求: ${SPEC_MIN_LINES.requirements} 行\n\n` +
+							`請繼續使用 \`<!-- APPEND -->\` 添加更多內容，直到達到最低行數要求。`
+					} else if (currentPhase === "design" && !specStatus.designComplete) {
+						blockMessage = `🚫 **BLOCKED: design.md 尚未完成！**\n\n` +
+							`目前行數: ${specStatus.designLineCount} 行\n` +
+							`最低要求: ${SPEC_MIN_LINES.design} 行\n\n` +
+							`請繼續使用 \`<!-- APPEND -->\` 添加更多內容，直到達到最低行數要求。`
+					} else if (currentPhase === "tasks" && !specStatus.tasksComplete) {
+						blockMessage = `🚫 **BLOCKED: tasks.md 尚未完成！**\n\n` +
+							`目前行數: ${specStatus.tasksLineCount} 行\n` +
+							`最低要求: ${SPEC_MIN_LINES.tasks} 行\n\n` +
+							`請繼續使用 \`<!-- APPEND -->\` 添加更多內容，直到達到最低行數要求。`
+					}
+					
+					if (blockMessage) {
+						task.consecutiveMistakeCount++
+						task.recordToolError("attempt_completion")
+						pushToolResult(formatResponse.toolError(blockMessage))
+						console.log(`[AttemptCompletionTool] BLOCKED: Spec Mode ${currentPhase} phase incomplete`)
+						return
+					}
+					
+					// Phase file is COMPLETE - check if we need to show transition popup
+					// For requirements and design phases, show popup to ask for next phase
+					
+					// Extract original user prompt for context continuity
+					let originalUserPrompt = ""
+					const history = task.clineMessages || []
+					const firstUserMessage = history.find(m => m.type === "say" && m.say === "user_feedback")
+					if (firstUserMessage?.text) {
+						originalUserPrompt = firstUserMessage.text
+					}
+					
+					if (currentPhase === "requirements" && specStatus.requirementsComplete && !approvedPhases.requirements) {
+						// Requirements complete, show popup to transition to design
+						const choice = await vscode.window.showInformationMessage(
+							`✅ Requirements 已完成！(${specStatus.requirementsLineCount} 行)\n是否進入 Design 階段？`,
+							{ modal: true },
+							"進入 Design 階段",
+							"繼續編輯 Requirements"
+						)
+						
+						if (choice === "進入 Design 階段") {
+						// Approve requirements phase
+						approvePhase(workspacePath, "requirements")
+						console.log(`[AttemptCompletionTool] User approved requirements phase, transitioning to design`)
+						
+						// Create new task for design phase with rich context
+				const designTaskPrompt = `## 🎨 Design 階段
+
+### 📝 使用者原始需求
+${originalUserPrompt ? `> ${originalUserPrompt.split('\n').slice(0, 5).join('\n> ')}` : '> [請讀取 .specs/requirements.md 了解原始需求]'}
+
+### 任務
+請根據 requirements.md 建立設計文件 (.specs/design.md)：
+
+1. 先用 read_file 讀取 .specs/requirements.md
+2. 建立 design.md 包含：
+   - 系統架構圖 (Mermaid)
+   - 資料庫設計 (ERD)
+   - API 規格
+
+完成後使用 attempt_completion 結束。`
+
+						// Create and trigger new task
+						const newTask = await provider?.createTask(designTaskPrompt)
+						if (newTask) {
+							// Trigger task execution with fresh system prompt
+							setTimeout(() => {
+								newTask.handleWebviewAskResponse("messageResponse", designTaskPrompt)
+							}, 200)
+						}
+						
+						pushToolResult(`✅ Requirements 階段已完成！Design 階段任務已啟動。`)
+						return
+						} else {
+							// User wants to continue editing
+							pushToolResult(`📝 繼續編輯 requirements.md。完成後再次調用 attempt_completion。`)
+							return
+						}
+					} else if (currentPhase === "design" && specStatus.designComplete && !approvedPhases.design) {
+						// Design complete, show popup to transition to tasks
+						const choice = await vscode.window.showInformationMessage(
+							`✅ Design 已完成！(${specStatus.designLineCount} 行)\n是否進入 Tasks 階段？`,
+							{ modal: true },
+							"進入 Tasks 階段",
+							"繼續編輯 Design"
+						)
+						
+						if (choice === "進入 Tasks 階段") {
+					// Approve design phase
+					approvePhase(workspacePath, "design")
+					console.log(`[AttemptCompletionTool] User approved design phase, transitioning to tasks`)
+					
+					// Create new task for tasks phase with rich context
+				const tasksTaskPrompt = `## ✅ Tasks 階段
+
+### 📝 使用者原始需求
+${originalUserPrompt ? `> ${originalUserPrompt.split('\n').slice(0, 5).join('\n> ')}` : '> [請讀取 .specs/requirements.md 了解原始需求]'}
+
+### 任務
+請根據 requirements.md 和 design.md 建立任務列表 (.specs/tasks.md)：
+
+1. 先用 read_file 讀取 .specs/requirements.md 和 .specs/design.md
+2. 建立 tasks.md 包含：
+   - 任務分解 (TASK-001, TASK-002...)
+   - 每個任務的驗收標準
+   - TDD 測試案例
+   - 任務依賴關係
+
+完成後使用 attempt_completion 結束。`
+
+					// Create and trigger new task
+					const newTask = await provider?.createTask(tasksTaskPrompt)
+					if (newTask) {
+						// Trigger task execution with fresh system prompt
+						setTimeout(() => {
+							newTask.handleWebviewAskResponse("messageResponse", tasksTaskPrompt)
+						}, 200)
+					}
+					
+					pushToolResult(`✅ Design 階段已完成！Tasks 階段任務已啟動。`)
+					return
+						} else {
+							// User wants to continue editing
+							pushToolResult(`📝 繼續編輯 design.md。完成後再次調用 attempt_completion。`)
+							return
+						}
+					}
+					// Tasks phase complete or already approved - allow normal completion
+				}
+			} catch (e) {
+				console.error(`[AttemptCompletionTool] Error checking spec status:`, e)
+			}
+		}
+
+
 		try {
 			if (!result) {
 				task.consecutiveMistakeCount++

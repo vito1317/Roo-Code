@@ -77,6 +77,79 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			for (const change of changes) {
 				const relPath = change.path
 				const absolutePath = path.resolve(task.cwd, relPath)
+				const fileName = path.basename(relPath)
+
+				// =====================================
+				// STRICT PHASE-BASED FILE BLOCKING
+				// =====================================
+				// In Spec Mode, AI can ONLY write the file that corresponds to the CURRENT phase
+				const isSpecsPath = relPath.includes(".specs/") || relPath.includes(".specs\\")
+				console.log(`[ApplyPatchTool] Checking file: fileName=${fileName}, isSpecsPath=${isSpecsPath}, relPath=${relPath}`)
+				
+				if (isSpecsPath && (fileName === "requirements.md" || fileName === "design.md" || fileName === "tasks.md")) {
+					console.log(`[ApplyPatchTool] SPEC FILE DETECTED: ${fileName}, checking phase...`)
+					try {
+						const { checkSpecFilesStatus, determineCurrentPhase, SPEC_MIN_LINES } = await import("../specs/SpecModeContextProvider")
+						const specStatus = checkSpecFilesStatus(task.cwd)
+						const currentPhase = determineCurrentPhase(specStatus, task.cwd)
+						
+						console.log(`[ApplyPatchTool] PHASE CHECK:`, {
+							currentPhase,
+							fileName,
+							requirementsExists: specStatus.requirementsExists,
+							requirementsLineCount: specStatus.requirementsLineCount,
+							requirementsComplete: specStatus.requirementsComplete,
+							minRequirements: SPEC_MIN_LINES.requirements
+						})
+						
+						const expectedFile = {
+							requirements: "requirements.md",
+							design: "design.md",
+							tasks: "tasks.md",
+							execution: null
+						}[currentPhase]
+						
+						console.log(`[ApplyPatchTool] expectedFile=${expectedFile}, fileName=${fileName}, shouldBlock=${expectedFile && fileName !== expectedFile}`)
+						
+						if (expectedFile && fileName !== expectedFile) {
+							console.log(`[ApplyPatchTool] *** BLOCKING ${fileName} - wrong phase! ***`)
+							task.consecutiveMistakeCount++
+							task.recordToolError("apply_patch")
+							const phaseNames: Record<string, string> = {
+								requirements: "Requirements（需求分析）",
+								design: "Design（設計規劃）",
+								tasks: "Tasks（任務分解）",
+								execution: "Execution（任務執行）"
+							}
+							pushToolResult(
+								`🚫 **BLOCKED: 禁止在 ${phaseNames[currentPhase]} 階段建立 ${fileName}！**\n\n` +
+								`目前階段: **${phaseNames[currentPhase]}**\n` +
+								`允許建立的檔案: **${expectedFile}**\n` +
+								`您嘗試建立的檔案: **${fileName}**\n\n` +
+								`**必須按順序完成: requirements.md → design.md → tasks.md**\n\n` +
+								`請專注於完成當前階段的 \`${expectedFile}\`，達到最低行數要求後系統會自動進入下一階段。`
+							)
+							await task.diffViewProvider.reset()
+							return
+						}
+						
+						// In execution phase, block ALL spec file creation
+						if (currentPhase === "execution") {
+							console.log(`[ApplyPatchTool] *** BLOCKING ${fileName} - execution phase! ***`)
+							task.consecutiveMistakeCount++
+							task.recordToolError("apply_patch")
+							pushToolResult(
+								`🚫 **BLOCKED: Spec 文件已全部完成！**\n\n` +
+								`所有 spec 文件（requirements.md, design.md, tasks.md）都已經完成。\n\n` +
+								`現在是 Execution 階段，請專注於執行任務，不要再修改 spec 文件。`
+							)
+							await task.diffViewProvider.reset()
+							return
+						}
+					} catch (importError) {
+						console.error(`[ApplyPatchTool] ERROR importing SpecModeContextProvider:`, importError)
+					}
+				}
 
 				// Check access permissions
 				const accessAllowed = task.rooIgnoreController?.validateAccess(relPath)

@@ -25,8 +25,9 @@ const WORKFLOW_STAGES = [
 	{ id: "FINAL_REVIEW", label: "FINAL_REVIEW" },
 ] as const
 
-// Agent colors
+// Agent colors - support both uppercase and mixed-case names
 const AGENT_COLORS: Record<string, string> = {
+	// Uppercase (from workflow stages)
 	ARCHITECT: "#10B981",
 	DESIGNER: "#EC4899",
 	DESIGN_REVIEW: "#F59E0B",
@@ -36,6 +37,22 @@ const AGENT_COLORS: Record<string, string> = {
 	TEST_REVIEW: "#22D3EE",
 	SENTINEL: "#EF4444",
 	FINAL_REVIEW: "#10B981",
+	// Mixed-case (from handoff display names)
+	"Architect": "#10B981",
+	"Architect (Code Review)": "#8B5CF6",
+	"Architect (Test Review)": "#22D3EE",
+	"Architect (Final Review)": "#10B981",
+	"Designer": "#EC4899",
+	"Design Review": "#F59E0B",
+	"Builder": "#3B82F6",
+	"Code Review": "#8B5CF6",
+	"Test Review": "#22D3EE",
+	"Sentinel": "#EF4444",
+	"Final Review": "#10B981",
+	"Idle": "#64748B",
+	"Completed": "#10B981",
+	"Blocked": "#EF4444",
+	"Unknown": "#64748B",
 }
 
 interface SentinelWorkflowViewProps {
@@ -269,18 +286,29 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 	
 	// Map agent slug to display name & color
 	const getAgentDisplayInfo = useCallback((slug: string): { name: string; color: string; icon: string } => {
+		if (!slug || slug.trim() === "") {
+			return { name: "Unknown", color: "#64748B", icon: "❓" }
+		}
 		const normalized = slug.toLowerCase().replace(/-/g, "_").replace(/\s+/g, "_")
+		// Generic "agent" should not match anything and use current agent
+		if (normalized === "agent" || normalized === "agent_agent") {
+			return { name: currentAgent, color: AGENT_COLORS[currentAgent] || "#64748B", icon: "🤖" }
+		}
+		if (normalized.includes("architect") && (normalized.includes("code") || normalized.includes("review_code"))) return { name: "Architect (Code Review)", color: "#8B5CF6", icon: "�" }
+		if (normalized.includes("architect") && (normalized.includes("test") || normalized.includes("review_test"))) return { name: "Architect (Test Review)", color: "#22D3EE", icon: "🧪" }
+		if (normalized.includes("architect") && (normalized.includes("final") || normalized.includes("review_final"))) return { name: "Architect (Final Review)", color: "#10B981", icon: "🏁" }
 		if (normalized.includes("architect")) return { name: "Architect", color: "#10B981", icon: "🔷" }
 		if (normalized.includes("designer")) return { name: "Designer", color: "#EC4899", icon: "🎨" }
-		if (normalized.includes("builder")) return { name: "Builder", color: "#3B82F6", icon: "🟩" }
-		if (normalized.includes("qa")) return { name: "QA", color: "#F59E0B", icon: "🧪" }
+		if (normalized.includes("design") && normalized.includes("review")) return { name: "Design Review", color: "#F59E0B", icon: "🔎" }
+		if (normalized.includes("builder")) return { name: "Builder", color: "#3B82F6", icon: "�" }
+		if (normalized.includes("qa") || normalized.includes("engineer")) return { name: "QA", color: "#F59E0B", icon: "🧪" }
 		if (normalized.includes("sentinel")) return { name: "Sentinel", color: "#EF4444", icon: "🛡️" }
-		if (normalized.includes("code")) return { name: "Code Review", color: "#8B5CF6", icon: "📝" }
-		if (normalized.includes("design")) return { name: "Design Review", color: "#F59E0B", icon: "🔎" }
-		if (normalized.includes("test")) return { name: "Test Review", color: "#22D3EE", icon: "✅" }
-		if (normalized.includes("final")) return { name: "Final Review", color: "#10B981", icon: "🏁" }
-		return { name: slug, color: "#64748B", icon: "💬" }
-	}, [])
+		if (normalized.includes("code") && normalized.includes("review")) return { name: "Code Review", color: "#8B5CF6", icon: "�" }
+		if (normalized.includes("test") && normalized.includes("review")) return { name: "Test Review", color: "#22D3EE", icon: "✅" }
+		if (normalized.includes("final") && normalized.includes("review")) return { name: "Final Review", color: "#10B981", icon: "🏁" }
+		// Fallback: use the current agent instead of the unknown slug
+		return { name: currentAgent, color: AGENT_COLORS[currentAgent] || "#64748B", icon: "💬" }
+	}, [currentAgent])
 	
 	// Ref for auto-scrolling messages container
 	const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -678,7 +706,7 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 									<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
 										<span style={{ fontSize: "12px" }}>🟦</span>
 										<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "11px", fontWeight: 600, color: AGENT_COLORS[handoff.from] || "#3B82F6" }}>
-											{handoff.from} Agent
+											{handoff.from}
 										</span>
 									</div>
 									<span style={{
@@ -711,8 +739,8 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 							<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
 								<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
 									<span style={{ fontSize: "12px" }}>🟢</span>
-									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "11px", fontWeight: 600, color: agentColor }}>
-										{currentAgent} Agent
+									<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "11px", fontWeight: 600, color: handoff ? AGENT_COLORS[handoff.to] || agentColor : agentColor }}>
+										{handoff ? handoff.to : currentAgent}
 									</span>
 								</div>
 								<span style={{
@@ -1011,7 +1039,7 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 										<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
 											<span style={{ fontSize: "16px" }}>{askerInfo.icon}</span>
 											<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "12px", fontWeight: 600, color: askerInfo.color }}>
-												{askerInfo.name} Agent
+												{askerInfo.name}
 											</span>
 										</div>
 										<span style={{
@@ -1064,7 +1092,7 @@ export const SentinelWorkflowView: React.FC<SentinelWorkflowViewProps> = ({
 										<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
 											<span style={{ fontSize: "16px" }}>{responderInfo.icon}</span>
 											<span style={{ fontFamily: "'Inter', sans-serif", fontSize: "12px", fontWeight: 600, color: responderInfo.color }}>
-												{responderInfo.name} Agent
+												{responderInfo.name}
 											</span>
 										</div>
 										<span style={{
